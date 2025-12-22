@@ -16,4 +16,3 @@ interface HttpClientInterface
 
     public function uploadFile(string $uri, string $filePath, array $data = [], array $headers = []): Response;
 }
-

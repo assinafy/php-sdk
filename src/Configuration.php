@@ -23,7 +23,7 @@ class Configuration
     ) {
         $this->validateApiKey($apiKey);
         $this->validateAccountId($accountId);
-        
+
         $this->apiKey = $apiKey;
         $this->accountId = $accountId;
         $this->baseUrl = rtrim($baseUrl, '/');
@@ -98,4 +98,3 @@ class Configuration
         }
     }
 }
-

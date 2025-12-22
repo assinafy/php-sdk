@@ -62,4 +62,3 @@ class WebhookResource extends AbstractResource
         return $response->getData() ?? [];
     }
 }
-

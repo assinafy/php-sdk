@@ -168,4 +168,3 @@ class AssinafyClient
         return $this;
     }
 }
-

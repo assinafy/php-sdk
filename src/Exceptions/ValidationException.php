@@ -24,4 +24,3 @@ class ValidationException extends AssinafyException
         return new self('Validation failed', $errors);
     }
 }
-

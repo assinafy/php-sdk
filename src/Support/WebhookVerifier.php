@@ -49,4 +49,3 @@ class WebhookVerifier
         return $event['data'] ?? $event['object'] ?? [];
     }
 }
-

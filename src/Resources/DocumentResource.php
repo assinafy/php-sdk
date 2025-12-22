@@ -46,7 +46,7 @@ class DocumentResource extends AbstractResource
         $this->logger->debug("Fetching document details", ['document_id' => $documentId]);
 
         $response = $this->httpClient->get("documents/{$documentId}");
-        
+
         return $this->extractData($response->getData() ?? []);
     }
 
@@ -162,7 +162,8 @@ class DocumentResource extends AbstractResource
             throw new ValidationException("File not found", ['file_path' => $filePath]);
         }
 
-        if (!str_ends_with(strtolower($filePath), '.pdf')) {
+        $extension = strtolower(substr($filePath, -4));
+        if ($extension !== '.pdf') {
             throw new ValidationException("Only PDF files are supported", ['file_path' => $filePath]);
         }
 
@@ -177,4 +178,3 @@ class DocumentResource extends AbstractResource
         }
     }
 }
-

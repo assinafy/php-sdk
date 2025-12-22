@@ -116,4 +116,3 @@ class AssignmentResource extends AbstractResource
         return $signerIds;
     }
 }
-

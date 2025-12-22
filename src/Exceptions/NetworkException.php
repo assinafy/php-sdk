@@ -7,4 +7,3 @@ namespace Assinafy\SDK\Exceptions;
 class NetworkException extends AssinafyException
 {
 }
-

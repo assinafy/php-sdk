@@ -27,4 +27,3 @@ class AssinafyException extends Exception
         return $this;
     }
 }
-

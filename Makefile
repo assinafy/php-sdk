@@ -1,10 +1,14 @@
-.PHONY: help install test docker-up docker-down docker-build docker-logs
+.PHONY: help install test docker-up docker-down docker-build docker-logs phpcs phpcbf phpstan
 
 help:
 	@echo "Assinafy PHP SDK - Available commands:"
 	@echo ""
 	@echo "  make install       Install Composer dependencies"
 	@echo "  make test          Run tests"
+	@echo "  make phpcs         Run PHP_CodeSniffer (check code style)"
+	@echo "  make phpcbf        Run PHP Code Beautifier (fix code style)"
+	@echo "  make phpstan       Run PHPStan (static analysis)"
+	@echo "  make quality       Run all quality checks (phpcs + phpstan)"
 	@echo "  make docker-up     Start Docker environment"
 	@echo "  make docker-down   Stop Docker environment"
 	@echo "  make docker-build  Build Docker images"
@@ -38,4 +42,16 @@ docker-install:
 
 docker-quickstart:
 	docker-compose exec php php docs/quickstart.php
+
+phpcs:
+	vendor/bin/phpcs
+
+phpcbf:
+	vendor/bin/phpcbf
+
+phpstan:
+	vendor/bin/phpstan analyse
+
+quality: phpcs phpstan
+	@echo "All quality checks passed!"
 

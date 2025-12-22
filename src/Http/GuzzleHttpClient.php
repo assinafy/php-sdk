@@ -23,7 +23,7 @@ class GuzzleHttpClient implements HttpClientInterface
     {
         $this->config = $config;
         $this->logger = $logger ?? new NullLogger();
-        
+
         $this->client = new Client([
             'base_uri' => $config->getBaseUrl(),
             'timeout' => $config->getTimeout(),
@@ -98,7 +98,7 @@ class GuzzleHttpClient implements HttpClientInterface
 
         try {
             $response = $this->client->request($method, $uri, $options);
-            
+
             $statusCode = $response->getStatusCode();
             $headers = $response->getHeaders();
             $body = (string)$response->getBody();
@@ -135,4 +135,3 @@ class GuzzleHttpClient implements HttpClientInterface
         }
     }
 }
-

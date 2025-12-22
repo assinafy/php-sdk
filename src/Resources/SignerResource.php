@@ -46,10 +46,11 @@ class SignerResource extends AbstractResource
             );
 
             $data = $response->getData() ?? [];
-            
+
             return $this->normalizeSignerResponse($this->extractData($data));
         } catch (\Exception $e) {
-            if (str_contains($e->getMessage(), 'já existe') || str_contains($e->getMessage(), 'already exists')) {
+            $message = $e->getMessage();
+            if (strpos($message, 'já existe') !== false || strpos($message, 'already exists') !== false) {
                 $existingSigner = $this->findByEmail($email);
                 if ($existingSigner) {
                     $this->logger->info("Signer already exists, using existing", ['email' => $email]);
@@ -127,12 +128,12 @@ class SignerResource extends AbstractResource
 
     private function sanitizeDocument(string $document): string
     {
-        return preg_replace('/[^0-9]/', '', $document);
+        return preg_replace('/[^0-9]/', '', $document) ?? '';
     }
 
     private function sanitizePhone(string $phone): string
     {
-        return preg_replace('/[^0-9]/', '', $phone);
+        return preg_replace('/[^0-9]/', '', $phone) ?? '';
     }
 
     private function normalizeSignerResponse(array $signer): array
@@ -148,4 +149,3 @@ class SignerResource extends AbstractResource
         ];
     }
 }
-

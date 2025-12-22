@@ -33,8 +33,7 @@ class ApiException extends AssinafyException
     public static function fromResponse(int $statusCode, array $responseData): self
     {
         $message = $responseData['message'] ?? $responseData['error'] ?? 'API request failed';
-        
+
         return new self($message, $statusCode, $responseData);
     }
 }
-

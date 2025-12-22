@@ -1,0 +1,15 @@
+parameters:
+    level: 8
+    paths:
+        - src
+    excludePaths:
+        - vendor
+    reportUnmatchedIgnoredErrors: false
+    ignoreErrors:
+        - '#Call to an undefined method Psr\\Http\\Message\\StreamInterface::__toString\(\)#'
+        - '#Property Assinafy\\SDK\\Http\\GuzzleHttpClient::\$config is never read, only written#'
+        -
+            identifier: missingType.iterableValue
+        -
+            identifier: missingType.generics
+

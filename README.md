@@ -15,7 +15,7 @@ Modern, framework-agnostic PHP SDK for the Assinafy digital signature API. Built
 
 ## Requirements
 
-- PHP 8.1 or higher
+- PHP 7.4 or higher (PHP 8.0+ recommended for named arguments)
 - ext-json
 
 ## Installation
@@ -391,6 +391,29 @@ try {
     echo "Error: {$e->getMessage()}\n";
 }
 ```
+
+## Code Quality
+
+The SDK maintains high code quality standards:
+
+```bash
+# Check code style (PSR-12)
+make phpcs
+
+# Fix code style automatically
+make phpcbf
+
+# Run static analysis (PHPStan level 8)
+make phpstan
+
+# Run all quality checks
+make quality
+```
+
+**Current Status**:
+- ✅ PSR-12 compliant (100%)
+- ✅ PHPStan level 8 (zero errors)
+- ✅ PHP 7.4 - 8.3 compatible
 
 ## Testing
 
