@@ -16,12 +16,10 @@ use Psr\Log\NullLogger;
 class GuzzleHttpClient implements HttpClientInterface
 {
     private Client $client;
-    private Configuration $config;
     private LoggerInterface $logger;
 
     public function __construct(Configuration $config, ?LoggerInterface $logger = null)
     {
-        $this->config = $config;
         $this->logger = $logger ?? new NullLogger();
 
         $this->client = new Client([
