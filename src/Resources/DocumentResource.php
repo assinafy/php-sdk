@@ -156,6 +156,52 @@ class DocumentResource extends AbstractResource
         ];
     }
 
+    public function createFromTemplate(
+        string $templateId,
+        array $signers,
+        array $options = []
+    ): array {
+        $this->logger->info("Creating document from template", [
+            'template_id' => $templateId,
+            'signers_count' => count($signers),
+        ]);
+
+        $payload = array_merge(['signers' => $signers], $options);
+
+        $response = $this->httpClient->post(
+            "accounts/{$this->config->getAccountId()}/templates/{$templateId}/documents",
+            $payload
+        );
+
+        return $response->getData() ?? [];
+    }
+
+    public function estimateCostFromTemplate(
+        string $templateId,
+        array $signers
+    ): array {
+        $this->logger->debug("Estimating cost for document from template", [
+            'template_id' => $templateId,
+            'signers_count' => count($signers),
+        ]);
+
+        $response = $this->httpClient->post(
+            "accounts/{$this->config->getAccountId()}/templates/{$templateId}/documents/estimate-cost",
+            ['signers' => $signers]
+        );
+
+        return $response->getData() ?? [];
+    }
+
+    public function verify(string $hash): array
+    {
+        $this->logger->debug("Verifying document by hash", ['hash' => $hash]);
+
+        $response = $this->httpClient->get("documents/{$hash}/verify");
+
+        return $response->getData() ?? [];
+    }
+
     private function validateUpload(string $filePath): void
     {
         if (!file_exists($filePath)) {

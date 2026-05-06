@@ -9,6 +9,7 @@ use Assinafy\SDK\Http\HttpClientInterface;
 use Assinafy\SDK\Resources\AssignmentResource;
 use Assinafy\SDK\Resources\DocumentResource;
 use Assinafy\SDK\Resources\SignerResource;
+use Assinafy\SDK\Resources\TemplateResource;
 use Assinafy\SDK\Resources\WebhookResource;
 use Assinafy\SDK\Support\WebhookVerifier;
 use Psr\Log\LoggerInterface;
@@ -23,6 +24,7 @@ class AssinafyClient
     private ?DocumentResource $documents = null;
     private ?SignerResource $signers = null;
     private ?AssignmentResource $assignments = null;
+    private ?TemplateResource $templates = null;
     private ?WebhookResource $webhooks = null;
     private ?WebhookVerifier $webhookVerifier = null;
 
@@ -76,6 +78,15 @@ class AssinafyClient
         }
 
         return $this->assignments;
+    }
+
+    public function templates(): TemplateResource
+    {
+        if ($this->templates === null) {
+            $this->templates = new TemplateResource($this->httpClient, $this->config, $this->logger);
+        }
+
+        return $this->templates;
     }
 
     public function webhooks(): WebhookResource

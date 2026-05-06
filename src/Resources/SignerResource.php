@@ -34,7 +34,7 @@ class SignerResource extends AbstractResource
         }
 
         if ($phone) {
-            $payload['phone'] = $this->sanitizePhone($phone);
+            $payload['whatsapp_phone_number'] = $this->sanitizePhone($phone);
         }
 
         $this->logger->info("Creating new signer", ['email' => $email]);
@@ -85,6 +85,29 @@ class SignerResource extends AbstractResource
         $response = $this->httpClient->get(
             "accounts/{$this->config->getAccountId()}/signers",
             $params
+        );
+
+        return $response->getData() ?? [];
+    }
+
+    public function update(string $signerId, array $data): array
+    {
+        $this->logger->info("Updating signer", ['signer_id' => $signerId]);
+
+        $response = $this->httpClient->put(
+            "accounts/{$this->config->getAccountId()}/signers/{$signerId}",
+            $data
+        );
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    public function delete(string $signerId): array
+    {
+        $this->logger->info("Deleting signer", ['signer_id' => $signerId]);
+
+        $response = $this->httpClient->delete(
+            "accounts/{$this->config->getAccountId()}/signers/{$signerId}"
         );
 
         return $response->getData() ?? [];
@@ -144,7 +167,7 @@ class SignerResource extends AbstractResource
                 'full_name' => $signer['full_name'] ?? null,
                 'email' => $signer['email'] ?? null,
                 'cpf' => $signer['cpf'] ?? null,
-                'phone' => $signer['phone'] ?? null,
+                'whatsapp_phone_number' => $signer['whatsapp_phone_number'] ?? null,
             ],
         ];
     }

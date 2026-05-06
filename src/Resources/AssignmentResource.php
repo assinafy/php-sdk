@@ -85,6 +85,90 @@ class AssignmentResource extends AbstractResource
         return $response->getData() ?? [];
     }
 
+    public function estimateCost(
+        string $documentId,
+        array $signers,
+        string $method = 'virtual',
+        ?array $entries = null
+    ): array {
+        $payload = [
+            'method' => $method,
+            'signers' => $signers,
+        ];
+
+        if ($entries !== null) {
+            $payload['entries'] = $entries;
+        }
+
+        $this->logger->debug("Estimating assignment cost", [
+            'document_id' => $documentId,
+            'method' => $method,
+            'signers_count' => count($signers),
+        ]);
+
+        $response = $this->httpClient->post(
+            "documents/{$documentId}/assignments/estimate-cost",
+            $payload
+        );
+
+        return $response->getData() ?? [];
+    }
+
+    public function resend(
+        string $documentId,
+        string $assignmentId,
+        string $signerId
+    ): array {
+        $this->logger->info("Resending notification to signer", [
+            'document_id' => $documentId,
+            'assignment_id' => $assignmentId,
+            'signer_id' => $signerId,
+        ]);
+
+        $response = $this->httpClient->put(
+            "documents/{$documentId}/assignments/{$assignmentId}/signers/{$signerId}/resend"
+        );
+
+        return $response->getData() ?? [];
+    }
+
+    public function estimateResendCost(
+        string $documentId,
+        string $assignmentId,
+        string $signerId
+    ): array {
+        $this->logger->debug("Estimating resend cost", [
+            'document_id' => $documentId,
+            'assignment_id' => $assignmentId,
+            'signer_id' => $signerId,
+        ]);
+
+        $response = $this->httpClient->post(
+            "documents/{$documentId}/assignments/{$assignmentId}/signers/{$signerId}/estimate-resend-cost"
+        );
+
+        return $response->getData() ?? [];
+    }
+
+    public function resetExpiration(
+        string $documentId,
+        string $assignmentId,
+        string $expiresAt
+    ): array {
+        $this->logger->info("Resetting assignment expiration", [
+            'document_id' => $documentId,
+            'assignment_id' => $assignmentId,
+            'expires_at' => $expiresAt,
+        ]);
+
+        $response = $this->httpClient->put(
+            "documents/{$documentId}/assignments/{$assignmentId}/reset-expiration",
+            ['expires_at' => $expiresAt]
+        );
+
+        return $response->getData() ?? [];
+    }
+
     private function validateSigners(array $signers): void
     {
         if (empty($signers)) {
