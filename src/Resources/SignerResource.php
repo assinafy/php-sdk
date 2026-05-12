@@ -6,137 +6,132 @@ namespace Assinafy\SDK\Resources;
 
 use Assinafy\SDK\Exceptions\ValidationException;
 
+/**
+ * Signers resource — every endpoint under `/accounts/{account_id}/signers`.
+ *
+ * Signer-facing endpoints (the ones consumed by the end-signer in the browser, e.g.
+ * `/signers/self`, `/signers/accept-terms`, `/signature`) are intentionally NOT exposed
+ * here: they require a `signer-access-code` rather than an account API key.
+ */
 class SignerResource extends AbstractResource
 {
+    /**
+     * Create a signer.
+     * `POST /accounts/{account_id}/signers`
+     *
+     * Only `full_name` is required by the API. `email` and `whatsapp_phone_number`
+     * are optional but at least one is needed for any verification/notification.
+     */
     public function create(
-        string $name,
-        string $email,
-        ?string $cpf = null,
-        ?string $phone = null,
-        array $metadata = []
+        string $fullName,
+        ?string $email = null,
+        ?string $whatsappPhoneNumber = null
     ): array {
-        $this->validateEmail($email);
-
-        $existingSigner = $this->findByEmail($email);
-        if ($existingSigner) {
-            $this->logger->info("Using existing signer", ['email' => $email]);
-            return $this->normalizeSignerResponse($existingSigner);
+        if ($fullName === '') {
+            throw new ValidationException('full_name is required', ['full_name' => $fullName]);
         }
 
-        $payload = [
-            'full_name' => $name,
-            'email' => $email,
-            'metadata' => $metadata,
-        ];
-
-        if ($cpf) {
-            $payload['cpf'] = $this->sanitizeDocument($cpf);
+        if ($email !== null) {
+            $this->validateEmail($email);
         }
 
-        if ($phone) {
-            $payload['whatsapp_phone_number'] = $this->sanitizePhone($phone);
+        $payload = ['full_name' => $fullName];
+
+        if ($email !== null) {
+            $payload['email'] = $email;
         }
 
-        $this->logger->info("Creating new signer", ['email' => $email]);
-
-        try {
-            $response = $this->httpClient->post(
-                "accounts/{$this->config->getAccountId()}/signers",
-                $payload
-            );
-
-            $data = $response->getData() ?? [];
-
-            return $this->normalizeSignerResponse($this->extractData($data));
-        } catch (\Exception $e) {
-            $message = $e->getMessage();
-            if (strpos($message, 'já existe') !== false || strpos($message, 'already exists') !== false) {
-                $existingSigner = $this->findByEmail($email);
-                if ($existingSigner) {
-                    $this->logger->info("Signer already exists, using existing", ['email' => $email]);
-                    return $this->normalizeSignerResponse($existingSigner);
-                }
-            }
-
-            throw $e;
+        if ($whatsappPhoneNumber !== null) {
+            $payload['whatsapp_phone_number'] = $this->normalizePhone($whatsappPhoneNumber);
         }
-    }
 
-    public function get(string $signerId): array
-    {
-        $response = $this->httpClient->get(
-            "accounts/{$this->config->getAccountId()}/signers/{$signerId}"
-        );
+        $response = $this->httpClient->post($this->accountPath('signers'), $payload);
 
         return $this->extractData($response->getData() ?? []);
     }
 
+    /**
+     * Retrieve a signer.
+     * `GET /accounts/{account_id}/signers/{signer_id}`
+     */
+    public function get(string $signerId): array
+    {
+        $response = $this->httpClient->get($this->accountPath("signers/{$signerId}"));
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    /**
+     * List signers in the workspace.
+     * `GET /accounts/{account_id}/signers`
+     */
     public function list(int $page = 1, int $perPage = 20, ?string $search = null): array
     {
         $params = [
             'page' => $page,
-            'per_page' => $perPage,
+            'per-page' => $perPage,
         ];
 
-        if ($search) {
+        if ($search !== null && $search !== '') {
             $params['search'] = $search;
         }
 
-        $response = $this->httpClient->get(
-            "accounts/{$this->config->getAccountId()}/signers",
-            $params
-        );
+        $response = $this->httpClient->get($this->accountPath('signers'), $params);
 
         return $response->getData() ?? [];
     }
 
+    /**
+     * Update a signer.
+     * `PUT /accounts/{account_id}/signers/{signer_id}`
+     *
+     * @param array<string, mixed> $data subset of { full_name, email, whatsapp_phone_number }
+     */
     public function update(string $signerId, array $data): array
     {
-        $this->logger->info("Updating signer", ['signer_id' => $signerId]);
+        if (isset($data['whatsapp_phone_number'])) {
+            $data['whatsapp_phone_number'] = $this->normalizePhone((string) $data['whatsapp_phone_number']);
+        }
 
-        $response = $this->httpClient->put(
-            "accounts/{$this->config->getAccountId()}/signers/{$signerId}",
-            $data
-        );
+        if (isset($data['email'])) {
+            $this->validateEmail((string) $data['email']);
+        }
+
+        $response = $this->httpClient->put($this->accountPath("signers/{$signerId}"), $data);
 
         return $this->extractData($response->getData() ?? []);
     }
 
+    /**
+     * Delete a signer.
+     * `DELETE /accounts/{account_id}/signers/{signer_id}`
+     */
     public function delete(string $signerId): array
     {
-        $this->logger->info("Deleting signer", ['signer_id' => $signerId]);
-
-        $response = $this->httpClient->delete(
-            "accounts/{$this->config->getAccountId()}/signers/{$signerId}"
-        );
+        $response = $this->httpClient->delete($this->accountPath("signers/{$signerId}"));
 
         return $response->getData() ?? [];
     }
 
+    /**
+     * Find a signer by email by searching the workspace.
+     * Returns the first exact-match (case-insensitive) signer, or null if none found.
+     */
     public function findByEmail(string $email): ?array
     {
-        try {
-            $response = $this->httpClient->get(
-                "accounts/{$this->config->getAccountId()}/signers",
-                [
-                    'search' => $email,
-                    'per_page' => 100,
-                ]
-            );
+        $this->validateEmail($email);
 
-            $data = $response->getData() ?? [];
-            $signers = $data['data'] ?? [];
+        $response = $this->httpClient->get($this->accountPath('signers'), [
+            'search' => $email,
+            'per-page' => 100,
+        ]);
 
-            foreach ($signers as $signer) {
-                if (strtolower($signer['email']) === strtolower($email)) {
-                    return $signer;
-                }
+        $signers = $response->getData()['data'] ?? [];
+
+        foreach ($signers as $signer) {
+            if (isset($signer['email']) && strcasecmp((string) $signer['email'], $email) === 0) {
+                return $signer;
             }
-        } catch (\Exception $e) {
-            $this->logger->warning("Error searching for signer by email", [
-                'email' => $email,
-                'exception' => $e->getMessage(),
-            ]);
         }
 
         return null;
@@ -145,30 +140,25 @@ class SignerResource extends AbstractResource
     private function validateEmail(string $email): void
     {
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            throw new ValidationException("Invalid email address", ['email' => $email]);
+            throw new ValidationException('Invalid email address', ['email' => $email]);
         }
     }
 
-    private function sanitizeDocument(string $document): string
+    /**
+     * Normalize a phone number into E.164 (e.g. `+5548999990000`).
+     * If the input already starts with `+`, it's preserved; otherwise we keep digits only
+     * and prepend `+`. This matches the format the Assinafy API expects for `whatsapp_phone_number`.
+     */
+    private function normalizePhone(string $phone): string
     {
-        return preg_replace('/[^0-9]/', '', $document) ?? '';
-    }
+        $trimmed = trim($phone);
+        $hasPlus = strncmp($trimmed, '+', 1) === 0;
+        $digits = preg_replace('/\D+/', '', $trimmed) ?? '';
 
-    private function sanitizePhone(string $phone): string
-    {
-        return preg_replace('/[^0-9]/', '', $phone) ?? '';
-    }
+        if ($digits === '') {
+            throw new ValidationException('Invalid phone number', ['phone' => $phone]);
+        }
 
-    private function normalizeSignerResponse(array $signer): array
-    {
-        return [
-            'data' => [
-                'id' => $signer['id'] ?? null,
-                'full_name' => $signer['full_name'] ?? null,
-                'email' => $signer['email'] ?? null,
-                'cpf' => $signer['cpf'] ?? null,
-                'whatsapp_phone_number' => $signer['whatsapp_phone_number'] ?? null,
-            ],
-        ];
+        return ($hasPlus ? '+' : '+') . $digits;
     }
 }

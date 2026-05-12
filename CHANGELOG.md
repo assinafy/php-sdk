@@ -5,6 +5,80 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-05-11
+
+Full audit against `https://api.assinafy.com.br/v1/docs` verified against the live API.
+
+### Added
+
+- **`AuthResource`** (`$client->auth()`) covering every authentication endpoint:
+  `POST /login`, `POST /authentication/social-login`, `POST/GET/DELETE /users/api-keys`,
+  `PUT /authentication/change-password`, `PUT /authentication/request-password-reset`,
+  `PUT /authentication/reset-password`.
+- **`SignerSessionResource`** (`$client->signerSession()`) covering signer-facing endpoints
+  authenticated with a `signer-access-code`: `GET /signers/self`, `PUT /signers/accept-terms`,
+  `POST /verify`, `PUT /documents/{id}/signers/confirm-data`,
+  `POST /signature`, `GET /signature/{type}`.
+- **`DocumentResource`**:
+  - `delete($documentId)` — `DELETE /documents/{id}`
+  - `download($documentId, $artifact)` — now correctly hits
+    `GET /documents/{id}/download/{artifact_name}` and validates the artifact name
+  - `downloadThumbnail($documentId)` — `GET /documents/{id}/thumbnail`
+  - `downloadPage($documentId, $pageId)` — `GET /documents/{id}/pages/{page_id}/download`
+  - `activities($documentId)` — `GET /documents/{id}/activities`
+  - `statuses()` — `GET /documents/statuses`
+  - `publicInfo($documentId)` — `GET /public/documents/{id}`
+  - `sendToken($documentId, $recipient, $channel)` — `PUT /public/documents/{id}/send-token`
+  - Status / artifact-name constants for type safety (`STATUS_*`, `ARTIFACT_*`)
+- **`AssignmentResource`**:
+  - `METHOD_*` and `VERIFICATION_*` constants
+  - `create()` now accepts either string signer IDs or full signer objects and serialises them
+    to the documented `signers: [{ id, verification_method?, notification_methods? }]` shape
+- **`HttpClientInterface::postRaw()`** for binary uploads (signature image bytes).
+- Full **PHPUnit test suite** (`tests/Unit`, `tests/Integration`) — 66 unit tests + 6 live tests
+  against the production API.
+
+### Changed
+
+- **Pagination param fix**: every `list()` method now sends `per-page` (with hyphen) as the
+  API expects. Previously `per_page` was sent and silently ignored.
+- **Upload size limit** lowered from a fictional 50 MB to the documented 25 MB.
+- **`DocumentResource::waitUntilReady()`** now polls for the real status codes
+  (`metadata_ready`, `pending_signature`, `certificated`) and fails fast on `failed`,
+  `expired`, `rejected_by_signer`, `rejected_by_user`.
+- **`DocumentResource::isFullySigned()`** now checks `status === 'certificated'` (was a
+  fictional `'signed'`).
+- **`DocumentResource::getSigningProgress()`** now reads progress from `document.assignment`.
+- **`SignerResource::create()`** signature simplified to `(fullName, email?, whatsappPhoneNumber?)` —
+  removed unsupported `cpf` and `metadata` fields.
+- **`SignerResource`** phone numbers are now normalised to E.164 (the `+` prefix is preserved).
+- **`GuzzleHttpClient`** ensures the `base_uri` ends with `/` so relative request paths resolve
+  correctly per RFC 3986 (previously every request lost the `/v1` prefix and 404'd).
+- **`GuzzleHttpClient::uploadFile()`** no longer overrides the multipart Content-Type header
+  (which stripped the boundary).
+- **`Configuration::getHeaders()`** no longer pins `Content-Type: application/json` globally —
+  it's set per-request by JSON helpers, leaving uploads and binary calls free to set their own.
+- **`AssinafyClient::uploadAndRequestSignatures()`** signature changed to
+  `(filePath, signers, ?message, ?expiresAt, waitForReady)`. It now creates / reuses signers by
+  email and uses the documented assignment payload.
+- **`Configuration::SDK_VERSION`, `DEFAULT_BASE_URL`, `SANDBOX_BASE_URL`** constants.
+
+### Removed
+
+- **`AssignmentResource::cancel()`** — the underlying endpoint
+  `POST /accounts/{id}/signature-requests/{id}/cancel` does not exist on the API (verified
+  with a live 404).
+- **`AssignmentResource::resendNotification()`** — the underlying endpoint
+  `POST /accounts/{id}/signature-requests/resend` does not exist (verified with a live 404).
+  Use `resend()` instead, which hits the documented path.
+- **`AbstractResource::normalizeId()`** — alias hack adding `document_id` keys to API responses.
+  Read the real `id` field instead.
+
+### Fixed
+
+- Upload no longer sends bogus `name` / `metadata` multipart fields (only `file`).
+- Every `list()` URL now resolves correctly against the v1 base URL.
+
 ## [1.1.1] - 2026-05-06
 
 ### Fixed
@@ -64,6 +138,7 @@ All new endpoints from the official API catalog added without breaking existing 
 - **PHP 8.0+**: Full support with named arguments
 - **PHP 8.1+**: Recommended for best developer experience
 
+[1.2.0]: https://github.com/assinafy/php-sdk/releases/tag/v1.2.0
 [1.1.1]: https://github.com/assinafy/php-sdk/releases/tag/v1.1.1
 [1.1.0]: https://github.com/assinafy/php-sdk/releases/tag/v1.1.0
 [1.0.0]: https://github.com/assinafy/php-sdk/releases/tag/v1.0.0

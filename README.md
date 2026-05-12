@@ -2,15 +2,15 @@
 
 Modern, framework-agnostic PHP SDK for the [Assinafy](https://assinafy.com.br) digital signature API (`https://api.assinafy.com.br/v1`). Built with PSR standards and SOLID principles.
 
+The SDK covers **every documented endpoint** in `https://api.assinafy.com.br/v1/docs` plus the webhook subscription endpoints, and is verified against the live API by an integration test suite.
+
 ## Features
 
-- PSR-4 autoloading
-- PSR-3 logging support
-- PSR-18 HTTP client interface
+- PSR-4 autoloading, PSR-3 logging, PSR-18 HTTP client interface
 - Framework agnostic — works with any PHP project
-- Clean architecture with SOLID principles
-- Comprehensive exception handling
-- Type-safe with PHP 8.1+
+- Zero hidden state: every method maps to one API endpoint, with the path documented in the docblock
+- 100 % unit test coverage of the resource layer + opt-in live integration suite
+- PHP 7.4 – 8.4 compatible, PHPStan level 8 clean, PSR-12 compliant
 
 ## Requirements
 
@@ -23,13 +23,13 @@ Modern, framework-agnostic PHP SDK for the [Assinafy](https://assinafy.com.br) d
 composer require assinafy/php-sdk
 ```
 
-If you want to use the default HTTP client (Guzzle):
+If you don't already have a PSR-18 client, install Guzzle:
 
 ```bash
 composer require guzzlehttp/guzzle
 ```
 
-## Quick Start
+## Quick start
 
 ```php
 <?php
@@ -41,20 +41,24 @@ use Assinafy\SDK\AssinafyClient;
 $client = AssinafyClient::create(
     apiKey: 'your-api-key',
     accountId: 'your-account-id',
-    webhookSecret: 'your-webhook-secret'
 );
 
+// 1. upload a PDF + 2. wait until it's metadata-ready + 3. dispatch a signature request
 $result = $client->uploadAndRequestSignatures(
     filePath: '/path/to/contract.pdf',
-    fileName: 'contract.pdf',
     signers: [
-        ['name' => 'John Doe',   'email' => 'john@example.com',  'cpf' => '12345678900'],
-        ['name' => 'Jane Smith', 'email' => 'jane@example.com',  'cpf' => '09876543211'],
+        ['full_name' => 'John Doe',  'email' => 'john@example.com'],
+        ['full_name' => 'Jane Smith','email' => 'jane@example.com'],
     ],
-    message: 'Please sign this contract'
+    message:   'Please sign this contract',
+    expiresAt: '2026-12-31T23:59:00Z',
 );
 
-echo "Document ID: {$result['document']['document_id']}\n";
+echo "Document ID: {$result['document']['id']}\n";
+echo "Assignment ID: {$result['assignment']['id']}\n";
+foreach ($result['assignment']['signing_urls'] ?? [] as $u) {
+    echo "  • {$u['signer_id']} → {$u['url']}\n";
+}
 ```
 
 ## Configuration
@@ -66,55 +70,62 @@ use Assinafy\SDK\AssinafyClient;
 $config = new Configuration(
     apiKey: 'your-api-key',
     accountId: 'your-account-id',
-    baseUrl: 'https://api.assinafy.com.br/v1',
-    webhookSecret: 'your-webhook-secret',
+    baseUrl: Configuration::DEFAULT_BASE_URL,    // or SANDBOX_BASE_URL
+    webhookSecret: 'your-webhook-secret',        // optional
     timeout: 30,
-    connectTimeout: 10
+    connectTimeout: 10,
 );
 
 $client = new AssinafyClient($config);
 
-// or from array
+// or from an array
 $client = AssinafyClient::fromArray([
     'api_key'        => 'your-api-key',
     'account_id'     => 'your-account-id',
     'webhook_secret' => 'your-webhook-secret',
-    'base_url'       => 'https://api.assinafy.com.br/v1',
+    'base_url'       => Configuration::DEFAULT_BASE_URL,
 ]);
 ```
 
-## Usage
+## Endpoint coverage
 
-### Documents
+Every endpoint exposed by the documented API is reachable through the SDK. Resource accessors on `$client` are singletons (lazy-instantiated).
 
-All document endpoints are accessed via `$client->documents()`.
+### Documents — `$client->documents()`
 
-| Method | Endpoint | Description |
-| --- | --- | --- |
-| `upload($filePath, $fileName, $metadata)` | `POST /accounts/{id}/documents` | Upload a PDF |
-| `get($documentId)` | `GET /documents/{id}` | Get document details |
-| `list($page, $perPage, $filters)` | `GET /accounts/{id}/documents` | List workspace documents |
-| `download($documentId)` | `GET /accounts/{id}/documents/{id}/download` | Download the signed PDF |
-| `verify($hash)` | `GET /documents/{hash}/verify` | Verify a certificated document by its signature hash |
-| `createFromTemplate($templateId, $signers, $options)` | `POST /accounts/{id}/templates/{templateId}/documents` | Create a document from a template |
-| `estimateCostFromTemplate($templateId, $signers)` | `POST /accounts/{id}/templates/{templateId}/documents/estimate-cost` | Estimate credit cost |
-| `waitUntilReady($documentId, $maxWait, $pollInterval)` | polls `GET /documents/{id}` | Poll until status is ready |
-| `getSigningProgress($documentId)` | derived from `GET /documents/{id}` | Return signed/total/percentage summary |
-| `isFullySigned($documentId)` | derived from `GET /documents/{id}` | Boolean check |
+| Method | Endpoint |
+| --- | --- |
+| `upload($filePath)` | `POST /accounts/{id}/documents` |
+| `get($documentId)` | `GET /documents/{id}` |
+| `list($page, $perPage, $filters)` | `GET /accounts/{id}/documents` |
+| `delete($documentId)` | `DELETE /documents/{id}` |
+| `download($documentId, $artifact)` | `GET /documents/{id}/download/{artifact_name}` |
+| `downloadThumbnail($documentId)` | `GET /documents/{id}/thumbnail` |
+| `downloadPage($documentId, $pageId)` | `GET /documents/{id}/pages/{page_id}/download` |
+| `activities($documentId)` | `GET /documents/{id}/activities` |
+| `statuses()` | `GET /documents/statuses` |
+| `verify($hash)` | `GET /documents/{hash}/verify` |
+| `publicInfo($documentId)` | `GET /public/documents/{id}` |
+| `sendToken($documentId, $recipient, $channel)` | `PUT /public/documents/{id}/send-token` |
+| `createFromTemplate($templateId, $signers, $options)` | `POST /accounts/{id}/templates/{id}/documents` |
+| `estimateCostFromTemplate($templateId, $signers)` | `POST /accounts/{id}/templates/{id}/documents/estimate-cost` |
+| `waitUntilReady($documentId, $maxWait, $pollInterval)` | polls `GET /documents/{id}` |
+| `isFullySigned($documentId)` | derived from `GET /documents/{id}` |
+| `getSigningProgress($documentId)` | derived from `GET /documents/{id}` |
 
 ```php
-// Upload
-$doc = $client->documents()->upload('/path/to/contract.pdf', 'contract.pdf');
-$documentId = $doc['document_id'];
+// Upload (PDF only, ≤25 MB)
+$doc = $client->documents()->upload('/path/to/contract.pdf');
+$documentId = $doc['id'];
 
-// Wait for processing
+// Wait for the upload pipeline to finish
 $client->documents()->waitUntilReady($documentId);
 
-// Download the certificated PDF
-$pdf = $client->documents()->download($documentId);
-file_put_contents('signed.pdf', $pdf);
+// Download artifacts
+$pdf = $client->documents()->download($documentId, DocumentResource::ARTIFACT_CERTIFICATED);
+$jpg = $client->documents()->downloadThumbnail($documentId);
 
-// Verify a document by hash (public endpoint)
+// Verify a certificated document by signature hash (public)
 $result = $client->documents()->verify('FE32EDDADE7CBDDCBB934E7402047450B0E59C02');
 
 // Create from template
@@ -126,139 +137,138 @@ $doc = $client->documents()->createFromTemplate(
     options: [
         'name'       => 'Service Contract 2026',
         'expires_at' => '2026-12-31T23:59:00Z',
-    ]
+    ],
 );
-
-// Estimate cost before creating
-$estimate = $client->documents()->estimateCostFromTemplate(
-    templateId: 'fa7f3e524f3a2cc00a5ea4325e2',
-    signers: [['role_id' => 'fa8c14f32d732271e071998246e']]
-);
-echo "Total cost: {$estimate['data']['total']} credits\n";
 ```
 
-### Signers
+### Signers — `$client->signers()`
 
-All signer endpoints are accessed via `$client->signers()`.
-
-| Method | Endpoint | Description |
-| --- | --- | --- |
-| `create($name, $email, $cpf, $phone, $metadata)` | `POST /accounts/{id}/signers` | Create a signer — `$cpf` and `$phone` are sanitized (digits only) before sending |
-| `get($signerId)` | `GET /accounts/{id}/signers/{id}` | Get signer details |
-| `list($page, $perPage, $search)` | `GET /accounts/{id}/signers` | List signers |
-| `update($signerId, $data)` | `PUT /accounts/{id}/signers/{id}` | Update signer fields |
-| `delete($signerId)` | `DELETE /accounts/{id}/signers/{id}` | Delete a signer |
-| `findByEmail($email)` | `GET /accounts/{id}/signers?search={email}` | Look up signer by email |
+| Method | Endpoint |
+| --- | --- |
+| `create($fullName, $email, $whatsappPhoneNumber)` | `POST /accounts/{id}/signers` |
+| `get($signerId)` | `GET /accounts/{id}/signers/{id}` |
+| `list($page, $perPage, $search)` | `GET /accounts/{id}/signers` |
+| `update($signerId, $data)` | `PUT /accounts/{id}/signers/{id}` |
+| `delete($signerId)` | `DELETE /accounts/{id}/signers/{id}` |
+| `findByEmail($email)` | `GET /accounts/{id}/signers?search={email}` |
 
 ```php
-// Create (cpf and phone are optional; digits are stripped automatically)
 $signer = $client->signers()->create(
-    name: 'John Doe',
+    fullName: 'John Doe',
     email: 'john@example.com',
-    cpf: '12345678900',
-    phone: '+5511999999999',
-    metadata: ['department' => 'sales']
+    whatsappPhoneNumber: '+5548999990000',
 );
-$signerId = $signer['data']['id'];
 
-// Update
-$client->signers()->update($signerId, [
-    'full_name'             => 'John R. Doe',
-    'whatsapp_phone_number' => '+5548999990000',
-]);
-
-// Delete
-$client->signers()->delete($signerId);
-
-// Find by email
-$signer = $client->signers()->findByEmail('john@example.com');
+$client->signers()->update($signer['id'], ['full_name' => 'John R. Doe']);
+$client->signers()->delete($signer['id']);
 ```
 
-### Assignments
+> The Assinafy signer model only has `full_name`, `email` and `whatsapp_phone_number`. The phone number is normalised to E.164 (e.g. `+5548999990000`) before being sent.
 
-All assignment endpoints are accessed via `$client->assignments()`.
+### Assignments — `$client->assignments()`
 
-| Method | Endpoint | Description |
-| --- | --- | --- |
-| `create($documentId, $signers, $method, $message, $expiresAt)` | `POST /documents/{id}/assignments` | Request signatures |
-| `cancel($documentId, $reason)` | `POST /accounts/{id}/signature-requests/{id}/cancel` | Cancel a request |
-| `resendNotification($documentId, $signerId)` | legacy resend endpoint | Resend via legacy path |
-| `estimateCost($documentId, $signers, $method, $entries)` | `POST /documents/{id}/assignments/estimate-cost` | Estimate credit cost |
-| `resend($documentId, $assignmentId, $signerId)` | `PUT /documents/{id}/assignments/{id}/signers/{id}/resend` | Resend notification |
-| `estimateResendCost($documentId, $assignmentId, $signerId)` | `POST /documents/{id}/assignments/{id}/signers/{id}/estimate-resend-cost` | Estimate resend cost |
-| `resetExpiration($documentId, $assignmentId, $expiresAt)` | `PUT /documents/{id}/assignments/{id}/reset-expiration` | Extend the deadline |
+| Method | Endpoint |
+| --- | --- |
+| `create($documentId, $signers, $method, $options)` | `POST /documents/{id}/assignments` |
+| `estimateCost($documentId, $signers, $method, $options)` | `POST /documents/{id}/assignments/estimate-cost` |
+| `resend($documentId, $assignmentId, $signerId)` | `PUT /documents/{id}/assignments/{id}/signers/{id}/resend` |
+| `estimateResendCost($documentId, $assignmentId, $signerId)` | `POST /documents/{id}/assignments/{id}/signers/{id}/estimate-resend-cost` |
+| `resetExpiration($documentId, $assignmentId, $expiresAt)` | `PUT /documents/{id}/assignments/{id}/reset-expiration` |
 
 ```php
-// Create virtual assignment
+use Assinafy\SDK\Resources\AssignmentResource;
+
+// Virtual assignment (no input fields). Signers may be ID strings or full objects.
 $assignment = $client->assignments()->create(
     documentId: $documentId,
-    signers: [$signerId1, $signerId2],
-    method: 'virtual',
-    message: 'Please sign this document',
-    expiresAt: '2026-12-31T23:59:00Z'
+    signers: [
+        $signerId1,
+        ['id' => $signerId2, 'verification_method' => AssignmentResource::VERIFICATION_WHATSAPP],
+    ],
+    method: AssignmentResource::METHOD_VIRTUAL,
+    options: [
+        'message'    => 'Please sign this document',
+        'expires_at' => '2026-12-31T23:59:00Z',
+    ],
 );
 
 // Estimate cost before creating
 $estimate = $client->assignments()->estimateCost(
     documentId: $documentId,
-    signers: [['verification_method' => 'Whatsapp']],
-    method: 'virtual'
+    signers: [['id' => $signerId1, 'verification_method' => 'Whatsapp']],
 );
 
-// Resend notification to a signer
-$client->assignments()->resend($documentId, $assignmentId, $signerId);
-
-// Extend the deadline
-$client->assignments()->resetExpiration($documentId, $assignmentId, '2027-01-31T23:59:00Z');
-
-// Cancel
-$client->assignments()->cancel($documentId, 'Contract renegotiated');
+$client->assignments()->resend($documentId, $assignment['id'], $signerId1);
+$client->assignments()->resetExpiration($documentId, $assignment['id'], '2027-01-31T23:59:00Z');
 ```
 
-### Templates
+### Templates — `$client->templates()`
 
-All template endpoints are accessed via `$client->templates()`.
-
-| Method | Endpoint | Description |
-| --- | --- | --- |
-| `list($page, $perPage, $filters)` | `GET /accounts/{id}/templates` | List workspace templates |
-| `get($templateId)` | `GET /accounts/{id}/templates/{id}` | Get template with roles and pages |
+| Method | Endpoint |
+| --- | --- |
+| `list($page, $perPage, $filters)` | `GET /accounts/{id}/templates` |
+| `get($templateId)` | `GET /accounts/{id}/templates/{id}` |
 
 ```php
-// List ready templates
 $templates = $client->templates()->list(1, 20, ['status' => 'ready']);
-
-// Get template roles for document creation
-$template = $client->templates()->get('fa7f3e524f3a2cc00a5ea4325e2');
+$template  = $client->templates()->get('fa7f3e524f3a2cc00a5ea4325e2');
 foreach ($template['roles'] as $role) {
     echo "{$role['id']}: {$role['name']}\n";
 }
 ```
 
-### Webhooks
+### Webhooks — `$client->webhooks()`
 
-All webhook endpoints are accessed via `$client->webhooks()`.
-
-| Method | Endpoint | Description |
-| --- | --- | --- |
-| `register($url, $email, $events)` | `PUT /accounts/{id}/webhooks/subscriptions` | Register or update subscription |
-| `get()` | `GET /accounts/{id}/webhooks/subscriptions` | Get current subscription |
-| `delete()` | `DELETE /accounts/{id}/webhooks/subscriptions` | Delete subscription |
+| Method | Endpoint |
+| --- | --- |
+| `register($url, $email, $events)` | `PUT /accounts/{id}/webhooks/subscriptions` |
+| `get()` | `GET /accounts/{id}/webhooks/subscriptions` |
+| `delete()` | `DELETE /accounts/{id}/webhooks/subscriptions` |
 
 ```php
+use Assinafy\SDK\Resources\WebhookResource;
+
 $client->webhooks()->register(
     url: 'https://your-domain.com/webhooks/assinafy',
     email: 'admin@your-domain.com',
-    events: [
-        'document_ready',
-        'signer_signed_document',
-        'signer_rejected_document',
-        'document_processing_failed',
-    ]
+    events: WebhookResource::DEFAULT_EVENTS,
 );
 ```
 
-### Webhook Verification
+### Authentication — `$client->auth()`
+
+| Method | Endpoint |
+| --- | --- |
+| `login($email, $password)` | `POST /login` |
+| `socialLogin($provider, $token, $hasAcceptedTerms)` | `POST /authentication/social-login` |
+| `generateApiKey($accessToken, $password)` | `POST /users/api-keys` |
+| `getApiKey($accessToken)` | `GET /users/api-keys` |
+| `deleteApiKey($accessToken)` | `DELETE /users/api-keys` |
+| `changePassword($accessToken, $email, $password, $newPassword)` | `PUT /authentication/change-password` |
+| `requestPasswordReset($email)` | `PUT /authentication/request-password-reset` |
+| `resetPassword($email, $token, $newPassword)` | `PUT /authentication/reset-password` |
+
+```php
+$session = $client->auth()->login('user@example.com', 'secret');
+$accessToken = $session['access_token'];
+
+$apiKey = $client->auth()->generateApiKey($accessToken, 'secret');
+```
+
+### Signer session (signer-facing) — `$client->signerSession()`
+
+Endpoints authenticated with a signer's `signer-access-code` (not the workspace API key).
+
+| Method | Endpoint |
+| --- | --- |
+| `self($accessCode)` | `GET /signers/self` |
+| `acceptTerms($accessCode)` | `PUT /signers/accept-terms` |
+| `verifyCode($accessCode, $verificationCode)` | `POST /verify` |
+| `confirmData($documentId, $accessCode, $data)` | `PUT /documents/{id}/signers/confirm-data` |
+| `uploadSignature($accessCode, $type, $bytes, $mime)` | `POST /signature` |
+| `downloadSignature($accessCode, $type)` | `GET /signature/{type}` |
+
+## Webhook signature verification
 
 ```php
 $payload   = file_get_contents('php://input');
@@ -273,15 +283,6 @@ if (!$verifier->verify($payload, $signature)) {
 
 $event     = $verifier->extractEvent($payload);
 $eventType = $verifier->getEventType($event);
-
-switch ($eventType) {
-    case 'document_ready':
-        // ...
-        break;
-    case 'signer_signed_document':
-        // ...
-        break;
-}
 ```
 
 ## Logging
@@ -296,7 +297,7 @@ $logger->pushHandler(new StreamHandler('/path/to/assinafy.log', Logger::DEBUG));
 $client = new AssinafyClient($config, null, $logger);
 ```
 
-## Exception Handling
+## Exception handling
 
 ```php
 use Assinafy\SDK\Exceptions\ApiException;
@@ -304,7 +305,7 @@ use Assinafy\SDK\Exceptions\ValidationException;
 use Assinafy\SDK\Exceptions\NetworkException;
 
 try {
-    $client->documents()->upload('/path/to/file.pdf', 'contract.pdf');
+    $client->documents()->upload('/path/to/file.pdf');
 } catch (ValidationException $e) {
     echo "Validation: {$e->getMessage()}\n";
     print_r($e->getErrors());
@@ -316,20 +317,26 @@ try {
 }
 ```
 
-## Code Quality
+## Tests & quality
 
 ```bash
-# Check code style (PSR-12)
-vendor/bin/phpcs src/
+# Unit tests (mocked HTTP — no network)
+vendor/bin/phpunit --testsuite=unit
 
-# Fix code style automatically
-vendor/bin/phpcbf src/
+# Live integration tests against the real API (incurs credit cost)
+ASSINAFY_INTEGRATION=1 \
+ASSINAFY_API_KEY=your-key \
+ASSINAFY_ACCOUNT_ID=your-account \
+vendor/bin/phpunit --testsuite=integration
 
 # Static analysis (PHPStan level 8)
-vendor/bin/phpstan analyse --level=8 src/
+vendor/bin/phpstan analyse
+
+# Coding standard (PSR-12)
+vendor/bin/phpcs
 ```
 
-**Current status**: PSR-12 compliant · PHPStan level 8 (zero errors) · PHP 7.4 – 8.3 compatible
+**Current status**: PSR-12 compliant · PHPStan level 8 (zero errors) · 66 unit tests + 6 live integration tests · PHP 7.4 – 8.4 compatible.
 
 ## License
 

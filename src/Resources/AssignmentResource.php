@@ -6,197 +6,185 @@ namespace Assinafy\SDK\Resources;
 
 use Assinafy\SDK\Exceptions\ValidationException;
 
+/**
+ * Assignments resource — every endpoint under `/documents/{document_id}/assignments`.
+ *
+ * @see https://api.assinafy.com.br/v1/docs
+ */
 class AssignmentResource extends AbstractResource
 {
+    public const METHOD_VIRTUAL = 'virtual';
+    public const METHOD_COLLECT = 'collect';
+
+    public const VERIFICATION_EMAIL = 'Email';
+    public const VERIFICATION_WHATSAPP = 'Whatsapp';
+
+    /**
+     * Create an assignment (signature request).
+     * `POST /documents/{document_id}/assignments`
+     *
+     * @param array<int, string|array<string, mixed>> $signers
+     *     Either a list of signer IDs (strings) or a list of `{ id, verification_method?, notification_methods? }`
+     *     objects. String IDs are normalized to `{ id }` objects before being sent.
+     * @param array<string, mixed> $options
+     *     Optional keys: `entries` (required for collect), `message`, `expires_at`, `copy_receivers`.
+     */
     public function create(
         string $documentId,
         array $signers,
-        string $method = 'virtual',
-        ?string $message = null,
-        ?string $expiresAt = null
+        string $method = self::METHOD_VIRTUAL,
+        array $options = []
     ): array {
-        $this->validateSigners($signers);
+        $this->assertMethod($method);
+        $this->assertSigners($signers);
 
-        $signerIds = $this->extractSignerIds($signers);
-
-        $payload = [
-            'method' => $method,
-            'signer_ids' => $signerIds,
-        ];
-
-        if ($message) {
-            $payload['message'] = $message;
-        }
-
-        if ($expiresAt) {
-            $payload['expires_at'] = $expiresAt;
-        }
-
-        $this->logger->info("Creating assignment for document", [
-            'document_id' => $documentId,
-            'signers_count' => count($signerIds),
-        ]);
-
-        $response = $this->httpClient->post(
-            "documents/{$documentId}/assignments",
-            $payload
-        );
-
-        $this->logger->info("Assignment created successfully", [
-            'document_id' => $documentId,
-        ]);
-
-        return $response->getData() ?? [];
-    }
-
-    public function cancel(string $documentId, string $reason): array
-    {
-        $this->logger->info("Cancelling signature request", [
-            'document_id' => $documentId,
-            'reason' => $reason,
-        ]);
-
-        $response = $this->httpClient->post(
-            "accounts/{$this->config->getAccountId()}/signature-requests/{$documentId}/cancel",
+        $payload = array_merge(
             [
-                'document_id' => $documentId,
-                'reason' => $reason,
-            ]
+                'method' => $method,
+                'signers' => $this->normalizeSigners($signers),
+            ],
+            $options
         );
 
-        return $response->getData() ?? [];
+        $response = $this->httpClient->post("documents/{$documentId}/assignments", $payload);
+
+        return $this->extractData($response->getData() ?? []);
     }
 
-    public function resendNotification(string $documentId, string $signerId): array
-    {
-        $this->logger->info("Resending notification", [
-            'document_id' => $documentId,
-            'signer_id' => $signerId,
-        ]);
-
-        $response = $this->httpClient->post(
-            "accounts/{$this->config->getAccountId()}/signature-requests/resend",
-            [
-                'document_id' => $documentId,
-                'signer_id' => $signerId,
-            ]
-        );
-
-        return $response->getData() ?? [];
-    }
-
+    /**
+     * Estimate the credit cost of creating an assignment.
+     * `POST /documents/{document_id}/assignments/estimate-cost`
+     */
     public function estimateCost(
         string $documentId,
         array $signers,
-        string $method = 'virtual',
-        ?array $entries = null
+        string $method = self::METHOD_VIRTUAL,
+        array $options = []
     ): array {
-        $payload = [
-            'method' => $method,
-            'signers' => $signers,
-        ];
+        $this->assertMethod($method);
 
-        if ($entries !== null) {
-            $payload['entries'] = $entries;
-        }
-
-        $this->logger->debug("Estimating assignment cost", [
-            'document_id' => $documentId,
-            'method' => $method,
-            'signers_count' => count($signers),
-        ]);
+        $payload = array_merge(
+            [
+                'method' => $method,
+                'signers' => $this->normalizeSigners($signers),
+            ],
+            $options
+        );
 
         $response = $this->httpClient->post(
             "documents/{$documentId}/assignments/estimate-cost",
             $payload
         );
 
-        return $response->getData() ?? [];
+        return $this->extractData($response->getData() ?? []);
     }
 
-    public function resend(
-        string $documentId,
-        string $assignmentId,
-        string $signerId
-    ): array {
-        $this->logger->info("Resending notification to signer", [
-            'document_id' => $documentId,
-            'assignment_id' => $assignmentId,
-            'signer_id' => $signerId,
-        ]);
-
+    /**
+     * Resend the signing-notification to a single signer.
+     * `PUT /documents/{document_id}/assignments/{assignment_id}/signers/{signer_id}/resend`
+     */
+    public function resend(string $documentId, string $assignmentId, string $signerId): array
+    {
         $response = $this->httpClient->put(
             "documents/{$documentId}/assignments/{$assignmentId}/signers/{$signerId}/resend"
         );
 
-        return $response->getData() ?? [];
+        return $this->extractData($response->getData() ?? []);
     }
 
-    public function estimateResendCost(
-        string $documentId,
-        string $assignmentId,
-        string $signerId
-    ): array {
-        $this->logger->debug("Estimating resend cost", [
-            'document_id' => $documentId,
-            'assignment_id' => $assignmentId,
-            'signer_id' => $signerId,
-        ]);
-
+    /**
+     * Estimate the credit cost of resending a notification to one signer.
+     * `POST /documents/{document_id}/assignments/{assignment_id}/signers/{signer_id}/estimate-resend-cost`
+     */
+    public function estimateResendCost(string $documentId, string $assignmentId, string $signerId): array
+    {
         $response = $this->httpClient->post(
             "documents/{$documentId}/assignments/{$assignmentId}/signers/{$signerId}/estimate-resend-cost"
         );
 
-        return $response->getData() ?? [];
+        return $this->extractData($response->getData() ?? []);
     }
 
-    public function resetExpiration(
-        string $documentId,
-        string $assignmentId,
-        string $expiresAt
-    ): array {
-        $this->logger->info("Resetting assignment expiration", [
-            'document_id' => $documentId,
-            'assignment_id' => $assignmentId,
-            'expires_at' => $expiresAt,
-        ]);
-
+    /**
+     * Reset the expiration date of an assignment.
+     * `PUT /documents/{document_id}/assignments/{assignment_id}/reset-expiration`
+     */
+    public function resetExpiration(string $documentId, string $assignmentId, string $expiresAt): array
+    {
         $response = $this->httpClient->put(
             "documents/{$documentId}/assignments/{$assignmentId}/reset-expiration",
             ['expires_at' => $expiresAt]
         );
 
-        return $response->getData() ?? [];
+        return $this->extractData($response->getData() ?? []);
     }
 
-    private function validateSigners(array $signers): void
+    private function assertMethod(string $method): void
+    {
+        if (!in_array($method, [self::METHOD_VIRTUAL, self::METHOD_COLLECT], true)) {
+            throw new ValidationException(
+                "Invalid assignment method '{$method}'",
+                ['allowed' => [self::METHOD_VIRTUAL, self::METHOD_COLLECT]]
+            );
+        }
+    }
+
+    /**
+     * @param array<int, mixed> $signers
+     */
+    private function assertSigners(array $signers): void
     {
         if (empty($signers)) {
-            throw new ValidationException("At least one signer is required", ['signers' => $signers]);
-        }
-
-        foreach ($signers as $signer) {
-            if (!is_array($signer) && !is_string($signer)) {
-                throw new ValidationException("Invalid signer format", ['signer' => $signer]);
-            }
+            throw new ValidationException('At least one signer is required', ['signers' => $signers]);
         }
     }
 
-    private function extractSignerIds(array $signers): array
+    /**
+     * Accept either string signer IDs or full signer objects and produce the
+     * `signers: [{ id, verification_method?, notification_methods? }]` shape
+     * documented by the API.
+     *
+     * @param array<int, mixed> $signers
+     * @return array<int, array<string, mixed>>
+     */
+    private function normalizeSigners(array $signers): array
     {
-        $signerIds = [];
+        $normalized = [];
 
         foreach ($signers as $signer) {
             if (is_string($signer)) {
-                $signerIds[] = $signer;
-            } elseif (is_array($signer)) {
-                $id = $signer['signer_id'] ?? $signer['id'] ?? null;
-                if ($id) {
-                    $signerIds[] = $id;
-                }
+                $normalized[] = ['id' => $signer];
+                continue;
             }
+
+            if (is_array($signer)) {
+                $id = $signer['id'] ?? $signer['signer_id'] ?? null;
+
+                if ($id === null) {
+                    throw new ValidationException('Signer entry missing id', ['signer' => $signer]);
+                }
+
+                $entry = ['id' => (string) $id];
+
+                if (isset($signer['verification_method'])) {
+                    $entry['verification_method'] = $signer['verification_method'];
+                }
+
+                if (isset($signer['notification_methods'])) {
+                    $entry['notification_methods'] = $signer['notification_methods'];
+                }
+
+                if (isset($signer['role_id'])) {
+                    $entry['role_id'] = $signer['role_id'];
+                }
+
+                $normalized[] = $entry;
+                continue;
+            }
+
+            throw new ValidationException('Invalid signer entry', ['signer' => $signer]);
         }
 
-        return $signerIds;
+        return $normalized;
     }
 }

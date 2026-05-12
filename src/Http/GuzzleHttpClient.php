@@ -22,8 +22,12 @@ class GuzzleHttpClient implements HttpClientInterface
     {
         $this->logger = $logger ?? new NullLogger();
 
+        // Guzzle resolves relative request URIs against `base_uri` per RFC 3986. When the
+        // base_uri lacks a trailing slash, its last path segment gets *replaced* rather than
+        // appended to — so `https://api.assinafy.com.br/v1` + `documents/statuses` becomes
+        // `https://api.assinafy.com.br/documents/statuses` (no `/v1`). Always end with `/`.
         $this->client = new Client([
-            'base_uri' => $config->getBaseUrl(),
+            'base_uri' => rtrim($config->getBaseUrl(), '/') . '/',
             'timeout' => $config->getTimeout(),
             'connect_timeout' => $config->getConnectTimeout(),
             'headers' => $config->getHeaders(),
@@ -42,7 +46,7 @@ class GuzzleHttpClient implements HttpClientInterface
     {
         return $this->request('POST', $uri, [
             'json' => $data,
-            'headers' => $headers,
+            'headers' => $this->withJsonHeaders($headers),
         ]);
     }
 
@@ -50,7 +54,7 @@ class GuzzleHttpClient implements HttpClientInterface
     {
         return $this->request('PUT', $uri, [
             'json' => $data,
-            'headers' => $headers,
+            'headers' => $this->withJsonHeaders($headers),
         ]);
     }
 
@@ -82,10 +86,36 @@ class GuzzleHttpClient implements HttpClientInterface
             ];
         }
 
+        // Guzzle sets `Content-Type: multipart/form-data; boundary=...` automatically when the
+        // `multipart` option is used. Don't override it — that would strip the boundary and
+        // the server would reject the upload.
         return $this->request('POST', $uri, [
             'multipart' => $multipart,
-            'headers' => array_merge(['Content-Type' => 'multipart/form-data'], $headers),
+            'headers' => $headers,
         ]);
+    }
+
+    public function postRaw(
+        string $uri,
+        string $body,
+        string $contentType,
+        array $query = [],
+        array $headers = []
+    ): Response {
+        return $this->request('POST', $uri, [
+            'query' => $query,
+            'body' => $body,
+            'headers' => array_merge(['Content-Type' => $contentType], $headers),
+        ]);
+    }
+
+    /**
+     * @param array<string, string> $headers
+     * @return array<string, string>
+     */
+    private function withJsonHeaders(array $headers): array
+    {
+        return array_merge(['Content-Type' => 'application/json'], $headers);
     }
 
     private function request(string $method, string $uri, array $options = []): Response

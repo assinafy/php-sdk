@@ -6,221 +6,360 @@ namespace Assinafy\SDK\Resources;
 
 use Assinafy\SDK\Exceptions\ValidationException;
 
+/**
+ * Documents resource — covers every documented endpoint under `/documents`
+ * and `/accounts/{account_id}/documents`.
+ *
+ * @see https://api.assinafy.com.br/v1/docs
+ */
 class DocumentResource extends AbstractResource
 {
-    public function upload(string $filePath, string $fileName, array $metadata = []): array
+    public const ARTIFACT_ORIGINAL = 'original';
+    public const ARTIFACT_CERTIFICATED = 'certificated';
+    public const ARTIFACT_CERTIFICATE_PAGE = 'certificate-page';
+    public const ARTIFACT_BUNDLE = 'bundle';
+
+    public const STATUS_UPLOADING = 'uploading';
+    public const STATUS_UPLOADED = 'uploaded';
+    public const STATUS_METADATA_PROCESSING = 'metadata_processing';
+    public const STATUS_METADATA_READY = 'metadata_ready';
+    public const STATUS_PENDING_SIGNATURE = 'pending_signature';
+    public const STATUS_EXPIRED = 'expired';
+    public const STATUS_CERTIFICATING = 'certificating';
+    public const STATUS_CERTIFICATED = 'certificated';
+    public const STATUS_REJECTED_BY_SIGNER = 'rejected_by_signer';
+    public const STATUS_REJECTED_BY_USER = 'rejected_by_user';
+    public const STATUS_FAILED = 'failed';
+
+    /** Statuses that indicate the upload pipeline is finished and the document is usable. */
+    public const READY_STATUSES = [
+        self::STATUS_METADATA_READY,
+        self::STATUS_PENDING_SIGNATURE,
+        self::STATUS_CERTIFICATED,
+    ];
+
+    /** Terminal statuses that indicate the document will never become ready. */
+    public const FAILURE_STATUSES = [
+        self::STATUS_FAILED,
+        self::STATUS_EXPIRED,
+        self::STATUS_REJECTED_BY_SIGNER,
+        self::STATUS_REJECTED_BY_USER,
+    ];
+
+    /** Max upload size accepted by the API (25 MB). */
+    private const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+
+    /**
+     * Upload a PDF and create a new document.
+     * `POST /accounts/{account_id}/documents`
+     */
+    public function upload(string $filePath): array
     {
         $this->validateUpload($filePath);
 
-        $this->logger->info("Uploading document to Assinafy", [
-            'file_name' => $fileName,
-            'file_size' => filesize($filePath),
+        $this->logger->info('Uploading document', [
+            'file' => $filePath,
+            'size' => filesize($filePath),
         ]);
 
         $response = $this->httpClient->uploadFile(
-            "accounts/{$this->config->getAccountId()}/documents",
-            $filePath,
-            [
-                'name' => $fileName,
-                'metadata' => json_encode($metadata),
-            ]
+            $this->accountPath('documents'),
+            $filePath
         );
 
-        $data = $response->getData() ?? [];
-        $documentData = $this->extractData($data);
-        $documentData = $this->normalizeId($documentData);
-
-        if (!isset($documentData['document_id'])) {
-            throw new \RuntimeException('Upload succeeded but no document_id returned');
-        }
-
-        $this->logger->info("Document uploaded successfully", [
-            'document_id' => $documentData['document_id'],
-        ]);
-
-        return $documentData;
+        return $this->extractData($response->getData() ?? []);
     }
 
+    /**
+     * Retrieve a document.
+     * `GET /documents/{document_id}`
+     */
     public function get(string $documentId): array
     {
-        $this->logger->debug("Fetching document details", ['document_id' => $documentId]);
-
         $response = $this->httpClient->get("documents/{$documentId}");
 
         return $this->extractData($response->getData() ?? []);
     }
 
+    /**
+     * List documents in the workspace.
+     * `GET /accounts/{account_id}/documents`
+     *
+     * @param array<string, scalar> $filters optional `status`, `method`, `search`, `sort`
+     */
     public function list(int $page = 1, int $perPage = 20, array $filters = []): array
     {
         $params = array_merge([
             'page' => $page,
-            'per_page' => $perPage,
+            'per-page' => $perPage,
         ], $filters);
 
-        $response = $this->httpClient->get(
-            "accounts/{$this->config->getAccountId()}/documents",
-            $params
-        );
+        $response = $this->httpClient->get($this->accountPath('documents'), $params);
 
         return $response->getData() ?? [];
     }
 
-    public function waitUntilReady(string $documentId, int $maxWaitSeconds = 30, int $pollIntervalSeconds = 2): array
+    /**
+     * Delete a document.
+     * `DELETE /documents/{document_id}`
+     */
+    public function delete(string $documentId): array
     {
-        $this->logger->info("Waiting for document to be ready", [
-            'document_id' => $documentId,
-            'max_wait' => $maxWaitSeconds,
-        ]);
+        $this->logger->info('Deleting document', ['document_id' => $documentId]);
 
-        $startTime = time();
-        $attempts = 0;
+        $response = $this->httpClient->delete("documents/{$documentId}");
 
-        while ((time() - $startTime) < $maxWaitSeconds) {
-            $attempts++;
-
-            try {
-                $details = $this->get($documentId);
-                $status = $details['status'] ?? 'unknown';
-
-                $this->logger->debug("Document status check", [
-                    'attempt' => $attempts,
-                    'status' => $status,
-                ]);
-
-                if (in_array($status, ['prepared', 'metadata_ready', 'document_prepared'])) {
-                    $this->logger->info("Document is ready", [
-                        'document_id' => $documentId,
-                        'attempts' => $attempts,
-                    ]);
-                    return $details;
-                }
-
-                if (in_array($status, ['failed', 'error', 'processing_failed'])) {
-                    throw new \RuntimeException("Document processing failed with status: {$status}");
-                }
-
-                if (in_array($status, ['uploaded', 'processing'])) {
-                    sleep($pollIntervalSeconds);
-                    continue;
-                }
-
-                sleep($pollIntervalSeconds);
-            } catch (\Exception $e) {
-                $this->logger->warning("Error checking document status", [
-                    'exception' => $e->getMessage(),
-                ]);
-                sleep($pollIntervalSeconds);
-            }
-        }
-
-        throw new \RuntimeException('Timeout waiting for document to be ready');
+        return $response->getData() ?? [];
     }
 
-    public function download(string $documentId): string
+    /**
+     * Download an artifact for a document (original, certificated, certificate-page, bundle).
+     * `GET /documents/{document_id}/download/{artifact_name}`
+     *
+     * Returns the raw binary body.
+     */
+    public function download(string $documentId, string $artifact = self::ARTIFACT_CERTIFICATED): string
     {
-        $response = $this->httpClient->get(
-            "accounts/{$this->config->getAccountId()}/documents/{$documentId}/download"
-        );
+        $this->assertArtifact($artifact);
+
+        $response = $this->httpClient->get("documents/{$documentId}/download/{$artifact}");
 
         return $response->getBody();
     }
 
-    public function isFullySigned(string $documentId): bool
+    /**
+     * Download the JPEG thumbnail for a document.
+     * `GET /documents/{document_id}/thumbnail`
+     */
+    public function downloadThumbnail(string $documentId): string
     {
-        $document = $this->get($documentId);
+        $response = $this->httpClient->get("documents/{$documentId}/thumbnail");
 
-        return ($document['status'] ?? '') === 'signed' || ($document['all_signed'] ?? false) === true;
+        return $response->getBody();
     }
 
+    /**
+     * Download a rendered page as JPEG.
+     * `GET /documents/{document_id}/pages/{page_id}/download`
+     */
+    public function downloadPage(string $documentId, string $pageId): string
+    {
+        $response = $this->httpClient->get("documents/{$documentId}/pages/{$pageId}/download");
+
+        return $response->getBody();
+    }
+
+    /**
+     * List activity events for a document.
+     * `GET /documents/{document_id}/activities`
+     */
+    public function activities(string $documentId): array
+    {
+        $response = $this->httpClient->get("documents/{$documentId}/activities");
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    /**
+     * List all possible document statuses, with their `deletable` flag.
+     * `GET /documents/statuses`
+     */
+    public function statuses(): array
+    {
+        $response = $this->httpClient->get('documents/statuses');
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    /**
+     * Verify a certificated document by its signature hash. Public endpoint, no auth.
+     * `GET /documents/{signature_hash}/verify`
+     */
+    public function verify(string $signatureHash): array
+    {
+        $response = $this->httpClient->get("documents/{$signatureHash}/verify");
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    /**
+     * Public document info (no auth).
+     * `GET /public/documents/{document_id}`
+     */
+    public function publicInfo(string $documentId): array
+    {
+        $response = $this->httpClient->get("public/documents/{$documentId}");
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    /**
+     * Request an access token to be sent to a signer through email.
+     * `PUT /public/documents/{document_id}/send-token` (no auth).
+     */
+    public function sendToken(string $documentId, string $recipient, string $channel = 'email'): array
+    {
+        $response = $this->httpClient->put(
+            "public/documents/{$documentId}/send-token",
+            ['recipient' => $recipient, 'channel' => $channel]
+        );
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    /**
+     * Create a document from a template.
+     * `POST /accounts/{account_id}/templates/{template_id}/documents`
+     *
+     * @param array<int, array<string, mixed>> $signers each entry: { role_id, id, verification_method?, notification_methods? }
+     * @param array<string, mixed>             $options optional `name`, `message`, `editor_fields`, `expires_at`
+     */
+    public function createFromTemplate(string $templateId, array $signers, array $options = []): array
+    {
+        $payload = array_merge(['signers' => $signers], $options);
+
+        $response = $this->httpClient->post(
+            $this->accountPath("templates/{$templateId}/documents"),
+            $payload
+        );
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    /**
+     * Estimate cost of creating a document from a template.
+     * `POST /accounts/{account_id}/templates/{template_id}/documents/estimate-cost`
+     */
+    public function estimateCostFromTemplate(string $templateId, array $signers): array
+    {
+        $response = $this->httpClient->post(
+            $this->accountPath("templates/{$templateId}/documents/estimate-cost"),
+            ['signers' => $signers]
+        );
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    /**
+     * Poll `GET /documents/{id}` until the document reaches a usable status.
+     *
+     * @throws \RuntimeException on terminal failure or timeout
+     */
+    public function waitUntilReady(string $documentId, int $maxWaitSeconds = 60, int $pollIntervalSeconds = 2): array
+    {
+        $start = time();
+
+        while ((time() - $start) < $maxWaitSeconds) {
+            $document = $this->get($documentId);
+            $status = $document['status'] ?? 'unknown';
+
+            if (in_array($status, self::READY_STATUSES, true)) {
+                return $document;
+            }
+
+            if (in_array($status, self::FAILURE_STATUSES, true)) {
+                throw new \RuntimeException("Document processing failed with status: {$status}");
+            }
+
+            sleep($pollIntervalSeconds);
+        }
+
+        throw new \RuntimeException("Timed out after {$maxWaitSeconds}s waiting for document to become ready");
+    }
+
+    /**
+     * `true` if the document is fully signed and certificated.
+     */
+    public function isFullySigned(string $documentId): bool
+    {
+        return ($this->get($documentId)['status'] ?? '') === self::STATUS_CERTIFICATED;
+    }
+
+    /**
+     * Return a signed/total/percentage summary derived from the document's assignment.
+     *
+     * @return array{signed:int,total:int,pending:int,percentage:float}
+     */
     public function getSigningProgress(string $documentId): array
     {
         $document = $this->get($documentId);
-        $signers = $document['signers'] ?? [];
+        $assignment = $document['assignment'] ?? null;
 
+        if ($document['status'] === self::STATUS_CERTIFICATED) {
+            $signers = is_array($assignment['signers'] ?? null) ? $assignment['signers'] : [];
+            $total = count($signers) ?: 1;
+
+            return [
+                'signed' => $total,
+                'total' => $total,
+                'pending' => 0,
+                'percentage' => 100.0,
+            ];
+        }
+
+        $items = is_array($assignment['items'] ?? null) ? $assignment['items'] : [];
+        $signers = is_array($assignment['signers'] ?? null) ? $assignment['signers'] : [];
         $total = count($signers);
-        $signed = 0;
 
+        $completedBySigner = [];
+        foreach ($items as $item) {
+            $signerId = $item['signer']['id'] ?? null;
+            if ($signerId === null) {
+                continue;
+            }
+            if (($item['completed'] ?? false) === true) {
+                $completedBySigner[$signerId] = ($completedBySigner[$signerId] ?? 0) + 1;
+            }
+        }
+
+        $signed = 0;
         foreach ($signers as $signer) {
-            if (($signer['status'] ?? '') === 'signed') {
+            $id = $signer['id'] ?? null;
+            if ($id !== null && ($completedBySigner[$id] ?? 0) > 0) {
                 $signed++;
             }
         }
 
-        $percentage = $total > 0 ? round(($signed / $total) * 100, 2) : 0;
+        $percentage = $total > 0 ? round(($signed / $total) * 100, 2) : 0.0;
 
         return [
             'signed' => $signed,
             'total' => $total,
+            'pending' => max(0, $total - $signed),
             'percentage' => $percentage,
-            'pending' => $total - $signed,
         ];
-    }
-
-    public function createFromTemplate(
-        string $templateId,
-        array $signers,
-        array $options = []
-    ): array {
-        $this->logger->info("Creating document from template", [
-            'template_id' => $templateId,
-            'signers_count' => count($signers),
-        ]);
-
-        $payload = array_merge(['signers' => $signers], $options);
-
-        $response = $this->httpClient->post(
-            "accounts/{$this->config->getAccountId()}/templates/{$templateId}/documents",
-            $payload
-        );
-
-        return $response->getData() ?? [];
-    }
-
-    public function estimateCostFromTemplate(
-        string $templateId,
-        array $signers
-    ): array {
-        $this->logger->debug("Estimating cost for document from template", [
-            'template_id' => $templateId,
-            'signers_count' => count($signers),
-        ]);
-
-        $response = $this->httpClient->post(
-            "accounts/{$this->config->getAccountId()}/templates/{$templateId}/documents/estimate-cost",
-            ['signers' => $signers]
-        );
-
-        return $response->getData() ?? [];
-    }
-
-    public function verify(string $hash): array
-    {
-        $this->logger->debug("Verifying document by hash", ['hash' => $hash]);
-
-        $response = $this->httpClient->get("documents/{$hash}/verify");
-
-        return $response->getData() ?? [];
     }
 
     private function validateUpload(string $filePath): void
     {
-        if (!file_exists($filePath)) {
-            throw new ValidationException("File not found", ['file_path' => $filePath]);
+        if (!is_file($filePath)) {
+            throw new ValidationException('File not found', ['file_path' => $filePath]);
         }
 
-        $extension = strtolower(substr($filePath, -4));
-        if ($extension !== '.pdf') {
-            throw new ValidationException("Only PDF files are supported", ['file_path' => $filePath]);
+        if (strtolower(pathinfo($filePath, PATHINFO_EXTENSION)) !== 'pdf') {
+            throw new ValidationException('Only PDF files are supported', ['file_path' => $filePath]);
         }
 
-        $fileSize = filesize($filePath);
-        $maxSize = 50 * 1024 * 1024;
-
-        if ($fileSize > $maxSize) {
-            throw new ValidationException("File size exceeds maximum allowed (50MB)", [
-                'file_size' => $fileSize,
-                'max_size' => $maxSize,
+        $size = filesize($filePath);
+        if ($size !== false && $size > self::MAX_UPLOAD_BYTES) {
+            throw new ValidationException('File size exceeds the 25 MB API limit', [
+                'file_size' => $size,
+                'max_size' => self::MAX_UPLOAD_BYTES,
             ]);
+        }
+    }
+
+    private function assertArtifact(string $artifact): void
+    {
+        $allowed = [
+            self::ARTIFACT_ORIGINAL,
+            self::ARTIFACT_CERTIFICATED,
+            self::ARTIFACT_CERTIFICATE_PAGE,
+            self::ARTIFACT_BUNDLE,
+        ];
+
+        if (!in_array($artifact, $allowed, true)) {
+            throw new ValidationException("Unknown artifact '{$artifact}'", ['allowed' => $allowed]);
         }
     }
 }

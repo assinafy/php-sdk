@@ -25,6 +25,12 @@ abstract class AbstractResource
         $this->logger = $logger ?? new NullLogger();
     }
 
+    /**
+     * Unwrap the `data` envelope returned by the Assinafy API.
+     *
+     * Every endpoint responds with `{ status, message, data }`. This helper
+     * returns the inner `data` when present, otherwise the raw payload.
+     */
     protected function extractData(array $response): array
     {
         if (isset($response['data']) && is_array($response['data'])) {
@@ -34,12 +40,10 @@ abstract class AbstractResource
         return $response;
     }
 
-    protected function normalizeId(array $data): array
+    protected function accountPath(string $suffix = ''): string
     {
-        if (!isset($data['document_id']) && isset($data['id'])) {
-            $data['document_id'] = $data['id'];
-        }
+        $path = 'accounts/' . $this->config->getAccountId();
 
-        return $data;
+        return $suffix === '' ? $path : $path . '/' . ltrim($suffix, '/');
     }
 }

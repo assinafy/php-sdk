@@ -25,9 +25,15 @@ assinafy-php-sdk/
 │   │   ├── DocumentResource.php
 │   │   ├── SignerResource.php
 │   │   ├── AssignmentResource.php
-│   │   └── WebhookResource.php
+│   │   ├── TemplateResource.php
+│   │   ├── WebhookResource.php
+│   │   ├── AuthResource.php
+│   │   └── SignerSessionResource.php
 │   └── Support/                     # Helper classes
 │       └── WebhookVerifier.php
+├── tests/                           # PHPUnit test suites
+│   ├── Unit/                        #   - mocked HTTP, no network
+│   └── Integration/                 #   - opt-in live API tests
 ├── docs/                            # Documentation
 │   ├── index.php
 │   ├── EXAMPLES.md
@@ -63,10 +69,13 @@ $client->documents()->upload(...);
 
 Resource classes encapsulate domain logic for each API resource:
 
-- **DocumentResource**: Document operations
-- **SignerResource**: Signer management
-- **AssignmentResource**: Signature requests
-- **WebhookResource**: Webhook management
+- **DocumentResource**: Document operations, including artifacts, public endpoints, and template-driven creation
+- **SignerResource**: Workspace signer CRUD
+- **AssignmentResource**: Signature requests (virtual + collect), cost estimation, resend, expiration reset
+- **TemplateResource**: Template listing and retrieval
+- **WebhookResource**: Webhook subscription upsert / read / delete
+- **AuthResource**: Login, social login, API-key lifecycle, password reset / change
+- **SignerSessionResource**: Signer-facing endpoints authenticated with a `signer-access-code`
 
 **Pattern**: Each resource extends `AbstractResource` and follows the same structure.
 

@@ -7,8 +7,10 @@ namespace Assinafy\SDK;
 use Assinafy\SDK\Http\GuzzleHttpClient;
 use Assinafy\SDK\Http\HttpClientInterface;
 use Assinafy\SDK\Resources\AssignmentResource;
+use Assinafy\SDK\Resources\AuthResource;
 use Assinafy\SDK\Resources\DocumentResource;
 use Assinafy\SDK\Resources\SignerResource;
+use Assinafy\SDK\Resources\SignerSessionResource;
 use Assinafy\SDK\Resources\TemplateResource;
 use Assinafy\SDK\Resources\WebhookResource;
 use Assinafy\SDK\Support\WebhookVerifier;
@@ -26,6 +28,8 @@ class AssinafyClient
     private ?AssignmentResource $assignments = null;
     private ?TemplateResource $templates = null;
     private ?WebhookResource $webhooks = null;
+    private ?AuthResource $auth = null;
+    private ?SignerSessionResource $signerSession = null;
     private ?WebhookVerifier $webhookVerifier = null;
 
     public function __construct(
@@ -41,7 +45,7 @@ class AssinafyClient
     public static function create(
         string $apiKey,
         string $accountId,
-        string $baseUrl = 'https://api.assinafy.com.br/v1',
+        string $baseUrl = Configuration::DEFAULT_BASE_URL,
         ?string $webhookSecret = null
     ): self {
         $config = new Configuration($apiKey, $accountId, $baseUrl, $webhookSecret);
@@ -98,6 +102,24 @@ class AssinafyClient
         return $this->webhooks;
     }
 
+    public function auth(): AuthResource
+    {
+        if ($this->auth === null) {
+            $this->auth = new AuthResource($this->httpClient, $this->config, $this->logger);
+        }
+
+        return $this->auth;
+    }
+
+    public function signerSession(): SignerSessionResource
+    {
+        if ($this->signerSession === null) {
+            $this->signerSession = new SignerSessionResource($this->httpClient, $this->config, $this->logger);
+        }
+
+        return $this->signerSession;
+    }
+
     public function webhookVerifier(): WebhookVerifier
     {
         if ($this->webhookVerifier === null) {
@@ -107,21 +129,40 @@ class AssinafyClient
         return $this->webhookVerifier;
     }
 
+    /**
+     * High-level helper: upload a PDF, create signers if needed, then dispatch a virtual
+     * assignment to all of them.
+     *
+     * Each entry in `$signers` may be either:
+     *   - an existing signer ID (string), or
+     *   - an associative array `{ full_name (or name), email?, whatsapp_phone_number? (or phone)?,
+     *     verification_method?, notification_methods? }`
+     *
+     * Signers without an `id` are created via the API; signers found by email (when an email
+     * is supplied) are reused. Returns the created document, the assignment, and the resolved
+     * signer IDs.
+     *
+     * @param array<int, string|array<string, mixed>> $signers
+     * @return array{document: array<string, mixed>, assignment: array<string, mixed>, signer_ids: array<int, string>}
+     */
     public function uploadAndRequestSignatures(
         string $filePath,
-        string $fileName,
         array $signers,
-        string $message = '',
-        array $metadata = [],
+        ?string $message = null,
+        ?string $expiresAt = null,
         bool $waitForReady = true
     ): array {
-        $this->logger->info("Starting document upload and signature request workflow", [
-            'file_name' => $fileName,
+        $this->logger->info('Upload + signature workflow starting', [
+            'file' => $filePath,
             'signers_count' => count($signers),
         ]);
 
-        $document = $this->documents()->upload($filePath, $fileName, $metadata);
-        $documentId = $document['document_id'];
+        $document = $this->documents()->upload($filePath);
+        $documentId = $document['id'] ?? null;
+
+        if (!is_string($documentId) || $documentId === '') {
+            throw new \RuntimeException('Upload succeeded but no document id returned');
+        }
 
         if ($waitForReady) {
             $this->documents()->waitUntilReady($documentId);
@@ -129,33 +170,68 @@ class AssinafyClient
 
         $signerIds = [];
         foreach ($signers as $signer) {
-            $result = $this->signers()->create(
-                $signer['name'],
-                $signer['email'],
-                $signer['cpf'] ?? null,
-                $signer['phone'] ?? null,
-                $signer['metadata'] ?? []
-            );
+            $signerIds[] = $this->resolveSignerId($signer);
+        }
 
-            $signerIds[] = $result['data']['id'];
+        $options = [];
+        if ($message !== null) {
+            $options['message'] = $message;
+        }
+        if ($expiresAt !== null) {
+            $options['expires_at'] = $expiresAt;
         }
 
         $assignment = $this->assignments()->create(
             $documentId,
             $signerIds,
-            'virtual',
-            $message
+            \Assinafy\SDK\Resources\AssignmentResource::METHOD_VIRTUAL,
+            $options
         );
-
-        $this->logger->info("Document upload and signature request completed successfully", [
-            'document_id' => $documentId,
-        ]);
 
         return [
             'document' => $document,
             'assignment' => $assignment,
             'signer_ids' => $signerIds,
         ];
+    }
+
+    /**
+     * Resolve a signer description to an ID, creating/finding the signer as needed.
+     *
+     * @param string|array<string, mixed> $signer
+     */
+    private function resolveSignerId($signer): string
+    {
+        if (is_string($signer)) {
+            return $signer;
+        }
+
+        if (isset($signer['id']) && is_string($signer['id']) && $signer['id'] !== '') {
+            return $signer['id'];
+        }
+
+        $fullName = (string) ($signer['full_name'] ?? $signer['name'] ?? '');
+        $email = $signer['email'] ?? null;
+        $phone = $signer['whatsapp_phone_number'] ?? $signer['phone'] ?? null;
+
+        if ($email !== null) {
+            $existing = $this->signers()->findByEmail((string) $email);
+            if ($existing !== null && isset($existing['id'])) {
+                return (string) $existing['id'];
+            }
+        }
+
+        $created = $this->signers()->create(
+            $fullName,
+            $email !== null ? (string) $email : null,
+            $phone !== null ? (string) $phone : null
+        );
+
+        if (!isset($created['id']) || !is_string($created['id'])) {
+            throw new \RuntimeException('Signer creation returned no id');
+        }
+
+        return $created['id'];
     }
 
     public function getConfig(): Configuration
