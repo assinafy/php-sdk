@@ -28,8 +28,12 @@ abstract class AbstractResource
     /**
      * Unwrap the `data` envelope returned by the Assinafy API.
      *
-     * Every endpoint responds with `{ status, message, data }`. This helper
-     * returns the inner `data` when present, otherwise the raw payload.
+     * Every endpoint responds with `{ status, message, data, meta? }`. Single-item
+     * methods (`get`, `create`, `update`, …) call this helper and return just the
+     * inner `data` so callers can work with the resource directly. List endpoints
+     * intentionally do NOT unwrap — they return the full envelope so the caller
+     * keeps access to `meta` (pagination cursor, total count, …) alongside the
+     * `data` array of items. Read the docblock on each `list()` for the exact shape.
      */
     protected function extractData(array $response): array
     {
@@ -42,6 +46,14 @@ abstract class AbstractResource
 
     protected function accountPath(string $suffix = ''): string
     {
+        if ($this->config->isPublic()) {
+            throw new \RuntimeException(
+                'Account-scoped endpoints require an API key and account ID. '
+                . 'This client was built with Configuration::forPublic() — use a full '
+                . 'Configuration once you have credentials.'
+            );
+        }
+
         $path = 'accounts/' . $this->config->getAccountId();
 
         return $suffix === '' ? $path : $path . '/' . ltrim($suffix, '/');

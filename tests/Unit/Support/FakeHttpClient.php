@@ -49,14 +49,14 @@ final class FakeHttpClient implements HttpClientInterface
         return $this->record('GET', $uri, ['query' => $params, 'headers' => $headers]);
     }
 
-    public function post(string $uri, array $data = [], array $headers = []): Response
+    public function post(string $uri, array $data = [], array $headers = [], array $query = []): Response
     {
-        return $this->record('POST', $uri, ['body' => $data, 'headers' => $headers]);
+        return $this->record('POST', $uri, ['body' => $data, 'headers' => $headers, 'query' => $query]);
     }
 
-    public function put(string $uri, array $data = [], array $headers = []): Response
+    public function put(string $uri, array $data = [], array $headers = [], array $query = []): Response
     {
-        return $this->record('PUT', $uri, ['body' => $data, 'headers' => $headers]);
+        return $this->record('PUT', $uri, ['body' => $data, 'headers' => $headers, 'query' => $query]);
     }
 
     public function delete(string $uri, array $headers = []): Response

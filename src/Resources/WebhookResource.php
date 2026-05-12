@@ -8,9 +8,10 @@ namespace Assinafy\SDK\Resources;
  * Webhooks resource — manages the workspace's single webhook subscription.
  *
  * The Assinafy webhook subscription is an upsert: `PUT` creates or replaces it,
- * `GET` returns the current configuration, `DELETE` removes it. Although these
- * endpoints are not currently rendered in the public docs UI they are part of
- * the v1 API surface and respond at the documented paths.
+ * `GET` returns the current configuration, `DELETE` removes it. These endpoints
+ * are not currently rendered in the public docs UI (`https://api.assinafy.com.br/v1/docs`)
+ * but they are part of the v1 API surface and respond at the documented paths;
+ * the live integration test exercises them on every release.
  */
 class WebhookResource extends AbstractResource
 {
@@ -38,7 +39,6 @@ class WebhookResource extends AbstractResource
             'url' => $url,
             'email' => $email,
             'events' => $events !== [] ? $events : self::DEFAULT_EVENTS,
-            'is_active' => true,
         ];
 
         $response = $this->httpClient->put(

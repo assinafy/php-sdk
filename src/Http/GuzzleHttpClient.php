@@ -42,20 +42,20 @@ class GuzzleHttpClient implements HttpClientInterface
         ]);
     }
 
-    public function post(string $uri, array $data = [], array $headers = []): Response
+    public function post(string $uri, array $data = [], array $headers = [], array $query = []): Response
     {
-        return $this->request('POST', $uri, [
+        return $this->request('POST', $uri, $this->withOptionalQuery([
             'json' => $data,
             'headers' => $this->withJsonHeaders($headers),
-        ]);
+        ], $query));
     }
 
-    public function put(string $uri, array $data = [], array $headers = []): Response
+    public function put(string $uri, array $data = [], array $headers = [], array $query = []): Response
     {
-        return $this->request('PUT', $uri, [
+        return $this->request('PUT', $uri, $this->withOptionalQuery([
             'json' => $data,
             'headers' => $this->withJsonHeaders($headers),
-        ]);
+        ], $query));
     }
 
     public function delete(string $uri, array $headers = []): Response
@@ -116,6 +116,20 @@ class GuzzleHttpClient implements HttpClientInterface
     private function withJsonHeaders(array $headers): array
     {
         return array_merge(['Content-Type' => 'application/json'], $headers);
+    }
+
+    /**
+     * @param array<string, mixed>  $options
+     * @param array<string, scalar> $query
+     * @return array<string, mixed>
+     */
+    private function withOptionalQuery(array $options, array $query): array
+    {
+        if ($query !== []) {
+            $options['query'] = $query;
+        }
+
+        return $options;
     }
 
     private function request(string $method, string $uri, array $options = []): Response

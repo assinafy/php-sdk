@@ -5,6 +5,51 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-05-12
+
+Second pass against `https://api.assinafy.com.br/v1/docs` — fix the drift and rough edges
+found during the 1.2.0 audit. No breaking changes to the public resource API.
+
+### Added
+
+- **`Configuration::forPublic()`** and **`AssinafyClient::forAuth()`** — build a client for
+  the unauthenticated surface of the API without having to fabricate an API key / account
+  ID. Use it to call `auth()->login()`, `requestPasswordReset()`, `resetPassword()`,
+  `socialLogin()` and the public document endpoints (`verify`, `publicInfo`, `sendToken`).
+  Account-scoped resources called on a public client now raise a clear `RuntimeException`
+  instead of silently sending a placeholder account ID and getting a 401 from the API.
+- **`DocumentResource::SEND_TOKEN_CHANNEL_EMAIL`** constant + allow-list validation on
+  `sendToken()` — typos like `'whatsapp'` now raise `ValidationException` up front
+  instead of being forwarded blindly.
+- **Query-string parameter** on `HttpClientInterface::post()` / `put()` — lets resources
+  send query params alongside a JSON body without manually concatenating into the URI.
+  Backward-compatible: existing callers continue to work, the new `$query` arg is the
+  fourth positional and defaults to `[]`.
+
+### Changed
+
+- **`SignerSessionResource::confirmData()`** now passes `signer-access-code` through the
+  HTTP client's `$query` channel instead of building the URI by hand with `rawurlencode()`.
+  Behavior is identical (still goes on the query string) but it's consistent with the
+  rest of the signer-session methods and robust against future endpoint params.
+- **`WebhookResource::register()`** no longer sends `is_active: true`. The field is not
+  part of the API contract; dropping it removes a possible 422 risk and aligns the
+  payload with the documented envelope.
+- **`SignerResource::normalizePhone()`** — removed a dead ternary (`($hasPlus ? '+' : '+')`)
+  that always evaluated to `'+'`. The normalized output is unchanged.
+- **`AbstractResource::extractData()` docblock** clarifies the list-vs-single envelope
+  convention; every `list()` method now declares the `{data, meta}` shape it returns.
+- **`TemplateResource::get()` docblock** explicitly notes that `GET /accounts/{id}/templates/{id}`
+  is part of the v1 API even though it's not currently rendered in the public docs UI.
+- **`WebhookResource` class docblock** points to the live integration suite that exercises
+  the (undocumented) webhook subscription endpoints on every release.
+
+### Fixed
+
+- **Auth bootstrap chicken-and-egg** — `Configuration::__construct()` no longer requires
+  callers to invent dummy credentials just to reach `auth()->login()`. Use
+  `AssinafyClient::forAuth()`.
+
 ## [1.2.0] - 2026-05-11
 
 Full audit against `https://api.assinafy.com.br/v1/docs` verified against the live API.
@@ -138,6 +183,7 @@ All new endpoints from the official API catalog added without breaking existing 
 - **PHP 8.0+**: Full support with named arguments
 - **PHP 8.1+**: Recommended for best developer experience
 
+[1.3.0]: https://github.com/assinafy/php-sdk/releases/tag/v1.3.0
 [1.2.0]: https://github.com/assinafy/php-sdk/releases/tag/v1.2.0
 [1.1.1]: https://github.com/assinafy/php-sdk/releases/tag/v1.1.1
 [1.1.0]: https://github.com/assinafy/php-sdk/releases/tag/v1.1.0

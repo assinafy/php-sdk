@@ -30,7 +30,11 @@ final class WebhookResourceTest extends TestCase
         $this->assertSame(WebhookResource::DEFAULT_EVENTS, $call['body']['events']);
         $this->assertSame('https://x', $call['body']['url']);
         $this->assertSame('a@b.com', $call['body']['email']);
-        $this->assertTrue($call['body']['is_active']);
+        $this->assertArrayNotHasKey(
+            'is_active',
+            $call['body'],
+            'is_active is not part of the API contract; do not send it'
+        );
     }
 
     public function testRegisterRespectsCustomEvents(): void

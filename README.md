@@ -87,6 +87,36 @@ $client = AssinafyClient::fromArray([
 ]);
 ```
 
+### Bootstrapping without credentials
+
+When you don't yet have an API key (e.g. you're calling `auth()->login(...)` to obtain one
+or hitting a public document endpoint), use `AssinafyClient::forAuth()`:
+
+```php
+$bootstrap = AssinafyClient::forAuth();              // or ::forAuth(Configuration::SANDBOX_BASE_URL)
+$session   = $bootstrap->auth()->login('user@example.com', 'secret');
+$apiKey    = $bootstrap->auth()->generateApiKey($session['access_token'], 'secret');
+
+// Then build the real client with the credentials you just retrieved:
+$client = AssinafyClient::create($apiKey['key'], $session['accounts'][0]['id']);
+```
+
+Calling an account-scoped resource (`signers()`, `documents()`, `assignments()`, …) on a
+`forAuth()` client raises `RuntimeException` so misuse is caught at the call site rather
+than as an obscure 401 from the API.
+
+### Response shape: single-item vs list
+
+Single-item methods (`get()`, `create()`, `update()`, `verify()`, …) return the inner
+`data` object directly. List methods return the full envelope so you keep access to
+pagination metadata:
+
+```php
+$page = $client->documents()->list(1, 20);
+// $page['data'] => array of document objects
+// $page['meta'] => pagination cursor / totals
+```
+
 ## Endpoint coverage
 
 Every endpoint exposed by the documented API is reachable through the SDK. Resource accessors on `$client` are singletons (lazy-instantiated).
@@ -336,7 +366,7 @@ vendor/bin/phpstan analyse
 vendor/bin/phpcs
 ```
 
-**Current status**: PSR-12 compliant · PHPStan level 8 (zero errors) · 66 unit tests + 6 live integration tests · PHP 7.4 – 8.4 compatible.
+**Current status**: PSR-12 compliant · PHPStan level 8 (zero errors) · 73 unit tests + 6 live integration tests · PHP 7.4 – 8.4 compatible.
 
 ## License
 

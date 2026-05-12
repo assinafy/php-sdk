@@ -34,6 +34,32 @@ final class AssinafyClientTest extends TestCase
         $this->assertInstanceOf(WebhookVerifier::class, $client->webhookVerifier());
     }
 
+    public function testForAuthBuildsPublicClient(): void
+    {
+        $client = AssinafyClient::forAuth();
+
+        $this->assertTrue($client->getConfig()->isPublic());
+        $this->assertSame(Configuration::DEFAULT_BASE_URL, $client->getConfig()->getBaseUrl());
+        $this->assertInstanceOf(AuthResource::class, $client->auth());
+    }
+
+    public function testForAuthAcceptsCustomBaseUrl(): void
+    {
+        $client = AssinafyClient::forAuth(Configuration::SANDBOX_BASE_URL);
+
+        $this->assertSame(Configuration::SANDBOX_BASE_URL, $client->getConfig()->getBaseUrl());
+    }
+
+    public function testAccountScopedResourceFailsOnPublicClient(): void
+    {
+        $client = new AssinafyClient(Configuration::forPublic(), new FakeHttpClient());
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/Account-scoped endpoints require/');
+
+        $client->signers()->list();
+    }
+
     public function testUploadAndRequestSignaturesEndToEnd(): void
     {
         $http = new FakeHttpClient();

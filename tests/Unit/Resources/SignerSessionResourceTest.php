@@ -66,8 +66,8 @@ final class SignerSessionResourceTest extends TestCase
 
         $call = $this->http->lastCall();
         $this->assertSame('PUT', $call['method']);
-        $this->assertStringContainsString('documents/doc1/signers/confirm-data', $call['uri']);
-        $this->assertStringContainsString('signer-access-code=CODE%20WITH%20SPACE', $call['uri']);
+        $this->assertSame('documents/doc1/signers/confirm-data', $call['uri']);
+        $this->assertSame(['signer-access-code' => 'CODE WITH SPACE'], $call['query']);
         $this->assertSame(['email' => 'a@b.com', 'has_accepted_terms' => true], $call['body']);
     }
 

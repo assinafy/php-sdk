@@ -57,6 +57,23 @@ class AssinafyClient
         return new self(Configuration::fromArray($config));
     }
 
+    /**
+     * Build a client for the unauthenticated surface of the API — the place where
+     * you don't yet have an API key.
+     *
+     * Lets you call `$client->auth()->login(...)`, `requestPasswordReset(...)`,
+     * `resetPassword(...)`, `socialLogin(...)`, and the public document endpoints
+     * (`verify`, `publicInfo`, `sendToken`) without having to fabricate credentials
+     * just to satisfy the Configuration constructor.
+     *
+     * Calling an account-scoped resource on a public client (e.g. `$client->signers()->list()`)
+     * raises a `\RuntimeException` with a clear message — see {@see Configuration::forPublic()}.
+     */
+    public static function forAuth(string $baseUrl = Configuration::DEFAULT_BASE_URL): self
+    {
+        return new self(Configuration::forPublic($baseUrl));
+    }
+
     public function documents(): DocumentResource
     {
         if ($this->documents === null) {

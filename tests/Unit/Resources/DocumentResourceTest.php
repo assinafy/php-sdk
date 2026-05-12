@@ -139,6 +139,12 @@ final class DocumentResourceTest extends TestCase
         $this->assertSame(['recipient' => 'a@b.com', 'channel' => 'email'], $call['body']);
     }
 
+    public function testSendTokenRejectsUnknownChannel(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->documents->sendToken('doc1', 'a@b.com', 'whatsapp');
+    }
+
     public function testDelete(): void
     {
         $this->http->queueJson(200, []);

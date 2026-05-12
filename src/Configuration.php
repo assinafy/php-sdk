@@ -6,9 +6,16 @@ namespace Assinafy\SDK;
 
 class Configuration
 {
-    public const SDK_VERSION = '1.2.0';
+    public const SDK_VERSION = '1.3.0';
     public const DEFAULT_BASE_URL = 'https://api.assinafy.com.br/v1';
     public const SANDBOX_BASE_URL = 'https://sandbox.assinafy.com.br/v1';
+
+    /**
+     * Sentinel placeholder used by {@see self::forPublic()} so the SDK can talk to
+     * unauthenticated endpoints (`/login`, `/authentication/*`, the public document
+     * routes) without forcing the caller to fabricate an API key / account ID.
+     */
+    private const PUBLIC_PLACEHOLDER = '__public__';
 
     private string $baseUrl;
     private string $apiKey;
@@ -46,6 +53,31 @@ class Configuration
             $config['timeout'] ?? 30,
             $config['connect_timeout'] ?? $config['connectTimeout'] ?? 10
         );
+    }
+
+    /**
+     * Configuration for the unauthenticated surface of the API.
+     *
+     * Use this when bootstrapping a session — e.g. before you have an API key:
+     *
+     * ```php
+     * $client = new AssinafyClient(Configuration::forPublic());
+     * $session = $client->auth()->login('user@example.com', 'secret');
+     * ```
+     *
+     * The sentinel API key / account ID are sent on the `X-Api-Key` header for
+     * completeness, but unauthenticated endpoints ignore them. Account-scoped
+     * resources will fail with a clear runtime error if called on a public config.
+     */
+    public static function forPublic(string $baseUrl = self::DEFAULT_BASE_URL): self
+    {
+        return new self(self::PUBLIC_PLACEHOLDER, self::PUBLIC_PLACEHOLDER, $baseUrl);
+    }
+
+    public function isPublic(): bool
+    {
+        return $this->apiKey === self::PUBLIC_PLACEHOLDER
+            && $this->accountId === self::PUBLIC_PLACEHOLDER;
     }
 
     public function getBaseUrl(): string

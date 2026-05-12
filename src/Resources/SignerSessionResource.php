@@ -67,13 +67,18 @@ class SignerSessionResource extends AbstractResource
      * Confirm (or set) the signer's email / WhatsApp / terms acceptance.
      * `PUT /documents/{documentId}/signers/confirm-data?signer-access-code={code}`
      *
+     * The `signer-access-code` is sent as a query parameter, the rest of the data
+     * goes in the JSON body.
+     *
      * @param array<string, mixed> $data subset of { email, whatsapp_phone_number, has_accepted_terms }
      */
     public function confirmData(string $documentId, string $accessCode, array $data): array
     {
         $response = $this->httpClient->put(
-            "documents/{$documentId}/signers/confirm-data?signer-access-code=" . rawurlencode($accessCode),
-            $data
+            "documents/{$documentId}/signers/confirm-data",
+            $data,
+            [],
+            ['signer-access-code' => $accessCode]
         );
 
         return $this->extractData($response->getData() ?? []);

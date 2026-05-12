@@ -19,6 +19,11 @@ class DocumentResource extends AbstractResource
     public const ARTIFACT_CERTIFICATE_PAGE = 'certificate-page';
     public const ARTIFACT_BUNDLE = 'bundle';
 
+    public const SEND_TOKEN_CHANNEL_EMAIL = 'email';
+
+    /** Channels accepted by `PUT /public/documents/{id}/send-token`. */
+    private const SEND_TOKEN_CHANNELS = [self::SEND_TOKEN_CHANNEL_EMAIL];
+
     public const STATUS_UPLOADING = 'uploading';
     public const STATUS_UPLOADED = 'uploaded';
     public const STATUS_METADATA_PROCESSING = 'metadata_processing';
@@ -86,6 +91,8 @@ class DocumentResource extends AbstractResource
      * `GET /accounts/{account_id}/documents`
      *
      * @param array<string, scalar> $filters optional `status`, `method`, `search`, `sort`
+     * @return array{data?: array<int, array<string, mixed>>, meta?: array<string, mixed>} full
+     *     envelope — items live under `['data']`, pagination under `['meta']`.
      */
     public function list(int $page = 1, int $perPage = 20, array $filters = []): array
     {
@@ -196,9 +203,23 @@ class DocumentResource extends AbstractResource
     /**
      * Request an access token to be sent to a signer through email.
      * `PUT /public/documents/{document_id}/send-token` (no auth).
+     *
+     * Only the `email` channel is documented today. Pass {@see SEND_TOKEN_CHANNEL_EMAIL}
+     * or one of the constants exposed here — arbitrary strings are rejected up front
+     * so a typo doesn't get silently forwarded to the API.
      */
-    public function sendToken(string $documentId, string $recipient, string $channel = 'email'): array
-    {
+    public function sendToken(
+        string $documentId,
+        string $recipient,
+        string $channel = self::SEND_TOKEN_CHANNEL_EMAIL
+    ): array {
+        if (!in_array($channel, self::SEND_TOKEN_CHANNELS, true)) {
+            throw new ValidationException(
+                "Unsupported send-token channel '{$channel}'",
+                ['allowed' => self::SEND_TOKEN_CHANNELS]
+            );
+        }
+
         $response = $this->httpClient->put(
             "public/documents/{$documentId}/send-token",
             ['recipient' => $recipient, 'channel' => $channel]

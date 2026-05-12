@@ -6,14 +6,35 @@ namespace Assinafy\SDK\Http;
 
 interface HttpClientInterface
 {
+    /**
+     * @param array<string, scalar> $params
+     * @param array<string, string> $headers
+     */
     public function get(string $uri, array $params = [], array $headers = []): Response;
 
-    public function post(string $uri, array $data = [], array $headers = []): Response;
+    /**
+     * @param array<string, mixed>  $data    JSON body
+     * @param array<string, string> $headers
+     * @param array<string, scalar> $query   optional query-string parameters (e.g. `signer-access-code`)
+     */
+    public function post(string $uri, array $data = [], array $headers = [], array $query = []): Response;
 
-    public function put(string $uri, array $data = [], array $headers = []): Response;
+    /**
+     * @param array<string, mixed>  $data    JSON body
+     * @param array<string, string> $headers
+     * @param array<string, scalar> $query   optional query-string parameters (e.g. `signer-access-code`)
+     */
+    public function put(string $uri, array $data = [], array $headers = [], array $query = []): Response;
 
+    /**
+     * @param array<string, string> $headers
+     */
     public function delete(string $uri, array $headers = []): Response;
 
+    /**
+     * @param array<string, mixed>  $data
+     * @param array<string, string> $headers
+     */
     public function uploadFile(string $uri, string $filePath, array $data = [], array $headers = []): Response;
 
     /**

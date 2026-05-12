@@ -64,6 +64,9 @@ class SignerResource extends AbstractResource
     /**
      * List signers in the workspace.
      * `GET /accounts/{account_id}/signers`
+     *
+     * @return array{data?: array<int, array<string, mixed>>, meta?: array<string, mixed>} full
+     *     envelope — items live under `['data']`, pagination under `['meta']`.
      */
     public function list(int $page = 1, int $perPage = 20, ?string $search = null): array
     {
@@ -146,19 +149,17 @@ class SignerResource extends AbstractResource
 
     /**
      * Normalize a phone number into E.164 (e.g. `+5548999990000`).
-     * If the input already starts with `+`, it's preserved; otherwise we keep digits only
-     * and prepend `+`. This matches the format the Assinafy API expects for `whatsapp_phone_number`.
+     * Non-digit characters are stripped and `+` is prepended; the API expects this
+     * format for `whatsapp_phone_number`.
      */
     private function normalizePhone(string $phone): string
     {
-        $trimmed = trim($phone);
-        $hasPlus = strncmp($trimmed, '+', 1) === 0;
-        $digits = preg_replace('/\D+/', '', $trimmed) ?? '';
+        $digits = preg_replace('/\D+/', '', trim($phone)) ?? '';
 
         if ($digits === '') {
             throw new ValidationException('Invalid phone number', ['phone' => $phone]);
         }
 
-        return ($hasPlus ? '+' : '+') . $digits;
+        return '+' . $digits;
     }
 }

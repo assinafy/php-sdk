@@ -66,4 +66,25 @@ final class ConfigurationTest extends TestCase
         $this->expectException(InvalidArgumentException::class);
         new Configuration('k', '');
     }
+
+    public function testForPublicProducesPublicConfig(): void
+    {
+        $config = Configuration::forPublic();
+
+        $this->assertTrue($config->isPublic());
+        $this->assertSame(Configuration::DEFAULT_BASE_URL, $config->getBaseUrl());
+    }
+
+    public function testForPublicRespectsBaseUrlOverride(): void
+    {
+        $config = Configuration::forPublic(Configuration::SANDBOX_BASE_URL);
+
+        $this->assertTrue($config->isPublic());
+        $this->assertSame(Configuration::SANDBOX_BASE_URL, $config->getBaseUrl());
+    }
+
+    public function testStandardConfigIsNotPublic(): void
+    {
+        $this->assertFalse((new Configuration('k', 'a'))->isPublic());
+    }
 }
