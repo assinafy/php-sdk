@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Assinafy\SDK\Tests\Integration;
 
 use Assinafy\SDK\AssinafyClient;
+use Assinafy\SDK\Configuration;
 use Assinafy\SDK\Resources\DocumentResource;
 use PHPUnit\Framework\TestCase;
 
@@ -12,8 +13,11 @@ use PHPUnit\Framework\TestCase;
  * End-to-end integration tests against the live Assinafy API.
  *
  * Enabled when ASSINAFY_INTEGRATION=1 in the environment. Requires:
- *   ASSINAFY_API_KEY    – production API key
+ *   ASSINAFY_API_KEY    – API key for the target environment
  *   ASSINAFY_ACCOUNT_ID – workspace account id
+ *   ASSINAFY_BASE_URL   – optional, defaults to the production URL. Set to
+ *                         Configuration::SANDBOX_BASE_URL (https://sandbox.assinafy.com.br/v1)
+ *                         to exercise the sandbox instead.
  *
  * These tests perform real network calls and may incur credit costs.
  */
@@ -36,7 +40,12 @@ final class LiveApiTest extends TestCase
             $this->markTestSkipped('Set ASSINAFY_API_KEY and ASSINAFY_ACCOUNT_ID to run live API tests');
         }
 
-        $this->client = AssinafyClient::create($apiKey, $accountId);
+        $baseUrl = (string) getenv('ASSINAFY_BASE_URL');
+        if ($baseUrl === '') {
+            $baseUrl = Configuration::DEFAULT_BASE_URL;
+        }
+
+        $this->client = AssinafyClient::create($apiKey, $accountId, $baseUrl);
     }
 
     protected function tearDown(): void
