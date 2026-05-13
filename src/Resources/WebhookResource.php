@@ -31,14 +31,19 @@ class WebhookResource extends AbstractResource
      * Register or replace the workspace webhook subscription.
      * `PUT /accounts/{account_id}/webhooks/subscriptions`
      *
+     * The API requires `is_active` in the request body (the live sandbox returns
+     * `O atributo "is_active" é obrigatório.` if it's missing) even though the
+     * field is not currently rendered in the public docs UI.
+     *
      * @param array<int, string> $events when empty, {@see DEFAULT_EVENTS} is sent
      */
-    public function register(string $url, string $email, array $events = []): array
+    public function register(string $url, string $email, array $events = [], bool $isActive = true): array
     {
         $payload = [
             'url' => $url,
             'email' => $email,
             'events' => $events !== [] ? $events : self::DEFAULT_EVENTS,
+            'is_active' => $isActive,
         ];
 
         $response = $this->httpClient->put(
@@ -63,13 +68,52 @@ class WebhookResource extends AbstractResource
     }
 
     /**
-     * Delete the webhook subscription.
-     * `DELETE /accounts/{account_id}/webhooks/subscriptions`
+     * Disable delivery without losing the subscription configuration.
+     *
+     * The v1 API has no `DELETE /accounts/{id}/webhooks/subscriptions` route (it
+     * returns 404). The way to stop receiving events is to flip `is_active` to
+     * `false` via `PUT`. The URL / email / events stay on file so the subscription
+     * can be re-enabled later with {@see activate()} without re-supplying them.
      */
-    public function delete(): array
+    public function deactivate(): array
     {
-        $response = $this->httpClient->delete($this->accountPath('webhooks/subscriptions'));
+        $current = $this->get();
 
-        return $response->getData() ?? [];
+        if ($current === null) {
+            throw new \RuntimeException('No webhook subscription is configured — nothing to deactivate.');
+        }
+
+        return $this->register(
+            (string) ($current['url'] ?? ''),
+            (string) ($current['email'] ?? ''),
+            is_array($current['events'] ?? null) && $current['events'] !== []
+                ? $current['events']
+                : self::DEFAULT_EVENTS,
+            false
+        );
+    }
+
+    /**
+     * Re-enable delivery on the existing subscription.
+     *
+     * Counterpart of {@see deactivate()}; flips `is_active` back to `true`
+     * via `PUT` while preserving the configured URL / email / events.
+     */
+    public function activate(): array
+    {
+        $current = $this->get();
+
+        if ($current === null) {
+            throw new \RuntimeException('No webhook subscription is configured — call register() first.');
+        }
+
+        return $this->register(
+            (string) ($current['url'] ?? ''),
+            (string) ($current['email'] ?? ''),
+            is_array($current['events'] ?? null) && $current['events'] !== []
+                ? $current['events']
+                : self::DEFAULT_EVENTS,
+            true
+        );
     }
 }

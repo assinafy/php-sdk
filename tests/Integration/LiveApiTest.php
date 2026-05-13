@@ -6,7 +6,10 @@ namespace Assinafy\SDK\Tests\Integration;
 
 use Assinafy\SDK\AssinafyClient;
 use Assinafy\SDK\Configuration;
+use Assinafy\SDK\Exceptions\ApiException;
+use Assinafy\SDK\Resources\AssignmentResource;
 use Assinafy\SDK\Resources\DocumentResource;
+use Assinafy\SDK\Resources\WebhookResource;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -26,6 +29,8 @@ final class LiveApiTest extends TestCase
     private AssinafyClient $client;
     /** @var array<int, string> document ids we created and need to clean up */
     private array $createdDocuments = [];
+    /** @var array<int, string> signer ids we created and need to clean up */
+    private array $createdSigners = [];
 
     protected function setUp(): void
     {
@@ -53,6 +58,13 @@ final class LiveApiTest extends TestCase
         foreach ($this->createdDocuments as $id) {
             try {
                 $this->client->documents()->delete($id);
+            } catch (\Throwable $e) {
+                // best-effort cleanup
+            }
+        }
+        foreach ($this->createdSigners as $id) {
+            try {
+                $this->client->signers()->delete($id);
             } catch (\Throwable $e) {
                 // best-effort cleanup
             }
@@ -137,6 +149,248 @@ final class LiveApiTest extends TestCase
         $webhooks = $this->client->webhooks();
         $sub = $webhooks->get();
         $this->assertTrue(is_array($sub) || $sub === null);
+    }
+
+    /** Tier 1 — read-only artifact downloads after metadata_ready. */
+    public function testDocumentThumbnailAndPageDownload(): void
+    {
+        $pdf = $this->makePdfFixture();
+        $doc = $this->client->documents()->upload($pdf);
+        $this->createdDocuments[] = $doc['id'];
+        $ready = $this->client->documents()->waitUntilReady($doc['id'], 60, 2);
+
+        $thumb = $this->client->documents()->downloadThumbnail($doc['id']);
+        $this->assertNotEmpty($thumb, 'Thumbnail download returned empty body');
+
+        $pages = $ready['pages'] ?? [];
+        $this->assertNotEmpty($pages, 'metadata_ready document should expose at least one page');
+        $pageId = $pages[0]['id'] ?? null;
+        $this->assertIsString($pageId, 'page entry should carry an id');
+
+        $pageImage = $this->client->documents()->downloadPage($doc['id'], $pageId);
+        $this->assertNotEmpty($pageImage, 'Page download returned empty body');
+    }
+
+    /** Tier 1 — verify() on a bogus hash should be reachable and refused with a 4xx. */
+    public function testVerifyEndpointRejectsBogusHash(): void
+    {
+        $bogusHash = str_repeat('0', 40);
+
+        try {
+            $result = $this->client->documents()->verify($bogusHash);
+            // Some implementations return a payload with is_valid=false instead of an error.
+            $this->assertIsArray($result);
+            $this->assertArrayHasKey('is_valid', $result);
+            $this->assertFalse($result['is_valid']);
+        } catch (ApiException $e) {
+            $this->assertGreaterThanOrEqual(400, $e->getStatusCode());
+            $this->assertLessThan(500, $e->getStatusCode());
+        }
+    }
+
+    /** Tier 1 — TemplateResource::get (the endpoint flagged as undocumented in the audit). */
+    public function testTemplatesGetWhenAvailable(): void
+    {
+        $page = $this->client->templates()->list(1, 1);
+        $items = $page['data'] ?? [];
+
+        if ($items === []) {
+            $this->markTestSkipped('No templates in sandbox account — cannot exercise templates()->get');
+        }
+
+        $first = $items[0];
+        $template = $this->client->templates()->get($first['id']);
+        $this->assertSame($first['id'], $template['id'] ?? null);
+        $this->assertArrayHasKey(
+            'roles',
+            $template,
+            'Template detail response must expose `roles` — the SDK readme relies on it'
+        );
+    }
+
+    /** Tier 1 — estimateCostFromTemplate is read-only, but needs a real template + roles. */
+    public function testEstimateCostFromTemplateWhenAvailable(): void
+    {
+        $page = $this->client->templates()->list(1, 1, ['status' => 'ready']);
+        $items = $page['data'] ?? [];
+
+        if ($items === []) {
+            $this->markTestSkipped('No ready templates in sandbox — cannot estimate cost from template');
+        }
+
+        $template = $this->client->templates()->get($items[0]['id']);
+        $roleIds = array_column($template['roles'] ?? [], 'id');
+        if ($roleIds === []) {
+            $this->markTestSkipped('Template has no roles — cannot build signer/role mapping');
+        }
+
+        $signerEntries = [];
+        foreach ($roleIds as $roleId) {
+            $signer = $this->client->signers()->create(
+                'SDK estimateCost ' . uniqid(),
+                'sdk-integration+' . uniqid() . '@example.com'
+            );
+            $this->createdSigners[] = $signer['id'];
+            $signerEntries[] = ['role_id' => $roleId, 'id' => $signer['id']];
+        }
+
+        $estimate = $this->client->documents()->estimateCostFromTemplate($template['id'], $signerEntries);
+        $this->assertIsArray($estimate);
+    }
+
+    /** Tier 1 + Tier 2 — full assignment lifecycle (estimateCost → create → estimateResendCost → resend → resetExpiration). */
+    public function testAssignmentFullLifecycle(): void
+    {
+        $pdf = $this->makePdfFixture();
+        $doc = $this->client->documents()->upload($pdf);
+        $this->createdDocuments[] = $doc['id'];
+        $this->client->documents()->waitUntilReady($doc['id'], 60, 2);
+
+        $signer = $this->client->signers()->create(
+            'SDK assignment ' . uniqid(),
+            'sdk-integration+' . uniqid() . '@example.com'
+        );
+        $this->createdSigners[] = $signer['id'];
+
+        $signerEntries = [[
+            'id' => $signer['id'],
+            'verification_method' => AssignmentResource::VERIFICATION_EMAIL,
+        ]];
+
+        // 1. estimateCost (Tier 1, read-only)
+        $estimate = $this->client->assignments()->estimateCost(
+            $doc['id'],
+            $signerEntries,
+            AssignmentResource::METHOD_VIRTUAL
+        );
+        $this->assertIsArray($estimate);
+
+        // 2. create (Tier 2 — real assignment, virtual method, signer email at example.com (RFC 2606, undeliverable))
+        $assignment = $this->client->assignments()->create(
+            $doc['id'],
+            $signerEntries,
+            AssignmentResource::METHOD_VIRTUAL,
+            [
+                'message' => 'SDK integration test — no action required',
+                'expires_at' => '2099-12-31T23:59:00Z',
+            ]
+        );
+        $this->assertArrayHasKey('id', $assignment);
+        $assignmentId = (string) $assignment['id'];
+
+        // 3. estimateResendCost (Tier 2 — needs an existing assignment)
+        $resendEstimate = $this->client->assignments()->estimateResendCost(
+            $doc['id'],
+            $assignmentId,
+            $signer['id']
+        );
+        $this->assertIsArray($resendEstimate);
+
+        // 4. resend (Tier 2 — real notification, again to undeliverable example.com)
+        $resend = $this->client->assignments()->resend($doc['id'], $assignmentId, $signer['id']);
+        $this->assertIsArray($resend);
+
+        // 5. resetExpiration (Tier 2 — extends the assignment deadline)
+        $reset = $this->client->assignments()->resetExpiration(
+            $doc['id'],
+            $assignmentId,
+            '2100-01-31T23:59:00Z'
+        );
+        $this->assertIsArray($reset);
+    }
+
+    /** Tier 2 — createFromTemplate. Skipped unless the sandbox has a ready template. */
+    public function testCreateFromTemplateWhenAvailable(): void
+    {
+        $page = $this->client->templates()->list(1, 1, ['status' => 'ready']);
+        $items = $page['data'] ?? [];
+
+        if ($items === []) {
+            $this->markTestSkipped('No ready templates in sandbox — cannot exercise createFromTemplate');
+        }
+
+        $template = $this->client->templates()->get($items[0]['id']);
+        $roleIds = array_column($template['roles'] ?? [], 'id');
+        if ($roleIds === []) {
+            $this->markTestSkipped('Template has no roles — cannot bind signers');
+        }
+
+        $signerEntries = [];
+        foreach ($roleIds as $roleId) {
+            $signer = $this->client->signers()->create(
+                'SDK createFromTemplate ' . uniqid(),
+                'sdk-integration+' . uniqid() . '@example.com'
+            );
+            $this->createdSigners[] = $signer['id'];
+            $signerEntries[] = ['role_id' => $roleId, 'id' => $signer['id']];
+        }
+
+        $newDoc = $this->client->documents()->createFromTemplate(
+            $template['id'],
+            $signerEntries,
+            [
+                'name' => 'SDK integration ' . uniqid(),
+                'expires_at' => '2099-12-31T23:59:00Z',
+            ]
+        );
+        $this->assertArrayHasKey('id', $newDoc);
+        $this->createdDocuments[] = $newDoc['id'];
+    }
+
+    /** Tier 2 — webhook register / get / deactivate / activate round-trip. */
+    public function testWebhookFullRoundTrip(): void
+    {
+        $webhooks = $this->client->webhooks();
+        $existing = $webhooks->get();
+
+        $hadConfig = is_array($existing) && !empty($existing['url']);
+        $existingUrl = $hadConfig ? (string) $existing['url'] : '';
+        $existingEmail = $hadConfig ? (string) ($existing['email'] ?? '') : '';
+        $existingEvents = $hadConfig && !empty($existing['events']) ? $existing['events'] : WebhookResource::DEFAULT_EVENTS;
+        $existingActive = $hadConfig ? (bool) ($existing['is_active'] ?? true) : true;
+
+        $testUrl = 'https://example.com/webhooks/sdk-integration-' . uniqid();
+
+        try {
+            // 1. register a new subscription
+            $registered = $webhooks->register(
+                $testUrl,
+                'sdk-integration@example.com',
+                WebhookResource::DEFAULT_EVENTS
+            );
+            $this->assertSame($testUrl, $registered['url'] ?? null);
+            $this->assertTrue($registered['is_active'] ?? null);
+
+            $fetched = $webhooks->get();
+            $this->assertNotNull($fetched);
+            $this->assertSame($testUrl, $fetched['url'] ?? null);
+
+            // 2. deactivate (the API has no DELETE — this is the unsubscribe path)
+            $deactivated = $webhooks->deactivate();
+            $this->assertFalse($deactivated['is_active'] ?? null);
+
+            $afterDeactivate = $webhooks->get();
+            $this->assertNotNull($afterDeactivate);
+            $this->assertFalse($afterDeactivate['is_active'] ?? null);
+            $this->assertSame(
+                $testUrl,
+                $afterDeactivate['url'] ?? null,
+                'deactivate must preserve URL (it is a soft toggle, not a destroy)'
+            );
+
+            // 3. activate again
+            $reactivated = $webhooks->activate();
+            $this->assertTrue($reactivated['is_active'] ?? null);
+        } finally {
+            // Restore the prior subscription if there was one. Best-effort.
+            if ($hadConfig) {
+                try {
+                    $webhooks->register($existingUrl, $existingEmail, $existingEvents, $existingActive);
+                } catch (\Throwable $e) {
+                    // best-effort — the test still reports the underlying failure
+                }
+            }
+        }
     }
 
     private function makePdfFixture(): string

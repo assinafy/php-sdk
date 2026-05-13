@@ -7,8 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.3.0] - 2026-05-12
 
-Second pass against `https://api.assinafy.com.br/v1/docs` — fix the drift and rough edges
-found during the 1.2.0 audit. No breaking changes to the public resource API.
+Second pass against `https://api.assinafy.com.br/v1/docs` plus a full live verification
+against the sandbox. The live run caught two issues the unit suite had missed (see
+**Fixed** below — `is_active` and the non-existent `DELETE` for webhooks).
 
 ### Added
 
@@ -21,10 +22,20 @@ found during the 1.2.0 audit. No breaking changes to the public resource API.
 - **`DocumentResource::SEND_TOKEN_CHANNEL_EMAIL`** constant + allow-list validation on
   `sendToken()` — typos like `'whatsapp'` now raise `ValidationException` up front
   instead of being forwarded blindly.
+- **`WebhookResource::deactivate()`** / **`activate()`** — soft toggle the subscription
+  via `PUT … {is_active: false|true}`. Replaces the broken `delete()` (see Removed).
+- **`WebhookResource::register($url, $email, $events, $isActive = true)`** — new optional
+  fourth arg so callers can create an initially-inactive subscription.
 - **Query-string parameter** on `HttpClientInterface::post()` / `put()` — lets resources
   send query params alongside a JSON body without manually concatenating into the URI.
   Backward-compatible: existing callers continue to work, the new `$query` arg is the
   fourth positional and defaults to `[]`.
+- **`ASSINAFY_BASE_URL`** env-var support in `tests/Integration/LiveApiTest.php` — set it
+  to `Configuration::SANDBOX_BASE_URL` to run the integration suite against sandbox.
+- **6 new live integration tests** covering thumbnail / page downloads, `verify` with a
+  bogus hash, the assignment lifecycle (`estimateCost` → `create` → `estimateResendCost`
+  → `resend` → `resetExpiration`), and the webhook activate/deactivate round-trip.
+  Templates tests skip cleanly when the sandbox account has no templates.
 
 ### Changed
 
@@ -32,9 +43,6 @@ found during the 1.2.0 audit. No breaking changes to the public resource API.
   HTTP client's `$query` channel instead of building the URI by hand with `rawurlencode()`.
   Behavior is identical (still goes on the query string) but it's consistent with the
   rest of the signer-session methods and robust against future endpoint params.
-- **`WebhookResource::register()`** no longer sends `is_active: true`. The field is not
-  part of the API contract; dropping it removes a possible 422 risk and aligns the
-  payload with the documented envelope.
 - **`SignerResource::normalizePhone()`** — removed a dead ternary (`($hasPlus ? '+' : '+')`)
   that always evaluated to `'+'`. The normalized output is unchanged.
 - **`AbstractResource::extractData()` docblock** clarifies the list-vs-single envelope
@@ -44,9 +52,20 @@ found during the 1.2.0 audit. No breaking changes to the public resource API.
 - **`WebhookResource` class docblock** points to the live integration suite that exercises
   the (undocumented) webhook subscription endpoints on every release.
 
+### Removed
+
+- **`WebhookResource::delete()`** — the underlying `DELETE /accounts/{id}/webhooks/subscriptions`
+  route does not exist on the v1 API (verified live: returns 404 *Página não encontrada*).
+  The method has never worked. Use `deactivate()` instead — same outcome, supported by
+  the API.
+
 ### Fixed
 
-- **Auth bootstrap chicken-and-egg** — `Configuration::__construct()` no longer requires
+- **`WebhookResource::register()` `is_active` field** — verified live against sandbox: the
+  API rejects the request with `O atributo "is_active" é obrigatório.` if `is_active` is
+  omitted. The field stays in the payload and the new fourth parameter `$isActive` lets
+  callers opt out of immediate activation.
+- **Auth bootstrap chicken-and-egg** — `Configuration::__construct()` no longer forces
   callers to invent dummy credentials just to reach `auth()->login()`. Use
   `AssinafyClient::forAuth()`.
 

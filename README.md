@@ -251,9 +251,14 @@ foreach ($template['roles'] as $role) {
 
 | Method | Endpoint |
 | --- | --- |
-| `register($url, $email, $events)` | `PUT /accounts/{id}/webhooks/subscriptions` |
+| `register($url, $email, $events, $isActive)` | `PUT /accounts/{id}/webhooks/subscriptions` |
 | `get()` | `GET /accounts/{id}/webhooks/subscriptions` |
-| `delete()` | `DELETE /accounts/{id}/webhooks/subscriptions` |
+| `deactivate()` | `PUT …/subscriptions` with `is_active: false` |
+| `activate()` | `PUT …/subscriptions` with `is_active: true` |
+
+> The v1 API has no `DELETE` route for webhook subscriptions (it returns 404). The
+> way to stop receiving events is `deactivate()` — the configuration is preserved
+> so you can `activate()` again later. `is_active` is required in the request body.
 
 ```php
 use Assinafy\SDK\Resources\WebhookResource;
