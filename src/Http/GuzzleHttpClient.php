@@ -58,11 +58,11 @@ class GuzzleHttpClient implements HttpClientInterface
         ], $query));
     }
 
-    public function delete(string $uri, array $headers = []): Response
+    public function delete(string $uri, array $headers = [], array $query = []): Response
     {
-        return $this->request('DELETE', $uri, [
+        return $this->request('DELETE', $uri, $this->withOptionalQuery([
             'headers' => $headers,
-        ]);
+        ], $query));
     }
 
     public function uploadFile(string $uri, string $filePath, array $data = [], array $headers = []): Response

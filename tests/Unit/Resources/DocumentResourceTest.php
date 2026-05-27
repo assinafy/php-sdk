@@ -220,6 +220,47 @@ final class DocumentResourceTest extends TestCase
         $this->documents->waitUntilReady('doc1', 5, 1);
     }
 
+    public function testDocumentTagsLifecyclePaths(): void
+    {
+        $this->http->queueJson(200, [['id' => 't1', 'name' => 'Contracts']]);
+        $this->documents->listTags('doc1');
+        $list = $this->http->lastCall();
+        $this->assertSame('GET', $list['method']);
+        $this->assertSame('accounts/acc/documents/doc1/tags', $list['uri']);
+
+        $this->http->queueJson(200, []);
+        $this->documents->appendTags('doc1', ['Urgent']);
+        $append = $this->http->lastCall();
+        $this->assertSame('POST', $append['method']);
+        $this->assertSame('accounts/acc/documents/doc1/tags', $append['uri']);
+        $this->assertSame(['tags' => ['Urgent']], $append['body']);
+
+        $this->http->queueJson(200, []);
+        $this->documents->replaceTags('doc1', ['A', 'B']);
+        $replace = $this->http->lastCall();
+        $this->assertSame('PUT', $replace['method']);
+        $this->assertSame(['tags' => ['A', 'B']], $replace['body']);
+
+        $this->http->queueJson(200, ['detached' => true]);
+        $this->documents->detachTag('doc1', 't1');
+        $detach = $this->http->lastCall();
+        $this->assertSame('DELETE', $detach['method']);
+        $this->assertSame('accounts/acc/documents/doc1/tags/t1', $detach['uri']);
+    }
+
+    public function testAppendTagsRejectsEmpty(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->documents->appendTags('doc1', []);
+    }
+
+    public function testReplaceTagsAllowsEmptyToDetachAll(): void
+    {
+        $this->http->queueJson(200, []);
+        $this->documents->replaceTags('doc1', []);
+        $this->assertSame(['tags' => []], $this->http->lastCall()['body']);
+    }
+
     private function writeFixturePdf(): string
     {
         $path = tempnam(sys_get_temp_dir(), 'asn') . '.pdf';

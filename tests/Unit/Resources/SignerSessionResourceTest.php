@@ -106,4 +106,53 @@ final class SignerSessionResourceTest extends TestCase
         $this->assertSame('signature/initial', $call['uri']);
         $this->assertSame(['signer-access-code' => 'CODE'], $call['query']);
     }
+
+    public function testCurrentDocumentHitsSignEndpoint(): void
+    {
+        $this->http->queueJson(200, ['id' => 'doc1']);
+        $this->session->currentDocument('CODE');
+
+        $call = $this->http->lastCall();
+        $this->assertSame('GET', $call['method']);
+        $this->assertSame('sign', $call['uri']);
+        $this->assertSame(['signer-access-code' => 'CODE'], $call['query']);
+    }
+
+    public function testSignPostsFieldArrayWithAccessCodeOnQuery(): void
+    {
+        $this->http->queueJson(200, []);
+
+        $fields = [['itemId' => 'i1', 'fieldId' => 'f1', 'pageId' => 'p1', 'value' => 'Signed']];
+        $this->session->sign('doc1', 'a1', 'CODE', $fields);
+
+        $call = $this->http->lastCall();
+        $this->assertSame('POST', $call['method']);
+        $this->assertSame('documents/doc1/assignments/a1', $call['uri']);
+        $this->assertSame($fields, $call['body']);
+        $this->assertSame(['signer-access-code' => 'CODE'], $call['query']);
+    }
+
+    public function testSignRejectsEmptyFields(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->session->sign('doc1', 'a1', 'CODE', []);
+    }
+
+    public function testDeclineSendsReasonAndAccessCode(): void
+    {
+        $this->http->queueJson(200, []);
+        $this->session->decline('doc1', 'a1', 'CODE', 'No thanks');
+
+        $call = $this->http->lastCall();
+        $this->assertSame('PUT', $call['method']);
+        $this->assertSame('documents/doc1/assignments/a1/reject', $call['uri']);
+        $this->assertSame(['decline_reason' => 'No thanks'], $call['body']);
+        $this->assertSame(['signer-access-code' => 'CODE'], $call['query']);
+    }
+
+    public function testDeclineRejectsEmptyReason(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->session->decline('doc1', 'a1', 'CODE', '');
+    }
 }

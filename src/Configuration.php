@@ -6,7 +6,7 @@ namespace Assinafy\SDK;
 
 class Configuration
 {
-    public const SDK_VERSION = '1.3.0';
+    public const SDK_VERSION = '1.4.0';
     public const DEFAULT_BASE_URL = 'https://api.assinafy.com.br/v1';
     public const SANDBOX_BASE_URL = 'https://sandbox.assinafy.com.br/v1';
 

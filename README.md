@@ -2,7 +2,7 @@
 
 Modern, framework-agnostic PHP SDK for the [Assinafy](https://assinafy.com.br) digital signature API (`https://api.assinafy.com.br/v1`). Built with PSR standards and SOLID principles.
 
-The SDK covers **every documented endpoint** in `https://api.assinafy.com.br/v1/docs` plus the webhook subscription endpoints, and is verified against the live API by an integration test suite.
+The SDK covers **100% of the documented endpoints** in `https://api.assinafy.com.br/v1/docs` — documents and document tags, signers, signer sessions and signer documents, assignments, templates, workspace tags, field definitions, authentication, and the full webhooks surface (subscription, dispatch history, retry, event types). Every endpoint is verified against the live API by an integration test suite.
 
 ## Features
 
@@ -139,6 +139,10 @@ Every endpoint exposed by the documented API is reachable through the SDK. Resou
 | `sendToken($documentId, $recipient, $channel)` | `PUT /public/documents/{id}/send-token` |
 | `createFromTemplate($templateId, $signers, $options)` | `POST /accounts/{id}/templates/{id}/documents` |
 | `estimateCostFromTemplate($templateId, $signers)` | `POST /accounts/{id}/templates/{id}/documents/estimate-cost` |
+| `listTags($documentId)` | `GET /accounts/{id}/documents/{id}/tags` |
+| `appendTags($documentId, $tagNames)` | `POST /accounts/{id}/documents/{id}/tags` |
+| `replaceTags($documentId, $tagNames)` | `PUT /accounts/{id}/documents/{id}/tags` |
+| `detachTag($documentId, $tagId)` | `DELETE /accounts/{id}/documents/{id}/tags/{tag_id}` |
 | `waitUntilReady($documentId, $maxWait, $pollInterval)` | polls `GET /documents/{id}` |
 | `isFullySigned($documentId)` | derived from `GET /documents/{id}` |
 | `getSigningProgress($documentId)` | derived from `GET /documents/{id}` |
@@ -204,16 +208,19 @@ $client->signers()->delete($signer['id']);
 | `resend($documentId, $assignmentId, $signerId)` | `PUT /documents/{id}/assignments/{id}/signers/{id}/resend` |
 | `estimateResendCost($documentId, $assignmentId, $signerId)` | `POST /documents/{id}/assignments/{id}/signers/{id}/estimate-resend-cost` |
 | `resetExpiration($documentId, $assignmentId, $expiresAt)` | `PUT /documents/{id}/assignments/{id}/reset-expiration` |
+| `whatsappNotifications($documentId, $assignmentId)` | `GET /documents/{id}/assignments/{id}/whatsapp-notifications` |
 
 ```php
 use Assinafy\SDK\Resources\AssignmentResource;
 
 // Virtual assignment (no input fields). Signers may be ID strings or full objects.
+// Add `step` to a signer for sequential signing (signers in the same step sign in
+// parallel; the next step is notified only once the previous step has all signed).
 $assignment = $client->assignments()->create(
     documentId: $documentId,
     signers: [
-        $signerId1,
-        ['id' => $signerId2, 'verification_method' => AssignmentResource::VERIFICATION_WHATSAPP],
+        ['id' => $signerId1, 'step' => 1],
+        ['id' => $signerId2, 'verification_method' => AssignmentResource::VERIFICATION_WHATSAPP, 'step' => 2],
     ],
     method: AssignmentResource::METHOD_VIRTUAL,
     options: [
@@ -247,18 +254,60 @@ foreach ($template['roles'] as $role) {
 }
 ```
 
+### Tags — `$client->tags()`
+
+Workspace-scoped labels that can be attached to documents and templates. Tag names are unique per workspace (case-insensitive).
+
+| Method | Endpoint |
+| --- | --- |
+| `list($search)` | `GET /accounts/{id}/tags` |
+| `create($name, $color)` | `POST /accounts/{id}/tags` |
+| `update($tagId, $data)` | `PUT /accounts/{id}/tags/{id}` |
+| `delete($tagId, $force)` | `DELETE /accounts/{id}/tags/{id}` |
+
+```php
+$tag = $client->tags()->create('Contracts', 'ff8800');
+$client->tags()->update($tag['id'], ['name' => 'Sales Contracts']);
+$client->tags()->delete($tag['id'], force: true); // detach from everything, then delete
+```
+
+### Field definitions — `$client->fields()`
+
+Reusable inputs (text, CPF, e-mail, date, …) that can be placed on a document for `collect` assignments.
+
+| Method | Endpoint |
+| --- | --- |
+| `create($type, $name, $options)` | `POST /accounts/{id}/fields` |
+| `list($includeInactive, $includeStandard)` | `GET /accounts/{id}/fields` |
+| `get($fieldId)` | `GET /accounts/{id}/fields/{id}` |
+| `update($fieldId, $data)` | `PUT /accounts/{id}/fields/{id}` |
+| `delete($fieldId)` | `DELETE /accounts/{id}/fields/{id}` |
+| `validate($fieldId, $value, $signerAccessCode)` | `POST /accounts/{id}/fields/{id}/validate` |
+| `validateMultiple($values, $signerAccessCode)` | `POST /accounts/{id}/fields/validate-multiple` |
+| `types()` | `GET /field-types` |
+
+```php
+$field = $client->fields()->create('cpf', 'Taxpayer ID');
+$check = $client->fields()->validate($field['id'], '400.676.228-36');   // ['success' => true, …]
+$types = $client->fields()->types();                                    // [['type' => 'text', 'name' => 'Text'], …]
+```
+
 ### Webhooks — `$client->webhooks()`
 
 | Method | Endpoint |
 | --- | --- |
 | `register($url, $email, $events, $isActive)` | `PUT /accounts/{id}/webhooks/subscriptions` |
 | `get()` | `GET /accounts/{id}/webhooks/subscriptions` |
-| `deactivate()` | `PUT …/subscriptions` with `is_active: false` |
-| `activate()` | `PUT …/subscriptions` with `is_active: true` |
+| `deactivate()` | `PUT /accounts/{id}/webhooks/inactivate` |
+| `activate()` | re-sends the stored config via `PUT …/subscriptions` with `is_active: true` |
+| `eventTypes()` | `GET /webhooks/event-types` |
+| `dispatches($filters)` | `GET /accounts/{id}/webhooks` |
+| `retryDispatch($dispatchId)` | `POST /accounts/{id}/webhooks/{dispatch_id}/retry` |
 
-> The v1 API has no `DELETE` route for webhook subscriptions (it returns 404). The
-> way to stop receiving events is `deactivate()` — the configuration is preserved
-> so you can `activate()` again later. `is_active` is required in the request body.
+> The v1 API has no `DELETE` route for webhook subscriptions. The way to stop
+> receiving events is `deactivate()` (the dedicated `inactivate` endpoint) — the
+> configuration is preserved so you can `activate()` again later. `register()`
+> requires `url`, `email`, `events`, and `is_active`.
 
 ```php
 use Assinafy\SDK\Resources\WebhookResource;
@@ -268,6 +317,12 @@ $client->webhooks()->register(
     email: 'admin@your-domain.com',
     events: WebhookResource::DEFAULT_EVENTS,
 );
+
+// Inspect and replay delivery history
+$history = $client->webhooks()->dispatches(['delivered' => 'false']);
+foreach ($history['data'] as $dispatch) {
+    $client->webhooks()->retryDispatch($dispatch['id']);
+}
 ```
 
 ### Authentication — `$client->auth()`
@@ -302,6 +357,21 @@ Endpoints authenticated with a signer's `signer-access-code` (not the workspace 
 | `confirmData($documentId, $accessCode, $data)` | `PUT /documents/{id}/signers/confirm-data` |
 | `uploadSignature($accessCode, $type, $bytes, $mime)` | `POST /signature` |
 | `downloadSignature($accessCode, $type)` | `GET /signature/{type}` |
+| `currentDocument($accessCode)` | `GET /sign` |
+| `sign($documentId, $assignmentId, $accessCode, $fields)` | `POST /documents/{id}/assignments/{id}` |
+| `decline($documentId, $assignmentId, $accessCode, $reason)` | `PUT /documents/{id}/assignments/{id}/reject` |
+
+### Signer documents (signer-facing) — `$client->signerDocuments()`
+
+Document list/sign/decline/download for a signer, authenticated by `signer-access-code`.
+
+| Method | Endpoint |
+| --- | --- |
+| `current($signerId, $accessCode)` | `GET /signers/{id}/document` |
+| `list($signerId, $accessCode, $filters)` | `GET /signers/{id}/documents` |
+| `signMultiple($accessCode, $documentIds)` | `PUT /signers/documents/sign-multiple` |
+| `declineMultiple($accessCode, $documentIds, $reason)` | `PUT /signers/documents/decline-multiple` |
+| `download($signerId, $documentId, $accessCode, $artifact)` | `GET /signers/{id}/documents/{id}/download/{artifact_name}` |
 
 ## Webhook signature verification
 
@@ -371,7 +441,7 @@ vendor/bin/phpstan analyse
 vendor/bin/phpcs
 ```
 
-**Current status**: PSR-12 compliant · PHPStan level 8 (zero errors) · 73 unit tests + 6 live integration tests · PHP 7.4 – 8.4 compatible.
+**Current status**: PSR-12 compliant · PHPStan level 8 (zero errors) · 116 unit tests + 17 live integration tests · PHP 7.4 – 8.4 compatible.
 
 ## License
 

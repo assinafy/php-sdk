@@ -123,4 +123,29 @@ final class AssignmentResourceTest extends TestCase
         $this->assertSame('documents/doc1/assignments/a1/reset-expiration', $call['uri']);
         $this->assertSame(['expires_at' => '2027-01-01T00:00:00Z'], $call['body']);
     }
+
+    public function testCreatePassesStepForSequentialSigning(): void
+    {
+        $this->http->queueJson(201, ['id' => 'a1']);
+
+        $this->assignments->create('doc1', [
+            ['id' => 's1', 'step' => 1],
+            ['id' => 's2', 'step' => 2],
+        ]);
+
+        $signers = $this->http->lastCall()['body']['signers'];
+        $this->assertSame(['id' => 's1', 'step' => 1], $signers[0]);
+        $this->assertSame(['id' => 's2', 'step' => 2], $signers[1]);
+    }
+
+    public function testWhatsappNotifications(): void
+    {
+        $this->http->queueJson(200, [['signer_id' => 's1', 'phone_number' => '+5511999990001']]);
+
+        $this->assignments->whatsappNotifications('doc1', 'a1');
+
+        $call = $this->http->lastCall();
+        $this->assertSame('GET', $call['method']);
+        $this->assertSame('documents/doc1/assignments/a1/whatsapp-notifications', $call['uri']);
+    }
 }
