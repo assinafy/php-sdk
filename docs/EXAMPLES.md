@@ -201,7 +201,17 @@ $client->webhooks()->register(
 );
 
 $current = $client->webhooks()->get();
-$client->webhooks()->delete();
+
+// Stop / resume delivery (the v1 API has no DELETE for subscriptions)
+$client->webhooks()->deactivate();   // PUT /accounts/{id}/webhooks/inactivate
+$client->webhooks()->activate();     // re-sends stored config with is_active: true
+
+// Discover subscribable events and inspect / replay delivery history
+$types   = $client->webhooks()->eventTypes();                       // GET /webhooks/event-types
+$history = $client->webhooks()->dispatches(['delivered' => 'false']); // GET /accounts/{id}/webhooks
+foreach ($history['data'] as $dispatch) {
+    $client->webhooks()->retryDispatch($dispatch['id']);            // POST …/webhooks/{id}/retry
+}
 ```
 
 ## 12. Webhook receiver
@@ -261,9 +271,64 @@ $session->uploadSignature(
 
 // Download the stored signature
 $png = $session->downloadSignature($accessCode, 'signature');
+
+// View, sign (collect method) and decline as the signer
+$current = $session->currentDocument($accessCode);          // GET /sign
+$session->sign($documentId, $assignmentId, $accessCode, [   // POST /documents/{id}/assignments/{id}
+    ['itemId' => 'i1', 'fieldId' => 'f1', 'pageId' => 'p1', 'value' => 'Signed by John'],
+]);
+$session->decline($documentId, $assignmentId, $accessCode, 'I do not agree with clause 2.');
 ```
 
-## 15. Error handling
+## 15. Signer documents (signer-facing list / bulk sign / download)
+
+```php
+$docs = $client->signerDocuments();
+
+$current = $docs->current($signerId, $accessCode);                 // GET /signers/{id}/document
+$list    = $docs->list($signerId, $accessCode, ['status' => 'pending_signature']);
+
+$docs->signMultiple($accessCode, ['doc1', 'doc2']);                // PUT /signers/documents/sign-multiple
+$docs->declineMultiple($accessCode, ['doc3'], 'Unfavorable terms.');
+
+$pdf = $docs->download($signerId, 'doc1', $accessCode, \Assinafy\SDK\Resources\DocumentResource::ARTIFACT_ORIGINAL);
+```
+
+## 16. Workspace tags
+
+```php
+$tag = $client->tags()->create('Contracts', 'ff8800');   // POST /accounts/{id}/tags
+$client->tags()->list('contract');                       // GET /accounts/{id}/tags?search=contract
+$client->tags()->update($tag['id'], ['name' => 'Sales Contracts']);
+$client->tags()->delete($tag['id'], force: true);        // detach from everything, then delete
+```
+
+## 17. Document tags
+
+```php
+$client->documents()->appendTags($documentId, ['Urgent', 'Q1-2026']);  // POST …/documents/{id}/tags
+$client->documents()->listTags($documentId);                            // GET  …/documents/{id}/tags
+$client->documents()->replaceTags($documentId, ['Signed']);             // PUT  …/documents/{id}/tags
+$client->documents()->detachTag($documentId, $tagId);                   // DELETE …/tags/{tag_id}
+```
+
+## 18. Field definitions and validation
+
+```php
+$field = $client->fields()->create('cpf', 'Taxpayer ID');   // POST /accounts/{id}/fields
+$client->fields()->list(includeStandard: true);             // GET  /accounts/{id}/fields
+$client->fields()->update($field['id'], ['name' => 'CPF']);
+
+// Validate a value — as an authenticated user, or as a signer via the access code
+$result = $client->fields()->validate($field['id'], '400.676.228-36');   // ['success' => true, …]
+$client->fields()->validateMultiple([
+    ['field_id' => $field['id'], 'value' => '400.676.228-36'],
+], $signerAccessCode);
+
+$types = $client->fields()->types();   // GET /field-types
+```
+
+## 19. Error handling
 
 ```php
 use Assinafy\SDK\Exceptions\ApiException;

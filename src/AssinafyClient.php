@@ -9,8 +9,11 @@ use Assinafy\SDK\Http\HttpClientInterface;
 use Assinafy\SDK\Resources\AssignmentResource;
 use Assinafy\SDK\Resources\AuthResource;
 use Assinafy\SDK\Resources\DocumentResource;
+use Assinafy\SDK\Resources\FieldResource;
+use Assinafy\SDK\Resources\SignerDocumentResource;
 use Assinafy\SDK\Resources\SignerResource;
 use Assinafy\SDK\Resources\SignerSessionResource;
+use Assinafy\SDK\Resources\TagResource;
 use Assinafy\SDK\Resources\TemplateResource;
 use Assinafy\SDK\Resources\WebhookResource;
 use Assinafy\SDK\Support\WebhookVerifier;
@@ -27,9 +30,12 @@ class AssinafyClient
     private ?SignerResource $signers = null;
     private ?AssignmentResource $assignments = null;
     private ?TemplateResource $templates = null;
+    private ?TagResource $tags = null;
+    private ?FieldResource $fields = null;
     private ?WebhookResource $webhooks = null;
     private ?AuthResource $auth = null;
     private ?SignerSessionResource $signerSession = null;
+    private ?SignerDocumentResource $signerDocuments = null;
     private ?WebhookVerifier $webhookVerifier = null;
 
     public function __construct(
@@ -110,6 +116,24 @@ class AssinafyClient
         return $this->templates;
     }
 
+    public function tags(): TagResource
+    {
+        if ($this->tags === null) {
+            $this->tags = new TagResource($this->httpClient, $this->config, $this->logger);
+        }
+
+        return $this->tags;
+    }
+
+    public function fields(): FieldResource
+    {
+        if ($this->fields === null) {
+            $this->fields = new FieldResource($this->httpClient, $this->config, $this->logger);
+        }
+
+        return $this->fields;
+    }
+
     public function webhooks(): WebhookResource
     {
         if ($this->webhooks === null) {
@@ -135,6 +159,15 @@ class AssinafyClient
         }
 
         return $this->signerSession;
+    }
+
+    public function signerDocuments(): SignerDocumentResource
+    {
+        if ($this->signerDocuments === null) {
+            $this->signerDocuments = new SignerDocumentResource($this->httpClient, $this->config, $this->logger);
+        }
+
+        return $this->signerDocuments;
     }
 
     public function webhookVerifier(): WebhookVerifier

@@ -17,6 +17,9 @@ use Assinafy\SDK\Exceptions\ValidationException;
  *   - PUT  /documents/{documentId}/signers/confirm-data
  *   - POST /signature
  *   - GET  /signature/{type}
+ *   - GET  /sign                                       (current document/assignment view)
+ *   - POST /documents/{documentId}/assignments/{id}    (sign — collect method)
+ *   - PUT  /documents/{documentId}/assignments/{id}/reject (decline)
  *
  * The access code is required for every call.
  */
@@ -120,6 +123,69 @@ class SignerSessionResource extends AbstractResource
         );
 
         return $response->getBody();
+    }
+
+    /**
+     * Retrieve the document/assignment the signer currently has access to.
+     * `GET /sign?signer-access-code={code}`
+     *
+     * Requires the access code (and a verified code on the underlying request). The
+     * response mirrors the document shape with the signer's `current_signer` and the
+     * assignment items they must complete.
+     */
+    public function currentDocument(string $accessCode): array
+    {
+        $response = $this->httpClient->get('sign', ['signer-access-code' => $accessCode]);
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    /**
+     * Sign a document with input fields (collect method).
+     * `POST /documents/{documentId}/assignments/{assignmentId}?signer-access-code={code}`
+     *
+     * For virtual assignments the signer must first call {@see confirmData()}.
+     *
+     * @param array<int, array{itemId: string, fieldId: string, pageId: string, value: string}> $fields
+     *
+     * @throws ValidationException when no fields are provided
+     */
+    public function sign(string $documentId, string $assignmentId, string $accessCode, array $fields): array
+    {
+        if ($fields === []) {
+            throw new ValidationException('At least one field value is required to sign');
+        }
+
+        $response = $this->httpClient->post(
+            "documents/{$documentId}/assignments/{$assignmentId}",
+            array_values($fields),
+            [],
+            ['signer-access-code' => $accessCode]
+        );
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    /**
+     * Decline (reject) an assignment as a signer.
+     * `PUT /documents/{documentId}/assignments/{assignmentId}/reject?signer-access-code={code}`
+     *
+     * @throws ValidationException when no reason is provided
+     */
+    public function decline(string $documentId, string $assignmentId, string $accessCode, string $reason): array
+    {
+        if ($reason === '') {
+            throw new ValidationException('A decline reason is required');
+        }
+
+        $response = $this->httpClient->put(
+            "documents/{$documentId}/assignments/{$assignmentId}/reject",
+            ['decline_reason' => $reason],
+            [],
+            ['signer-access-code' => $accessCode]
+        );
+
+        return $this->extractData($response->getData() ?? []);
     }
 
     private function assertType(string $type): void

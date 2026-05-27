@@ -68,28 +68,22 @@ final class WebhookResourceTest extends TestCase
         $this->assertSame('accounts/a/webhooks/subscriptions', $http->lastCall()['uri']);
     }
 
-    public function testDeactivatePreservesConfigAndFlipsIsActive(): void
+    public function testDeactivateUsesDedicatedInactivateEndpoint(): void
     {
         [$http, $webhooks] = $this->build();
-        // GET current
         $http->queueJson(200, [
             'url' => 'https://x',
             'email' => 'a@b.com',
             'events' => [WebhookResource::EVENT_DOCUMENT_READY],
-            'is_active' => true,
+            'is_active' => false,
         ]);
-        // PUT replacement
-        $http->queueJson(200, []);
 
-        $webhooks->deactivate();
+        $result = $webhooks->deactivate();
 
         $put = $http->lastCall();
         $this->assertSame('PUT', $put['method']);
-        $this->assertSame('accounts/a/webhooks/subscriptions', $put['uri']);
-        $this->assertSame('https://x', $put['body']['url']);
-        $this->assertSame('a@b.com', $put['body']['email']);
-        $this->assertSame([WebhookResource::EVENT_DOCUMENT_READY], $put['body']['events']);
-        $this->assertFalse($put['body']['is_active']);
+        $this->assertSame('accounts/a/webhooks/inactivate', $put['uri']);
+        $this->assertFalse($result['is_active']);
     }
 
     public function testActivateReusesExistingConfig(): void
@@ -108,12 +102,49 @@ final class WebhookResourceTest extends TestCase
         $this->assertTrue($http->lastCall()['body']['is_active']);
     }
 
-    public function testDeactivateThrowsWhenNoSubscription(): void
+    public function testActivateThrowsWhenNoSubscription(): void
     {
         [$http, $webhooks] = $this->build();
         $http->queueJson(200, []);
 
         $this->expectException(\RuntimeException::class);
-        $webhooks->deactivate();
+        $webhooks->activate();
+    }
+
+    public function testEventTypesHitsGlobalEndpoint(): void
+    {
+        [$http, $webhooks] = $this->build();
+        $http->queueJson(200, [['id' => 'document_ready', 'description' => 'x']]);
+
+        $result = $webhooks->eventTypes();
+
+        $this->assertSame('webhooks/event-types', $http->lastCall()['uri']);
+        $this->assertSame('document_ready', $result[0]['id']);
+    }
+
+    public function testDispatchesReturnsEnvelopeWithFilters(): void
+    {
+        [$http, $webhooks] = $this->build();
+        $http->queueJson(200, [['id' => 'd1', 'event' => 'document_ready']]);
+
+        $result = $webhooks->dispatches(['event' => 'document_ready', 'delivered' => 'false']);
+
+        $call = $http->lastCall();
+        $this->assertSame('GET', $call['method']);
+        $this->assertSame('accounts/a/webhooks', $call['uri']);
+        $this->assertSame(['event' => 'document_ready', 'delivered' => 'false'], $call['query']);
+        $this->assertArrayHasKey('data', $result);
+    }
+
+    public function testRetryDispatch(): void
+    {
+        [$http, $webhooks] = $this->build();
+        $http->queueJson(200, ['id' => 'd1', 'delivered' => true]);
+
+        $webhooks->retryDispatch('d1');
+
+        $call = $http->lastCall();
+        $this->assertSame('POST', $call['method']);
+        $this->assertSame('accounts/a/webhooks/d1/retry', $call['uri']);
     }
 }

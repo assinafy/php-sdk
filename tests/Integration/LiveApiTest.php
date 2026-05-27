@@ -382,12 +382,109 @@ final class LiveApiTest extends TestCase
             $reactivated = $webhooks->activate();
             $this->assertTrue($reactivated['is_active'] ?? null);
         } finally {
-            // Restore the prior subscription if there was one. Best-effort.
-            if ($hadConfig) {
-                try {
+            // Restore the prior subscription if there was one; otherwise leave delivery
+            // disabled so we don't strand the account with an active bogus endpoint.
+            // Best-effort either way.
+            try {
+                if ($hadConfig) {
                     $webhooks->register($existingUrl, $existingEmail, $existingEvents, $existingActive);
-                } catch (\Throwable $e) {
-                    // best-effort — the test still reports the underlying failure
+                } else {
+                    $webhooks->deactivate();
+                }
+            } catch (\Throwable $e) {
+                // best-effort — the test still reports the underlying failure
+            }
+        }
+    }
+
+    /** Tier 1 — workspace tag CRUD (no credit cost). */
+    public function testTagLifecycle(): void
+    {
+        $tags = $this->client->tags();
+        $name = 'SDK Tag ' . uniqid();
+
+        $created = $tags->create($name, 'ff8800');
+        $this->assertNotEmpty($created['id']);
+        $this->assertSame($name, $created['name']);
+
+        $listed = $tags->list($name);
+        $this->assertContains($created['id'], array_column($listed, 'id'));
+
+        $renamed = $tags->update($created['id'], ['name' => $name . ' renamed']);
+        $this->assertSame($name . ' renamed', $renamed['name']);
+
+        $deleted = $tags->delete($created['id']);
+        $this->assertTrue($deleted['deleted'] ?? false);
+    }
+
+    /** Tier 1 — field-definition CRUD plus the global type catalog (no credit cost). */
+    public function testFieldLifecycleAndTypes(): void
+    {
+        $fields = $this->client->fields();
+
+        $types = $fields->types();
+        $this->assertNotEmpty($types);
+        $this->assertContains('text', array_column($types, 'type'));
+
+        $created = $fields->create('text', 'SDK Field ' . uniqid());
+        $this->assertNotEmpty($created['id']);
+
+        $fetched = $fields->get($created['id']);
+        $this->assertSame($created['id'], $fetched['id']);
+
+        $updated = $fields->update($created['id'], ['name' => 'SDK Field renamed']);
+        $this->assertSame('SDK Field renamed', $updated['name']);
+
+        $this->assertContains($created['id'], array_column($fields->list(), 'id'));
+
+        $fields->delete($created['id']);
+    }
+
+    /** Tier 1 — webhook discovery endpoints (read-only). */
+    public function testWebhookEventTypesAndDispatches(): void
+    {
+        $eventTypes = $this->client->webhooks()->eventTypes();
+        $this->assertContains('document_ready', array_column($eventTypes, 'id'));
+
+        $dispatches = $this->client->webhooks()->dispatches(['per-page' => 1]);
+        $this->assertArrayHasKey('data', $dispatches);
+    }
+
+    /** Tier 1 — document tag attach/list/replace/detach round-trip (no credit cost). */
+    public function testDocumentTagRoundTrip(): void
+    {
+        $pdf = $this->makePdfFixture();
+        $doc = $this->client->documents()->upload($pdf);
+        $this->createdDocuments[] = $doc['id'];
+        $this->client->documents()->waitUntilReady($doc['id'], 60, 2);
+
+        $documents = $this->client->documents();
+        $tagName = 'SDK DocTag ' . uniqid();
+
+        $afterAppend = $documents->appendTags($doc['id'], [$tagName]);
+        $this->assertContains($tagName, array_column($afterAppend, 'name'));
+
+        $listed = $documents->listTags($doc['id']);
+        $this->assertContains($tagName, array_column($listed, 'name'));
+
+        $replaceName = 'SDK DocTag2 ' . uniqid();
+        $documents->replaceTags($doc['id'], [$replaceName]);
+        $afterReplace = $documents->listTags($doc['id']);
+        $this->assertSame([$replaceName], array_column($afterReplace, 'name'));
+
+        $tagId = $afterReplace[0]['id'];
+        $detached = $documents->detachTag($doc['id'], $tagId);
+        $this->assertTrue($detached['detached'] ?? false);
+
+        // Clean up the workspace tags the document operations auto-created.
+        foreach ([$tagName, $replaceName] as $name) {
+            foreach ($this->client->tags()->list($name) as $tag) {
+                if ($tag['name'] === $name) {
+                    try {
+                        $this->client->tags()->delete($tag['id'], true);
+                    } catch (\Throwable $e) {
+                        // best-effort
+                    }
                 }
             }
         }

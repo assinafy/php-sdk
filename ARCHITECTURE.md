@@ -26,9 +26,12 @@ assinafy-php-sdk/
 │   │   ├── SignerResource.php
 │   │   ├── AssignmentResource.php
 │   │   ├── TemplateResource.php
+│   │   ├── TagResource.php
+│   │   ├── FieldResource.php
 │   │   ├── WebhookResource.php
 │   │   ├── AuthResource.php
-│   │   └── SignerSessionResource.php
+│   │   ├── SignerSessionResource.php
+│   │   └── SignerDocumentResource.php
 │   └── Support/                     # Helper classes
 │       └── WebhookVerifier.php
 ├── tests/                           # PHPUnit test suites
@@ -69,13 +72,16 @@ $client->documents()->upload(...);
 
 Resource classes encapsulate domain logic for each API resource:
 
-- **DocumentResource**: Document operations, including artifacts, public endpoints, and template-driven creation
+- **DocumentResource**: Document operations, including artifacts, public endpoints, document tags, and template-driven creation
 - **SignerResource**: Workspace signer CRUD
-- **AssignmentResource**: Signature requests (virtual + collect), cost estimation, resend, expiration reset
+- **AssignmentResource**: Signature requests (virtual + collect), cost estimation, resend, expiration reset, WhatsApp notification history
 - **TemplateResource**: Template listing and retrieval
-- **WebhookResource**: Webhook subscription upsert / read / delete
+- **TagResource**: Workspace tag CRUD
+- **FieldResource**: Field-definition CRUD, value validation, and the global type catalog
+- **WebhookResource**: Webhook subscription upsert / read / inactivate, plus dispatch history, retry, and event-type discovery
 - **AuthResource**: Login, social login, API-key lifecycle, password reset / change
-- **SignerSessionResource**: Signer-facing endpoints authenticated with a `signer-access-code`
+- **SignerSessionResource**: Signer-facing session endpoints authenticated with a `signer-access-code` (identity, signature image, sign/decline)
+- **SignerDocumentResource**: Signer-facing document list / sign-multiple / decline-multiple / download, authenticated with a `signer-access-code`
 
 **Pattern**: Each resource extends `AbstractResource` and follows the same structure.
 
@@ -172,7 +178,7 @@ class CustomHttpClient implements HttpClientInterface { }
 abstract class AbstractResource
 {
     protected function extractData(array $response): array { }
-    protected function normalizeId(array $data): array { }
+    protected function accountPath(string $suffix = ''): string { }
 }
 ```
 

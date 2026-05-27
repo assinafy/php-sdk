@@ -5,6 +5,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-05-27
+
+Complete coverage pass against `https://api.assinafy.com.br/v1/docs`. A full re-read of
+the live documentation surfaced several whole resource families the SDK had never exposed;
+each new endpoint below was verified end-to-end against the production API before release.
+
+### Added
+
+- **`TagResource`** (`$client->tags()`) — workspace tag management:
+  `GET/POST /accounts/{id}/tags`, `PUT/DELETE /accounts/{id}/tags/{tag_id}` (with `force`
+  detach-and-delete).
+- **`FieldResource`** (`$client->fields()`) — field-definition management and validation:
+  `POST/GET /accounts/{id}/fields`, `GET/PUT/DELETE /accounts/{id}/fields/{field_id}`,
+  `POST …/fields/{id}/validate`, `POST …/fields/validate-multiple` (both usable as an
+  authenticated user or, with a `signer-access-code`, as a signer), and the global
+  `GET /field-types` catalog.
+- **`SignerDocumentResource`** (`$client->signerDocuments()`) — signer-facing document
+  endpoints authenticated by `signer-access-code`: `GET /signers/{id}/document`,
+  `GET /signers/{id}/documents`, `PUT /signers/documents/sign-multiple`,
+  `PUT /signers/documents/decline-multiple`, and
+  `GET /signers/{id}/documents/{id}/download/{artifact_name}`.
+- **`DocumentResource` document tags** — `listTags()`, `appendTags()`, `replaceTags()`,
+  `detachTag()` covering `GET/POST/PUT /accounts/{id}/documents/{id}/tags` and
+  `DELETE …/tags/{tag_id}`.
+- **`AssignmentResource::whatsappNotifications()`** — `GET /documents/{id}/assignments/{id}/whatsapp-notifications`.
+- **`AssignmentResource` sequential signing** — signer entries now pass through the
+  documented `step` field; added `NOTIFICATION_EMAIL` / `NOTIFICATION_WHATSAPP` constants.
+- **`SignerSessionResource`** signer-facing signing actions — `currentDocument()`
+  (`GET /sign`), `sign()` (`POST /documents/{id}/assignments/{id}`), and `decline()`
+  (`PUT /documents/{id}/assignments/{id}/reject`).
+- **`WebhookResource`** dispatch + discovery endpoints — `eventTypes()`
+  (`GET /webhooks/event-types`), `dispatches()` (`GET /accounts/{id}/webhooks`, paginated
+  with `event`/`delivered`/`from`/`to` filters), and `retryDispatch()`
+  (`POST /accounts/{id}/webhooks/{dispatch_id}/retry`). Added constants for all 15
+  subscribable event types.
+- **Query-string parameter** on `HttpClientInterface::delete()` — supports the tag
+  `?force=true` flag. Backward-compatible: the new `$query` arg is the third positional
+  and defaults to `[]`.
+- **4 new live integration tests** covering the tag, field, document-tag, and webhook
+  discovery endpoints (all credit-free).
+
+### Changed
+
+- **`WebhookResource::deactivate()`** now calls the dedicated `PUT /accounts/{id}/webhooks/inactivate`
+  endpoint (verified live) instead of re-`PUT`ting the subscription with `is_active: false`.
+  The server preserves the URL / email / events, so `activate()` still restores them.
+- **`DocumentResource::assertArtifact()`** promoted to `public static` so
+  `SignerDocumentResource::download()` validates artifact names through the same list (DRY).
+
+[1.4.0]: https://github.com/assinafy/php-sdk/releases/tag/v1.4.0
+
 ## [1.3.0] - 2026-05-12
 
 Second pass against `https://api.assinafy.com.br/v1/docs` plus a full live verification

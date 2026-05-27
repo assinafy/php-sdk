@@ -19,6 +19,9 @@ class AssignmentResource extends AbstractResource
     public const VERIFICATION_EMAIL = 'Email';
     public const VERIFICATION_WHATSAPP = 'Whatsapp';
 
+    public const NOTIFICATION_EMAIL = 'Email';
+    public const NOTIFICATION_WHATSAPP = 'Whatsapp';
+
     /**
      * Create an assignment (signature request).
      * `POST /documents/{document_id}/assignments`
@@ -119,6 +122,22 @@ class AssignmentResource extends AbstractResource
         return $this->extractData($response->getData() ?? []);
     }
 
+    /**
+     * List the WhatsApp notification messages sent for an assignment, with the rendered
+     * header/body/buttons exactly as the signer sees them.
+     * `GET /documents/{document_id}/assignments/{assignment_id}/whatsapp-notifications`
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function whatsappNotifications(string $documentId, string $assignmentId): array
+    {
+        $response = $this->httpClient->get(
+            "documents/{$documentId}/assignments/{$assignmentId}/whatsapp-notifications"
+        );
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
     private function assertMethod(string $method): void
     {
         if (!in_array($method, [self::METHOD_VIRTUAL, self::METHOD_COLLECT], true)) {
@@ -172,6 +191,10 @@ class AssignmentResource extends AbstractResource
 
                 if (isset($signer['notification_methods'])) {
                     $entry['notification_methods'] = $signer['notification_methods'];
+                }
+
+                if (isset($signer['step'])) {
+                    $entry['step'] = $signer['step'];
                 }
 
                 if (isset($signer['role_id'])) {

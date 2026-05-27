@@ -127,7 +127,7 @@ class DocumentResource extends AbstractResource
      */
     public function download(string $documentId, string $artifact = self::ARTIFACT_CERTIFICATED): string
     {
-        $this->assertArtifact($artifact);
+        self::assertArtifact($artifact);
 
         $response = $this->httpClient->get("documents/{$documentId}/download/{$artifact}");
 
@@ -223,6 +223,77 @@ class DocumentResource extends AbstractResource
         $response = $this->httpClient->put(
             "public/documents/{$documentId}/send-token",
             ['recipient' => $recipient, 'channel' => $channel]
+        );
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    /**
+     * List the tags currently attached to a document.
+     * `GET /accounts/{account_id}/documents/{document_id}/tags`
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function listTags(string $documentId): array
+    {
+        $response = $this->httpClient->get($this->accountPath("documents/{$documentId}/tags"));
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    /**
+     * Replace the document's entire tag set with the given names.
+     * `PUT /accounts/{account_id}/documents/{document_id}/tags`
+     *
+     * Names that don't yet exist in the workspace are created automatically
+     * (case-insensitive). An empty array detaches all tags.
+     *
+     * @param array<int, string> $tagNames
+     * @return array<int, array<string, mixed>> the document's resulting tag set
+     */
+    public function replaceTags(string $documentId, array $tagNames): array
+    {
+        $response = $this->httpClient->put(
+            $this->accountPath("documents/{$documentId}/tags"),
+            ['tags' => array_values($tagNames)]
+        );
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    /**
+     * Attach tags to a document without removing existing ones (idempotent).
+     * `POST /accounts/{account_id}/documents/{document_id}/tags`
+     *
+     * Unknown names are auto-created.
+     *
+     * @param array<int, string> $tagNames
+     * @return array<int, array<string, mixed>> the document's resulting tag set
+     *
+     * @throws ValidationException when no tag names are provided
+     */
+    public function appendTags(string $documentId, array $tagNames): array
+    {
+        if ($tagNames === []) {
+            throw new ValidationException('At least one tag name is required');
+        }
+
+        $response = $this->httpClient->post(
+            $this->accountPath("documents/{$documentId}/tags"),
+            ['tags' => array_values($tagNames)]
+        );
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    /**
+     * Detach a single tag from a document (the tag itself is not deleted).
+     * `DELETE /accounts/{account_id}/documents/{document_id}/tags/{tag_id}`
+     */
+    public function detachTag(string $documentId, string $tagId): array
+    {
+        $response = $this->httpClient->delete(
+            $this->accountPath("documents/{$documentId}/tags/{$tagId}")
         );
 
         return $this->extractData($response->getData() ?? []);
@@ -370,7 +441,13 @@ class DocumentResource extends AbstractResource
         }
     }
 
-    private function assertArtifact(string $artifact): void
+    /**
+     * Assert that `$artifact` is one of the documented artifact names. Shared with
+     * {@see SignerDocumentResource::download()} so both download paths validate identically.
+     *
+     * @throws ValidationException on an unknown artifact name
+     */
+    public static function assertArtifact(string $artifact): void
     {
         $allowed = [
             self::ARTIFACT_ORIGINAL,
