@@ -75,7 +75,7 @@ Resource classes encapsulate domain logic for each API resource:
 - **DocumentResource**: Document operations, including artifacts, public endpoints, document tags, and template-driven creation
 - **SignerResource**: Workspace signer CRUD
 - **AssignmentResource**: Signature requests (virtual + collect), cost estimation, resend, expiration reset, WhatsApp notification history
-- **TemplateResource**: Template listing and retrieval
+- **TemplateResource**: Template create (PDF upload), list, retrieval, update, delete, and page download
 - **TagResource**: Workspace tag CRUD
 - **FieldResource**: Field-definition CRUD, value validation, and the global type catalog
 - **WebhookResource**: Webhook subscription upsert / read / inactivate, plus dispatch history, retry, and event-type discovery

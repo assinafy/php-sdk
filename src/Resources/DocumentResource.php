@@ -60,7 +60,7 @@ class DocumentResource extends AbstractResource
      */
     public function upload(string $filePath): array
     {
-        $this->validateUpload($filePath);
+        self::assertUploadable($filePath);
 
         $this->logger->info('Uploading document', [
             'file' => $filePath,
@@ -422,7 +422,14 @@ class DocumentResource extends AbstractResource
         ];
     }
 
-    private function validateUpload(string $filePath): void
+    /**
+     * Assert a file can be uploaded as a document or template: it must exist, be a
+     * PDF, and not exceed the 25 MB API limit. Shared with {@see TemplateResource::create()}
+     * so both upload paths enforce identical constraints.
+     *
+     * @throws ValidationException when the file is missing, not a PDF, or too large
+     */
+    public static function assertUploadable(string $filePath): void
     {
         if (!is_file($filePath)) {
             throw new ValidationException('File not found', ['file_path' => $filePath]);

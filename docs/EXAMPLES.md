@@ -184,6 +184,36 @@ $doc = $client->documents()->createFromTemplate(
 );
 ```
 
+## 10b. Manage templates
+
+```php
+// Upload a PDF as a new template. Pages render asynchronously, so poll until Ready.
+$template = $client->templates()->create('/path/to/contract.pdf');
+do {
+    sleep(2);
+    $template = $client->templates()->get($template['id']);
+} while (strtolower($template['status']) !== 'ready');
+
+// Tweak the defaults applied to documents created from this template.
+$client->templates()->update($template['id'], [
+    'document_name' => 'Service Agreement',
+    'message'       => 'Please review and sign.',
+]);
+
+// Render the first page to a JPEG for previews.
+file_put_contents(
+    'preview.jpg',
+    $client->templates()->downloadPage($template['id'], $template['pages'][0]['id'])
+);
+
+// Remove it when you're done.
+$client->templates()->delete($template['id']);
+```
+
+> Signer roles and field placements are configured in the Assinafy web app — a freshly
+> uploaded template only has the default `Editor` role, so `createFromTemplate()` needs a
+> template whose roles were set up there first.
+
 ## 11. Webhook subscription
 
 ```php

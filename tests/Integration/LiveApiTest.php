@@ -144,6 +144,52 @@ final class LiveApiTest extends TestCase
         $this->assertArrayHasKey('data', $page);
     }
 
+    /** Tier 1 — full template management lifecycle: create → get → update → page download → delete. */
+    public function testTemplateManagementLifecycle(): void
+    {
+        $templates = $this->client->templates();
+        $pdf = $this->makePdfFixture();
+
+        $created = $templates->create($pdf);
+        $templateId = (string) ($created['id'] ?? '');
+        $this->assertNotSame('', $templateId, 'template create must return an id');
+        $this->assertSame('template', $created['resource'] ?? null);
+
+        try {
+            // The page render is asynchronous — poll get() until the template is Ready.
+            $template = $created;
+            for ($i = 0; $i < 30; $i++) {
+                $template = $templates->get($templateId);
+                if (strtolower((string) ($template['status'] ?? '')) === 'ready') {
+                    break;
+                }
+                sleep(2);
+            }
+            $this->assertSame('ready', strtolower((string) ($template['status'] ?? '')), 'template never reached Ready');
+            $this->assertSame($templateId, $template['id'] ?? null);
+
+            // update editable metadata
+            $newName = 'SDK Renamed ' . uniqid();
+            $updated = $templates->update($templateId, [
+                'document_name' => $newName,
+                'message' => 'SDK integration message',
+            ]);
+            $this->assertSame($newName, $updated['document_name'] ?? null);
+            $this->assertSame('SDK integration message', $updated['message'] ?? null);
+
+            // download the first rendered page
+            $pages = $template['pages'] ?? [];
+            $this->assertNotEmpty($pages, 'Ready template should expose at least one page');
+            $pageImage = $templates->downloadPage($templateId, (string) $pages[0]['id']);
+            $this->assertNotEmpty($pageImage, 'template page download returned empty body');
+        } finally {
+            $templates->delete($templateId);
+        }
+
+        $this->expectException(ApiException::class);
+        $templates->get($templateId);
+    }
+
     public function testWebhookSubscriptionRoundTrip(): void
     {
         $webhooks = $this->client->webhooks();

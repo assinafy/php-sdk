@@ -243,16 +243,41 @@ $client->assignments()->resetExpiration($documentId, $assignment['id'], '2027-01
 
 | Method | Endpoint |
 | --- | --- |
+| `create($filePath)` | `POST /accounts/{id}/templates` (PDF upload) |
 | `list($page, $perPage, $filters)` | `GET /accounts/{id}/templates` |
 | `get($templateId)` | `GET /accounts/{id}/templates/{id}` |
+| `update($templateId, $data)` | `PUT /accounts/{id}/templates/{id}` |
+| `delete($templateId)` | `DELETE /accounts/{id}/templates/{id}` |
+| `downloadPage($templateId, $pageId)` | `GET /accounts/{id}/templates/{id}/pages/{page_id}/download` |
 
 ```php
+// Upload a PDF as a template (pages render asynchronously — poll until Ready).
+$template = $client->templates()->create('/path/to/contract.pdf');
+do {
+    sleep(2);
+    $template = $client->templates()->get($template['id']);
+} while (strtolower($template['status']) !== 'ready');
+
+// Update the default document name / invitation message shown on documents created from it.
+$client->templates()->update($template['id'], [
+    'document_name' => 'Service Agreement',
+    'message'       => 'Please review and sign.',
+]);
+
 $templates = $client->templates()->list(1, 20, ['status' => 'ready']);
 $template  = $client->templates()->get('fa7f3e524f3a2cc00a5ea4325e2');
 foreach ($template['roles'] as $role) {
     echo "{$role['id']}: {$role['name']}\n";
 }
+
+// Render the first page as JPEG, or delete the template entirely.
+file_put_contents('page1.jpg', $client->templates()->downloadPage($template['id'], $template['pages'][0]['id']));
+$client->templates()->delete($template['id']);
 ```
+
+> Signer roles and field placements are configured in the Assinafy web app; a freshly
+> uploaded template carries only the default `Editor` role, so `createFromTemplate()`
+> requires a template whose roles have been set up there first.
 
 ### Tags — `$client->tags()`
 

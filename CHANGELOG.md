@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-06-05
+
+Audit pass against `https://api.assinafy.com.br/v1/docs`, verified end-to-end against the
+live sandbox (`https://sandbox.assinafy.com.br/v1`). The docs describe the Template service
+as "create, list, download and delete templates", but only the read endpoints were exposed.
+Probing the live API confirmed the four management routes exist (a `406`/app-level `404`
+response distinguishes a real route from a framework `Página não encontrada` routing miss),
+so they are now covered. No functionality was removed — `DELETE /webhooks/subscriptions`
+remains absent because the live API returns a routing 404 for it (it does not exist despite
+appearing in the docs).
+
+### Added
+
+- **`TemplateResource` management endpoints** — the SDK now covers the full documented
+  template surface:
+  - `create(string $filePath)` — `POST /accounts/{id}/templates` (multipart PDF upload;
+    the template renders asynchronously, poll `get()` until `status` is `Ready`).
+  - `update(string $templateId, array $data)` — `PUT /accounts/{id}/templates/{id}`
+    (editable `name`, `document_name`, `message`).
+  - `delete(string $templateId)` — `DELETE /accounts/{id}/templates/{id}`.
+  - `downloadPage(string $templateId, string $pageId)` — `GET /accounts/{id}/templates/{id}/pages/{page_id}/download`
+    (raw JPEG body).
+- **`DocumentResource::assertUploadable()`** — the document-upload validation (PDF +
+  25 MB limit) is now a shared static helper reused by `TemplateResource::create()` (DRY).
+- **Live `testTemplateManagementLifecycle`** — create → poll Ready → update → page
+  download → delete → confirm-gone, exercised against the sandbox.
+
+### Fixed
+
+- **`TemplateResource` docblocks** no longer claim template creation/editing is web-app
+  only — that statement contradicted both the docs and the live API.
+
 ## [1.4.0] - 2026-05-27
 
 Complete coverage pass against `https://api.assinafy.com.br/v1/docs`. A full re-read of
@@ -54,6 +86,7 @@ each new endpoint below was verified end-to-end against the production API befor
 - **`DocumentResource::assertArtifact()`** promoted to `public static` so
   `SignerDocumentResource::download()` validates artifact names through the same list (DRY).
 
+[1.4.1]: https://github.com/assinafy/php-sdk/releases/tag/v1.4.1
 [1.4.0]: https://github.com/assinafy/php-sdk/releases/tag/v1.4.0
 
 ## [1.3.0] - 2026-05-12
