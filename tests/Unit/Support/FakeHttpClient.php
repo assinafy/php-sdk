@@ -59,9 +59,14 @@ final class FakeHttpClient implements HttpClientInterface
         return $this->record('PUT', $uri, ['body' => $data, 'headers' => $headers, 'query' => $query]);
     }
 
-    public function delete(string $uri, array $headers = [], array $query = []): Response
+    public function patch(string $uri, array $data = [], array $headers = [], array $query = []): Response
     {
-        return $this->record('DELETE', $uri, ['headers' => $headers, 'query' => $query]);
+        return $this->record('PATCH', $uri, ['body' => $data, 'headers' => $headers, 'query' => $query]);
+    }
+
+    public function delete(string $uri, array $headers = [], array $query = [], array $data = []): Response
+    {
+        return $this->record('DELETE', $uri, ['headers' => $headers, 'query' => $query, 'body' => $data]);
     }
 
     public function uploadFile(string $uri, string $filePath, array $data = [], array $headers = []): Response

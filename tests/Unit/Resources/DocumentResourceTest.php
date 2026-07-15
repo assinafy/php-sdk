@@ -261,6 +261,106 @@ final class DocumentResourceTest extends TestCase
         $this->assertSame(['tags' => []], $this->http->lastCall()['body']);
     }
 
+    public function testRenameSendsPatchWithNameBody(): void
+    {
+        $this->http->queueJson(200, ['id' => 'doc1', 'name' => 'renamed.pdf']);
+
+        $result = $this->documents->rename('doc1', 'renamed.pdf');
+
+        $call = $this->http->lastCall();
+        $this->assertSame('PATCH', $call['method']);
+        $this->assertSame('documents/doc1', $call['uri']);
+        $this->assertSame(['name' => 'renamed.pdf'], $call['body']);
+        $this->assertSame('renamed.pdf', $result['name']);
+    }
+
+    public function testRenameRejectsAnEmptyName(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->documents->rename('doc1', '');
+    }
+
+    public function testRenameRejectsANameOver255Characters(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->documents->rename('doc1', str_repeat('a', 256));
+    }
+
+    /**
+     * The 255 cap is a character limit, not a byte limit — multibyte names near the
+     * boundary must not be rejected by a naive strlen().
+     */
+    public function testRenameAcceptsMultibyteNameAtTheBoundary(): void
+    {
+        $this->http->queueJson(200, ['id' => 'doc1']);
+
+        $this->documents->rename('doc1', str_repeat('á', 255));
+
+        $this->assertSame('PATCH', $this->http->lastCall()['method']);
+    }
+
+    public function testSearchHitsTheSearchPath(): void
+    {
+        $this->http->queueJson(200, [['id' => 'doc1']]);
+
+        $this->documents->search('contract');
+
+        $call = $this->http->lastCall();
+        $this->assertSame('GET', $call['method']);
+        $this->assertSame('accounts/acc/documents/search', $call['uri']);
+        $this->assertSame('contract', $call['query']['search']);
+        $this->assertSame(20, $call['query']['per-page']);
+    }
+
+    public function testListSendsKebabCasePerPage(): void
+    {
+        $this->http->queueJson(200, []);
+
+        $this->documents->list(2, 50);
+
+        $query = $this->http->lastCall()['query'];
+        $this->assertSame(2, $query['page']);
+        $this->assertSame(50, $query['per-page'], 'The API spells it per-page, not perPage');
+    }
+
+    /**
+     * The API reports pagination only through X-Pagination-* response headers — there is no
+     * `meta` key on any endpoint — so list() lifts them into a `pagination` key.
+     */
+    public function testListLiftsPaginationHeadersIntoTheResult(): void
+    {
+        $this->http->queueJson(200, [['id' => 'doc1']], [
+            'x-pagination-current-page' => ['1'],
+            'x-pagination-page-count' => ['9'],
+            'x-pagination-per-page' => ['2'],
+            'x-pagination-total-count' => ['17'],
+        ]);
+
+        $result = $this->documents->list();
+
+        $this->assertSame(
+            ['current_page' => 1, 'page_count' => 9, 'per_page' => 2, 'total_count' => 17],
+            $result['pagination']
+        );
+        $this->assertSame([['id' => 'doc1']], $result['data'], 'data must stay untouched');
+    }
+
+    public function testPaginationIsOmittedWhenTheServerSendsNoHeaders(): void
+    {
+        $this->http->queueJson(200, [['id' => 'doc1']]);
+
+        $result = $this->documents->list();
+
+        $this->assertArrayNotHasKey('pagination', $result);
+    }
+
+    public function testPaginationIsOmittedWhenHeadersArePartial(): void
+    {
+        $this->http->queueJson(200, [], ['x-pagination-total-count' => ['17']]);
+
+        $this->assertArrayNotHasKey('pagination', $this->documents->list());
+    }
+
     private function writeFixturePdf(): string
     {
         $path = tempnam(sys_get_temp_dir(), 'asn') . '.pdf';

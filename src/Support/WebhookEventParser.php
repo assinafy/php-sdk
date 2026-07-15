@@ -1,0 +1,110 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Assinafy\SDK\Support;
+
+/**
+ * Parses Assinafy webhook deliveries into their component parts.
+ *
+ * Signature verification is deliberately absent. Earlier versions shipped a `verify()` method
+ * doing HMAC-SHA256 against a configured `webhook_secret`, but the API documents no such
+ * mechanism: "secret" appears nowhere in the OpenAPI spec, the subscription endpoint
+ * (`PUT /accounts/{id}/webhooks/subscriptions`) accepts only `events`, `is_active`, `url` and
+ * `email` — leaving nowhere to register a signing key — and real deliveries carry no signature
+ * header. The method could therefore never return true for a genuine event, yet the docs
+ * recommended it as a reject-the-request guard, which would have dropped every webhook.
+ * It was removed in 2.0.0 rather than left as a trap.
+ *
+ * Authenticate deliveries by other means: keep the endpoint URL secret and unguessable, and
+ * re-fetch the referenced entity through the API before acting on it.
+ *
+ * @see https://api.assinafy.com.br/v1/docs
+ */
+class WebhookEventParser
+{
+    /**
+     * Decode a raw webhook body into an event array, or null when it is not valid JSON.
+     *
+     * The delivered envelope looks like:
+     * ```
+     * [
+     *   'id'         => 8629,
+     *   'event'      => 'signature_requested',
+     *   'message'    => 'Signature requested',
+     *   'subject'    => 'Document',
+     *   'origin'     => 'api',
+     *   'account_id' => '102d25a489f34a275d31a16045fd',
+     *   'created_at' => '2026-06-09T17:08:49Z',
+     *   'object'     => ['id' => '1032c…', 'type' => 'Document', 'status' => 'pending_signature', …],
+     *   'payload'    => [ … event-specific parameters … ],
+     * ]
+     * ```
+     *
+     * @param string $payload raw request body, exactly as received
+     * @return array<string, mixed>|null
+     */
+    public function extractEvent(string $payload): ?array
+    {
+        $data = json_decode($payload, true);
+
+        if (json_last_error() !== JSON_ERROR_NONE || !is_array($data)) {
+            return null;
+        }
+
+        return $data;
+    }
+
+    /**
+     * The event name, e.g. `signature_requested`.
+     *
+     * @param array<string, mixed>|null $event
+     * @see \Assinafy\SDK\Resources\WebhookResource the `EVENT_*` constants
+     */
+    public function getEventType(?array $event): ?string
+    {
+        $type = $event['event'] ?? null;
+
+        return is_string($type) ? $type : null;
+    }
+
+    /**
+     * The entity the event is about — the `object` key of the envelope.
+     *
+     * Its shape varies by `subject` (Document, Signer, Template, …); a Document object carries
+     * `id`, `name`, `status`, `artifacts`, `pages`, `tags` and friends.
+     *
+     * @param array<string, mixed>|null $event
+     * @return array<string, mixed>
+     */
+    public function getEventData(?array $event): array
+    {
+        return is_array($event['object'] ?? null) ? $event['object'] : [];
+    }
+
+    /**
+     * The event-specific parameters — the `payload` key of the envelope.
+     *
+     * Distinct from {@see self::getEventData()}: `object` is the entity the event concerns,
+     * `payload` is the extra detail about what happened to it.
+     *
+     * @param array<string, mixed>|null $event
+     * @return array<string, mixed>
+     */
+    public function getEventPayload(?array $event): array
+    {
+        return is_array($event['payload'] ?? null) ? $event['payload'] : [];
+    }
+
+    /**
+     * The account the event belongs to — useful when one endpoint serves several workspaces.
+     *
+     * @param array<string, mixed>|null $event
+     */
+    public function getAccountId(?array $event): ?string
+    {
+        $accountId = $event['account_id'] ?? null;
+
+        return is_string($accountId) ? $accountId : null;
+    }
+}

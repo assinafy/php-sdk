@@ -17,7 +17,6 @@ final class ConfigurationTest extends TestCase
         $this->assertSame('key', $config->getApiKey());
         $this->assertSame('account', $config->getAccountId());
         $this->assertSame(Configuration::DEFAULT_BASE_URL, $config->getBaseUrl());
-        $this->assertNull($config->getWebhookSecret());
         $this->assertSame(30, $config->getTimeout());
         $this->assertSame(10, $config->getConnectTimeout());
     }
@@ -44,15 +43,29 @@ final class ConfigurationTest extends TestCase
             'apiKey' => 'k',
             'account_id' => 'a',
             'baseUrl' => 'https://example.com',
-            'webhook_secret' => 'sec',
             'connectTimeout' => 5,
         ]);
 
         $this->assertSame('k', $config->getApiKey());
         $this->assertSame('a', $config->getAccountId());
         $this->assertSame('https://example.com', $config->getBaseUrl());
-        $this->assertSame('sec', $config->getWebhookSecret());
         $this->assertSame(5, $config->getConnectTimeout());
+    }
+
+    /**
+     * `webhook_secret` was meaningful in 1.x, when it fed the HMAC verifier that 2.0.0
+     * removed. Configs carried over from 1.x must keep working rather than blow up.
+     */
+    public function testFromArrayIgnoresLegacyWebhookSecretKey(): void
+    {
+        $config = Configuration::fromArray([
+            'api_key' => 'k',
+            'account_id' => 'a',
+            'webhook_secret' => 'sec',
+        ]);
+
+        $this->assertSame('k', $config->getApiKey());
+        $this->assertSame('a', $config->getAccountId());
     }
 
     public function testRejectsEmptyApiKey(): void

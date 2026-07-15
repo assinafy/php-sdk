@@ -6,6 +6,7 @@ namespace Assinafy\SDK;
 
 use Assinafy\SDK\Http\GuzzleHttpClient;
 use Assinafy\SDK\Http\HttpClientInterface;
+use Assinafy\SDK\Resources\AccountResource;
 use Assinafy\SDK\Resources\AssignmentResource;
 use Assinafy\SDK\Resources\AuthResource;
 use Assinafy\SDK\Resources\DocumentResource;
@@ -16,7 +17,7 @@ use Assinafy\SDK\Resources\SignerSessionResource;
 use Assinafy\SDK\Resources\TagResource;
 use Assinafy\SDK\Resources\TemplateResource;
 use Assinafy\SDK\Resources\WebhookResource;
-use Assinafy\SDK\Support\WebhookVerifier;
+use Assinafy\SDK\Support\WebhookEventParser;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 
@@ -26,6 +27,7 @@ class AssinafyClient
     private HttpClientInterface $httpClient;
     private LoggerInterface $logger;
 
+    private ?AccountResource $accounts = null;
     private ?DocumentResource $documents = null;
     private ?SignerResource $signers = null;
     private ?AssignmentResource $assignments = null;
@@ -36,7 +38,7 @@ class AssinafyClient
     private ?AuthResource $auth = null;
     private ?SignerSessionResource $signerSession = null;
     private ?SignerDocumentResource $signerDocuments = null;
-    private ?WebhookVerifier $webhookVerifier = null;
+    private ?WebhookEventParser $webhookEvents = null;
 
     public function __construct(
         Configuration $config,
@@ -51,11 +53,9 @@ class AssinafyClient
     public static function create(
         string $apiKey,
         string $accountId,
-        string $baseUrl = Configuration::DEFAULT_BASE_URL,
-        ?string $webhookSecret = null
+        string $baseUrl = Configuration::DEFAULT_BASE_URL
     ): self {
-        $config = new Configuration($apiKey, $accountId, $baseUrl, $webhookSecret);
-        return new self($config);
+        return new self(new Configuration($apiKey, $accountId, $baseUrl));
     }
 
     public static function fromArray(array $config): self
@@ -78,6 +78,22 @@ class AssinafyClient
     public static function forAuth(string $baseUrl = Configuration::DEFAULT_BASE_URL): self
     {
         return new self(Configuration::forPublic($baseUrl));
+    }
+
+    /**
+     * Accounts (workspaces).
+     *
+     * `accounts()->list()` and `accounts()->create()` are not account-scoped, so they work on a
+     * client built with {@see self::forAuth()} — that is how you discover the account ID that
+     * every other resource needs. The remaining methods act on the configured account.
+     */
+    public function accounts(): AccountResource
+    {
+        if ($this->accounts === null) {
+            $this->accounts = new AccountResource($this->httpClient, $this->config, $this->logger);
+        }
+
+        return $this->accounts;
     }
 
     public function documents(): DocumentResource
@@ -170,13 +186,19 @@ class AssinafyClient
         return $this->signerDocuments;
     }
 
-    public function webhookVerifier(): WebhookVerifier
+    /**
+     * Helpers for decoding incoming webhook deliveries.
+     *
+     * Replaces `webhookVerifier()` from 1.x. Signature verification was removed in 2.0.0 —
+     * see {@see WebhookEventParser} for why and for how to secure your endpoint instead.
+     */
+    public function webhookEvents(): WebhookEventParser
     {
-        if ($this->webhookVerifier === null) {
-            $this->webhookVerifier = new WebhookVerifier($this->config);
+        if ($this->webhookEvents === null) {
+            $this->webhookEvents = new WebhookEventParser();
         }
 
-        return $this->webhookVerifier;
+        return $this->webhookEvents;
     }
 
     /**

@@ -6,7 +6,7 @@ namespace Assinafy\SDK;
 
 class Configuration
 {
-    public const SDK_VERSION = '1.4.1';
+    public const SDK_VERSION = '2.0.0';
     public const DEFAULT_BASE_URL = 'https://api.assinafy.com.br/v1';
     public const SANDBOX_BASE_URL = 'https://sandbox.assinafy.com.br/v1';
 
@@ -20,7 +20,6 @@ class Configuration
     private string $baseUrl;
     private string $apiKey;
     private string $accountId;
-    private ?string $webhookSecret;
     private int $timeout;
     private int $connectTimeout;
 
@@ -28,7 +27,6 @@ class Configuration
         string $apiKey,
         string $accountId,
         string $baseUrl = self::DEFAULT_BASE_URL,
-        ?string $webhookSecret = null,
         int $timeout = 30,
         int $connectTimeout = 10
     ) {
@@ -38,20 +36,23 @@ class Configuration
         $this->apiKey = $apiKey;
         $this->accountId = $accountId;
         $this->baseUrl = rtrim($baseUrl, '/');
-        $this->webhookSecret = $webhookSecret;
         $this->timeout = $timeout;
         $this->connectTimeout = $connectTimeout;
     }
 
+    /**
+     * @param array<string, mixed> $config keys: `api_key`/`apiKey`, `account_id`/`accountId`,
+     *     `base_url`/`baseUrl`, `timeout`, `connect_timeout`/`connectTimeout`.
+     *     A `webhook_secret` key is accepted and ignored — see {@see \Assinafy\SDK\Support\WebhookEventParser}.
+     */
     public static function fromArray(array $config): self
     {
         return new self(
-            $config['api_key'] ?? $config['apiKey'] ?? '',
-            $config['account_id'] ?? $config['accountId'] ?? '',
-            $config['base_url'] ?? $config['baseUrl'] ?? self::DEFAULT_BASE_URL,
-            $config['webhook_secret'] ?? $config['webhookSecret'] ?? null,
-            $config['timeout'] ?? 30,
-            $config['connect_timeout'] ?? $config['connectTimeout'] ?? 10
+            (string) ($config['api_key'] ?? $config['apiKey'] ?? ''),
+            (string) ($config['account_id'] ?? $config['accountId'] ?? ''),
+            (string) ($config['base_url'] ?? $config['baseUrl'] ?? self::DEFAULT_BASE_URL),
+            (int) ($config['timeout'] ?? 30),
+            (int) ($config['connect_timeout'] ?? $config['connectTimeout'] ?? 10)
         );
     }
 
@@ -93,11 +94,6 @@ class Configuration
     public function getAccountId(): string
     {
         return $this->accountId;
-    }
-
-    public function getWebhookSecret(): ?string
-    {
-        return $this->webhookSecret;
     }
 
     public function getTimeout(): int

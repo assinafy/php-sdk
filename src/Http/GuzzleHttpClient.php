@@ -8,6 +8,7 @@ use Assinafy\SDK\Configuration;
 use Assinafy\SDK\Exceptions\ApiException;
 use Assinafy\SDK\Exceptions\NetworkException;
 use GuzzleHttp\Client;
+use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\Exception\RequestException;
 use Psr\Log\LoggerInterface;
@@ -15,18 +16,30 @@ use Psr\Log\NullLogger;
 
 class GuzzleHttpClient implements HttpClientInterface
 {
-    private Client $client;
+    private ClientInterface $client;
     private LoggerInterface $logger;
 
-    public function __construct(Configuration $config, ?LoggerInterface $logger = null)
-    {
+    /**
+     * @param ClientInterface|null $client Pre-built Guzzle client. Leave null in production —
+     *     the SDK builds one from `$config`. Tests inject a client backed by a `MockHandler`
+     *     so the transport can be exercised without network access.
+     */
+    public function __construct(
+        Configuration $config,
+        ?LoggerInterface $logger = null,
+        ?ClientInterface $client = null
+    ) {
         $this->logger = $logger ?? new NullLogger();
+        $this->client = $client ?? self::buildClient($config);
+    }
 
+    private static function buildClient(Configuration $config): Client
+    {
         // Guzzle resolves relative request URIs against `base_uri` per RFC 3986. When the
         // base_uri lacks a trailing slash, its last path segment gets *replaced* rather than
         // appended to — so `https://api.assinafy.com.br/v1` + `documents/statuses` becomes
         // `https://api.assinafy.com.br/documents/statuses` (no `/v1`). Always end with `/`.
-        $this->client = new Client([
+        return new Client([
             'base_uri' => rtrim($config->getBaseUrl(), '/') . '/',
             'timeout' => $config->getTimeout(),
             'connect_timeout' => $config->getConnectTimeout(),
@@ -58,11 +71,23 @@ class GuzzleHttpClient implements HttpClientInterface
         ], $query));
     }
 
-    public function delete(string $uri, array $headers = [], array $query = []): Response
+    public function patch(string $uri, array $data = [], array $headers = [], array $query = []): Response
     {
-        return $this->request('DELETE', $uri, $this->withOptionalQuery([
-            'headers' => $headers,
+        return $this->request('PATCH', $uri, $this->withOptionalQuery([
+            'json' => $data,
+            'headers' => $this->withJsonHeaders($headers),
         ], $query));
+    }
+
+    public function delete(string $uri, array $headers = [], array $query = [], array $data = []): Response
+    {
+        $options = ['headers' => $data === [] ? $headers : $this->withJsonHeaders($headers)];
+
+        if ($data !== []) {
+            $options['json'] = $data;
+        }
+
+        return $this->request('DELETE', $uri, $this->withOptionalQuery($options, $query));
     }
 
     public function uploadFile(string $uri, string $filePath, array $data = [], array $headers = []): Response
@@ -135,7 +160,7 @@ class GuzzleHttpClient implements HttpClientInterface
     private function request(string $method, string $uri, array $options = []): Response
     {
         $this->logger->debug("Assinafy API Request: {$method} {$uri}", [
-            'options' => $options,
+            'options' => LogRedactor::redact($options),
         ]);
 
         try {
@@ -146,7 +171,7 @@ class GuzzleHttpClient implements HttpClientInterface
             $body = (string)$response->getBody();
 
             $this->logger->debug("Assinafy API Response: {$statusCode}", [
-                'body' => $body,
+                'body' => LogRedactor::redactBody($body),
             ]);
 
             $apiResponse = new Response($statusCode, $headers, $body);
@@ -163,7 +188,7 @@ class GuzzleHttpClient implements HttpClientInterface
 
             $this->logger->error("Assinafy API Error: {$method} {$uri}", [
                 'status_code' => $statusCode,
-                'response' => $body,
+                'response' => LogRedactor::redactBody($body),
                 'exception' => $e->getMessage(),
             ]);
 

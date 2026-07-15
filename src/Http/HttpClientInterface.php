@@ -29,10 +29,19 @@ interface HttpClientInterface
     public function put(string $uri, array $data = [], array $headers = [], array $query = []): Response;
 
     /**
-     * @param array<string, string> $headers
-     * @param array<string, scalar> $query optional query-string parameters (e.g. `force`)
+     * @param array<array-key, mixed> $data    JSON body
+     * @param array<string, string>   $headers
+     * @param array<string, scalar>   $query
      */
-    public function delete(string $uri, array $headers = [], array $query = []): Response;
+    public function patch(string $uri, array $data = [], array $headers = [], array $query = []): Response;
+
+    /**
+     * @param array<string, string>   $headers
+     * @param array<string, scalar>   $query   optional query-string parameters (e.g. `force`)
+     * @param array<array-key, mixed> $data    optional JSON body — a few DELETE endpoints
+     *                                          (e.g. `DELETE /accounts/{id}`) document one
+     */
+    public function delete(string $uri, array $headers = [], array $query = [], array $data = []): Response;
 
     /**
      * @param array<string, mixed>  $data

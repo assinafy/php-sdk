@@ -50,7 +50,7 @@ phpcbf:
 	vendor/bin/phpcbf
 
 phpstan:
-	vendor/bin/phpstan analyse
+	vendor/bin/phpstan analyse --memory-limit=512M
 
 quality: phpcs phpstan
 	@echo "All quality checks passed!"
