@@ -536,6 +536,174 @@ final class LiveApiTest extends TestCase
         }
     }
 
+    // ---------------------------------------------------------------------------------
+    // Accounts — added in 2.0.0; the whole tag was previously unimplemented.
+    // ---------------------------------------------------------------------------------
+
+    public function testAccountsListReturnsTheConfiguredAccount(): void
+    {
+        $result = $this->client->accounts()->list();
+
+        $this->assertArrayHasKey('data', $result);
+        $this->assertNotEmpty($result['data']);
+
+        $ids = array_column($result['data'], 'id');
+        $this->assertContains(
+            $this->client->getConfig()->getAccountId(),
+            $ids,
+            'The configured account should appear in accounts()->list()'
+        );
+    }
+
+    public function testAccountsGetReturnsTheWorkspaceProfile(): void
+    {
+        $account = $this->client->accounts()->get();
+
+        $this->assertSame($this->client->getConfig()->getAccountId(), $account['id']);
+        $this->assertArrayHasKey('name', $account);
+    }
+
+    public function testAccountsThemeReturnsBranding(): void
+    {
+        $theme = $this->client->accounts()->theme();
+
+        $this->assertArrayHasKey('account_name', $theme);
+        $this->assertArrayHasKey('primary_color', $theme);
+    }
+
+    /**
+     * The route exists even with no logo uploaded — it answers with an app-level 404
+     * ("Arquivo de armazenamento não encontrado"), not a routing miss.
+     */
+    public function testAccountsDownloadLogoEitherReturnsBytesOr404s(): void
+    {
+        try {
+            $bytes = $this->client->accounts()->downloadLogo();
+            $this->assertNotSame('', $bytes);
+        } catch (ApiException $e) {
+            $this->assertSame(404, $e->getCode());
+        }
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Pagination — the API reports it only in X-Pagination-* headers, never in the body.
+    // ---------------------------------------------------------------------------------
+
+    public function testDocumentListSurfacesPaginationFromResponseHeaders(): void
+    {
+        $result = $this->client->documents()->list(1, 2);
+
+        $this->assertArrayNotHasKey('meta', $result, 'The API has never sent a `meta` key');
+        $this->assertArrayHasKey('pagination', $result, 'Pagination must be lifted from the headers');
+
+        $pagination = $result['pagination'];
+        $this->assertSame(1, $pagination['current_page']);
+        $this->assertSame(2, $pagination['per_page']);
+        $this->assertGreaterThanOrEqual(0, $pagination['total_count']);
+        $this->assertLessThanOrEqual(2, count($result['data']));
+    }
+
+    public function testDocumentSearchReturnsMatches(): void
+    {
+        $result = $this->client->documents()->search('', 1, 2);
+
+        $this->assertArrayHasKey('data', $result);
+        $this->assertLessThanOrEqual(2, count($result['data']));
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Rename (PATCH) — only legal before the signature process starts.
+    // ---------------------------------------------------------------------------------
+
+    public function testRenameWorksWhileTheDocumentIsStillEditable(): void
+    {
+        $doc = $this->client->documents()->upload($this->makePdfFixture());
+        $this->createdDocuments[] = $doc['id'];
+
+        $ready = $this->client->documents()->waitUntilReady($doc['id']);
+        $this->assertContains($ready['status'], DocumentResource::READY_STATUSES);
+
+        $renamed = $this->client->documents()->rename($doc['id'], 'renamed-by-test.pdf');
+
+        $this->assertSame('renamed-by-test.pdf', $renamed['name']);
+    }
+
+    /**
+     * The API normalises names server-side: diacritics are stripped. Asserting this keeps
+     * us honest about the fact that the stored name is not the name we sent.
+     */
+    public function testRenameNormalisesDiacritics(): void
+    {
+        $doc = $this->client->documents()->upload($this->makePdfFixture());
+        $this->createdDocuments[] = $doc['id'];
+        $this->client->documents()->waitUntilReady($doc['id']);
+
+        $renamed = $this->client->documents()->rename($doc['id'], 'acentuação áç.pdf');
+
+        $this->assertStringNotContainsString('ç', $renamed['name']);
+        $this->assertStringNotContainsString('á', $renamed['name']);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Assignments
+    // ---------------------------------------------------------------------------------
+
+    /**
+     * `GET /assignments` needs an `accountId` query param that the OpenAPI spec does not
+     * document. Without it the API answers 400 "Um contexto de conta é necessário".
+     */
+    public function testAssignmentListSendsTheUndocumentedAccountIdParam(): void
+    {
+        $result = $this->client->assignments()->list(1, 2);
+
+        $this->assertArrayHasKey('data', $result);
+        $this->assertLessThanOrEqual(2, count($result['data']));
+    }
+
+    /**
+     * Cost is priced off the verification/notification methods alone, so signer IDs are not
+     * required. Before 2.0.0 this threw client-side and never reached the API.
+     */
+    public function testEstimateCostAcceptsSignersWithoutIds(): void
+    {
+        $doc = $this->client->documents()->upload($this->makePdfFixture());
+        $this->createdDocuments[] = $doc['id'];
+        $this->client->documents()->waitUntilReady($doc['id']);
+
+        $estimate = $this->client->assignments()->estimateCost($doc['id'], [
+            ['verification_method' => 'Email', 'notification_methods' => ['Email']],
+        ]);
+
+        $this->assertArrayHasKey('documents', $estimate);
+        $this->assertArrayHasKey('has_sufficient_resources', $estimate);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Signer session — guards the body-vs-query question the spec gets wrong.
+    // ---------------------------------------------------------------------------------
+
+    /**
+     * The spec declares `signer-access-code` as a query parameter, but the server also reads
+     * it from the request body, which is what the SDK sends. Proof: a bogus code produces
+     * 401 "invalid credentials" (the server found and rejected it) rather than 400 "missing
+     * parameter". If this ever flips to 400, the server stopped reading the body and
+     * SignerSessionResource must move the code into the query string.
+     */
+    public function testSignerAccessCodeIsStillReadFromTheRequestBody(): void
+    {
+        try {
+            $this->client->signerSession()->self('BOGUS-ACCESS-CODE');
+            $this->fail('A bogus access code should not authenticate');
+        } catch (ApiException $e) {
+            $this->assertSame(
+                401,
+                $e->getCode(),
+                'Expected 401 (code seen, rejected). A 400 would mean the server no longer '
+                . 'reads signer-access-code from where the SDK sends it.'
+            );
+        }
+    }
+
     private function makePdfFixture(): string
     {
         // Minimal valid 1-page PDF.

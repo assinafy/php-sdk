@@ -2,20 +2,36 @@
 
 Modern, framework-agnostic PHP SDK for the [Assinafy](https://assinafy.com.br) digital signature API (`https://api.assinafy.com.br/v1`). Built with PSR standards and SOLID principles.
 
-The SDK covers **100% of the documented endpoints** in `https://api.assinafy.com.br/v1/docs` — documents and document tags, signers, signer sessions and signer documents, assignments, templates, workspace tags, field definitions, authentication, and the full webhooks surface (subscription, dispatch history, retry, event types). Every endpoint is verified against the live API by an integration test suite.
+The SDK covers accounts, documents and document tags, signers, signer sessions and signer
+documents, assignments, templates, workspace tags, field definitions, authentication, and the
+full webhooks surface (subscription, dispatch history, retry, event types).
+
+Coverage is measured against the machine-readable spec at
+`https://api.assinafy.com.br/v1/docs/openapi.json`: **84 of the 86 documented operations**.
+The two exceptions are `GET /v1/auth/authenticate` and `GET /v1/login-callback`, which are
+browser OAuth redirect targets rather than JSON endpoints — and the former does not actually
+exist on the live API despite being documented. Endpoints are verified against the live API by
+an opt-in integration suite, not merely against the spec: see [Where the docs and the API
+disagree](#where-the-docs-and-the-api-disagree).
 
 ## Features
 
 - PSR-4 autoloading, PSR-3 logging, PSR-18 HTTP client interface
 - Framework agnostic — works with any PHP project
-- Zero hidden state: every method maps to one API endpoint, with the path documented in the docblock
-- 100 % unit test coverage of the resource layer + opt-in live integration suite
-- PHP 7.4 – 8.4 compatible, PHPStan level 8 clean, PSR-12 compliant
+- Zero hidden state: every method maps to one API endpoint, with the path, request body and
+  response payload documented in the docblock
+- Credentials are redacted from debug logs
+- Unit-tested resource and transport layers + opt-in live integration suite
+- PHP 8.2 – 8.5, PHPStan level 8 clean, PSR-12 compliant
 
 ## Requirements
 
-- PHP 7.4 or higher (PHP 8.0+ recommended for named arguments)
+- PHP 8.2 or higher
 - `ext-json`
+
+> **Upgrading from 1.x?** See [UPGRADING.md](UPGRADING.md). The headline changes: PHP 8.2 is
+> now the floor, and webhook signature verification was removed because the API does not
+> implement it.
 
 ## Installation
 
@@ -71,7 +87,6 @@ $config = new Configuration(
     apiKey: 'your-api-key',
     accountId: 'your-account-id',
     baseUrl: Configuration::DEFAULT_BASE_URL,    // or SANDBOX_BASE_URL
-    webhookSecret: 'your-webhook-secret',        // optional
     timeout: 30,
     connectTimeout: 10,
 );
@@ -80,12 +95,14 @@ $client = new AssinafyClient($config);
 
 // or from an array
 $client = AssinafyClient::fromArray([
-    'api_key'        => 'your-api-key',
-    'account_id'     => 'your-account-id',
-    'webhook_secret' => 'your-webhook-secret',
-    'base_url'       => Configuration::DEFAULT_BASE_URL,
+    'api_key'    => 'your-api-key',
+    'account_id' => 'your-account-id',
+    'base_url'   => Configuration::DEFAULT_BASE_URL,
 ]);
 ```
+
+Don't know your account ID yet? `accounts()->list()` is the documented way to find it —
+see [Accounts](#accounts--clientaccounts).
 
 ### Bootstrapping without credentials
 
@@ -108,18 +125,86 @@ than as an obscure 401 from the API.
 ### Response shape: single-item vs list
 
 Single-item methods (`get()`, `create()`, `update()`, `verify()`, …) return the inner
-`data` object directly. List methods return the full envelope so you keep access to
-pagination metadata:
+`data` object directly. List methods return the full envelope plus a `pagination` key:
 
 ```php
 $page = $client->documents()->list(1, 20);
-// $page['data'] => array of document objects
-// $page['meta'] => pagination cursor / totals
+
+$page['data'];                      // array of document objects
+$page['pagination']['current_page']; // 1
+$page['pagination']['page_count'];   // 9
+$page['pagination']['per_page'];     // 20
+$page['pagination']['total_count'];  // 17
+```
+
+The API sends no pagination in the response body — there is no `meta` key on any endpoint.
+It reports pagination exclusively through `X-Pagination-*` response headers, which the SDK
+lifts into `pagination` for you. Endpoints that don't paginate (such as `accounts()->list()`)
+send no such headers, and the key is simply absent — always check with `isset()` if you
+handle both kinds.
+
+Iterating every page:
+
+```php
+$page = 1;
+do {
+    $result = $client->documents()->list($page, 100);
+    foreach ($result['data'] as $document) {
+        // …
+    }
+    $pageCount = $result['pagination']['page_count'] ?? 1;
+} while ($page++ < $pageCount);
 ```
 
 ## Endpoint coverage
 
 Every endpoint exposed by the documented API is reachable through the SDK. Resource accessors on `$client` are singletons (lazy-instantiated).
+
+### Accounts — `$client->accounts()`
+
+An *account* is a workspace: the container every document, signer, tag and field belongs to.
+
+| Method | Endpoint |
+|---|---|
+| `list()` | `GET /accounts` |
+| `create($name, $notificationSenderType = null)` | `POST /accounts` |
+| `get()` | `GET /accounts/{account_id}` |
+| `update($name = null, $notificationSenderType = null)` | `PUT /accounts/{account_id}` |
+| `delete($force = false)` | `DELETE /accounts/{account_id}` |
+| `theme()` | `GET /accounts/{account_id}/theme` |
+| `downloadLogo()` | `GET /accounts/{account_id}/logo` |
+| `uploadLogo($filePath)` | `POST /accounts/{account_id}/logo` |
+| `deleteLogo()` | `DELETE /accounts/{account_id}/logo` |
+
+`list()` and `create()` are not account-scoped, so they work on a `forAuth()` client — which
+is how you discover the account ID that every other resource needs:
+
+```php
+$client = AssinafyClient::forAuth();
+$session = $client->auth()->login('you@example.com', 'secret');
+
+// Now build a real client with an account ID from the list.
+$accounts = AssinafyClient::create($apiKey, 'placeholder')->accounts()->list();
+$accountId = $accounts['data'][0]['id'];
+```
+
+```php
+$account = $client->accounts()->get();
+// ['id' => '102d…', 'name' => 'Acme Inc.', 'primary_color' => null,
+//  'secondary_color' => null, 'created_at' => '2026-05-12T18:05:11Z']
+
+$theme = $client->accounts()->theme();
+// ['account_name' => 'Acme Inc.', 'primary_color' => '2072b9',
+//  'secondary_color' => 'ffffff', 'logo' => null]
+
+// Who signers see as the notification sender.
+$client->accounts()->update(
+    notificationSenderType: AccountResource::NOTIFICATION_SENDER_ACCOUNT,
+);
+```
+
+`downloadLogo()` returns raw image bytes and throws `ApiException` (404) when no logo has
+been uploaded. `delete()` is irreversible — it removes the workspace and everything in it.
 
 ### Documents — `$client->documents()`
 
@@ -398,22 +483,66 @@ Document list/sign/decline/download for a signer, authenticated by `signer-acces
 | `declineMultiple($accessCode, $documentIds, $reason)` | `PUT /signers/documents/decline-multiple` |
 | `download($signerId, $documentId, $accessCode, $artifact)` | `GET /signers/{id}/documents/{id}/download/{artifact_name}` |
 
-## Webhook signature verification
+## Receiving webhooks
 
 ```php
-$payload   = file_get_contents('php://input');
-$signature = $_SERVER['HTTP_X_ASSINAFY_SIGNATURE'] ?? '';
+$payload = file_get_contents('php://input');
 
-$verifier = $client->webhookVerifier();
+$parser = $client->webhookEvents();
+$event  = $parser->extractEvent($payload);
 
-if (!$verifier->verify($payload, $signature)) {
-    http_response_code(401);
-    exit('Invalid signature');
+if ($event === null) {
+    http_response_code(400);
+    exit('Malformed payload');
 }
 
-$event     = $verifier->extractEvent($payload);
-$eventType = $verifier->getEventType($event);
+$type    = $parser->getEventType($event);      // 'signer_signed_document'
+$object  = $parser->getEventData($event);      // the entity the event is about
+$extra   = $parser->getEventPayload($event);   // event-specific parameters
+
+// Re-fetch through the API before acting on it — see the security note below.
+$document = $client->documents()->get($object['id']);
+
+http_response_code(200);
 ```
+
+The delivered envelope looks like this:
+
+```php
+[
+    'id'         => 8629,
+    'event'      => 'signature_requested',
+    'message'    => 'Signature requested',
+    'subject'    => 'Document',
+    'origin'     => 'api',
+    'account_id' => '102d25a489f34a275d31a16045fd',
+    'created_at' => '2026-06-09T17:08:49Z',
+    'object'     => ['id' => '1032c…', 'type' => 'Document', 'status' => 'pending_signature'],
+    'payload'    => [ /* event-specific parameters */ ],
+]
+```
+
+### Securing your webhook endpoint
+
+**Assinafy does not sign webhook deliveries, so there is nothing to verify.** The API
+documents no signing mechanism: `secret` appears nowhere in the OpenAPI spec, the
+subscription endpoint accepts only `events`, `is_active`, `url` and `email` — leaving nowhere
+to register a signing key — and real deliveries carry no signature header.
+
+Version 1.x shipped a `webhookVerifier()->verify()` doing HMAC-SHA256 against a configured
+`webhook_secret`, and this README told you to reject requests that failed it. Since no
+delivery is ever signed, that check could never pass: following the old advice would have
+dropped every event. Both the method and the `webhook_secret` option were removed in 2.0.0
+rather than left as a trap.
+
+Secure the endpoint by other means:
+
+- Use a long, unguessable URL and keep it secret.
+- Treat the payload as a *notification*, not as trusted data: re-fetch the referenced entity
+  through the API (as above) before acting on it.
+- Terminate TLS and accept POSTs only.
+
+If Assinafy later adds signing, verification will return as a first-class feature.
 
 ## Logging
 
@@ -447,6 +576,23 @@ try {
 }
 ```
 
+## Where the docs and the API disagree
+
+Every endpoint below was exercised against the live sandbox. The published spec and the
+running API differ in a handful of places, and the SDK follows **the API**, not the document.
+Recorded here so the next person doesn't have to rediscover it.
+
+| Topic | What the docs say | What the API does | What the SDK does |
+|---|---|---|---|
+| **`GET /v1/auth/authenticate`** | Documented under Authentication | Returns a framework-level 404 (`{"name":"Not Found"}`) — the route does not exist | Not implemented |
+| **`GET /v1/login-callback`** | Documented | Returns HTML; it's a browser OAuth redirect target | Not implemented |
+| **`GET /v1/assignments`** | Takes `page` and `per-page` | Also **requires** an undocumented `accountId` query param (camelCase; `account-id`/`account_id` are rejected), else `400 "Um contexto de conta é necessário"` | `assignments()->list()` sends it from `Configuration` |
+| **Pagination** | Prose says list endpoints return pagination; `meta` appears nowhere | Sends `X-Pagination-*` **response headers**; no `meta` key on any endpoint | `list()` lifts the headers into `pagination` |
+| **`signer-access-code`** | `securitySchemes` declares it `in: query` | Reads it from the query string **or the request body** | Sends it in the body (proven working; a guard test in the live suite fails if that ever changes) |
+| **Webhook signing** | Not documented at all | Deliveries are unsigned; no field exists to register a secret | Verification removed in 2.0.0 — see [Receiving webhooks](#receiving-webhooks) |
+| **`sort` on list endpoints** | Prose says all list endpoints accept `sort` | Only `GET /accounts/{id}/documents` declares it | Only `documents()->list()` documents it |
+| **Templates** | Only `GET /accounts/{id}/templates` is documented | `create`, `get`, `update`, `delete` and `downloadPage` all exist and work | All six implemented; the five undocumented ones are live-verified but may change without a spec diff |
+
 ## Tests & quality
 
 ```bash
@@ -460,13 +606,14 @@ ASSINAFY_ACCOUNT_ID=your-account \
 vendor/bin/phpunit --testsuite=integration
 
 # Static analysis (PHPStan level 8)
-vendor/bin/phpstan analyse
+vendor/bin/phpstan analyse --memory-limit=512M
 
 # Coding standard (PSR-12)
 vendor/bin/phpcs
 ```
 
-**Current status**: PSR-12 compliant · PHPStan level 8 (zero errors) · 116 unit tests + 17 live integration tests · PHP 7.4 – 8.4 compatible.
+**Current status**: PSR-12 compliant · PHPStan level 8 (zero errors) · 175 unit tests + 29 live
+integration tests · PHP 8.2 – 8.5 · no known dependency advisories (`composer audit`).
 
 ## License
 
