@@ -17,7 +17,6 @@ $client = AssinafyClient::create(
     apiKey: 'your-api-key',
     accountId: 'your-account-id',
     baseUrl: Configuration::DEFAULT_BASE_URL,   // or SANDBOX_BASE_URL
-    webhookSecret: 'your-webhook-secret',
 );
 ```
 
@@ -246,23 +245,33 @@ foreach ($history['data'] as $dispatch) {
 
 ## 12. Webhook receiver
 
-```php
-$payload   = file_get_contents('php://input');
-$signature = $_SERVER['HTTP_X_ASSINAFY_SIGNATURE'] ?? '';
+Assinafy does not sign deliveries — there is no signature header and nowhere to register a
+secret — so treat the payload as an untrusted notification and re-fetch the entity before
+acting on it. (1.x's `webhookVerifier()->verify()` was removed in 2.0.0: it could never
+return true, so using it as a guard dropped every event.)
 
-$verifier = $client->webhookVerifier();
-if (!$verifier->verify($payload, $signature)) {
-    http_response_code(401);
-    exit('Invalid signature');
+```php
+$payload = file_get_contents('php://input');
+
+$parser = $client->webhookEvents();
+$event  = $parser->extractEvent($payload);
+
+if ($event === null) {
+    http_response_code(400);
+    exit('Malformed payload');
 }
 
-$event = $verifier->extractEvent($payload);
-switch ($verifier->getEventType($event)) {
+switch ($parser->getEventType($event)) {
     case 'signer_signed_document':
-        $data = $verifier->getEventData($event);
-        // handle …
+        $object = $parser->getEventData($event);     // the entity
+        $extra  = $parser->getEventPayload($event);  // event-specific parameters
+
+        // Re-fetch rather than trusting the payload.
+        $document = $client->documents()->get($object['id']);
         break;
 }
+
+http_response_code(200);
 ```
 
 ## 13. Login / API-key bootstrap

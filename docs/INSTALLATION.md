@@ -92,7 +92,6 @@ Add to `config/services.php`:
 'assinafy' => [
     'api_key' => env('ASSINAFY_API_KEY'),
     'account_id' => env('ASSINAFY_ACCOUNT_ID'),
-    'webhook_secret' => env('ASSINAFY_WEBHOOK_SECRET'),
     'base_url' => env('ASSINAFY_BASE_URL', 'https://api.assinafy.com.br/v1'),
 ],
 ```
@@ -105,7 +104,6 @@ Add to `config/packages/assinafy.yaml`:
 parameters:
     assinafy.api_key: '%env(ASSINAFY_API_KEY)%'
     assinafy.account_id: '%env(ASSINAFY_ACCOUNT_ID)%'
-    assinafy.webhook_secret: '%env(ASSINAFY_WEBHOOK_SECRET)%'
     assinafy.base_url: '%env(ASSINAFY_BASE_URL)%'
 ```
 

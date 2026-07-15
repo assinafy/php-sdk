@@ -54,6 +54,9 @@ class DocumentResource extends AbstractResource
     /** Max upload size accepted by the API (25 MB). */
     private const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
+    /** Max document name length accepted by `PATCH /documents/{id}`. */
+    private const MAX_NAME_LENGTH = 255;
+
     /**
      * Upload a PDF and create a new document.
      * `POST /accounts/{account_id}/documents`
@@ -90,9 +93,31 @@ class DocumentResource extends AbstractResource
      * List documents in the workspace.
      * `GET /accounts/{account_id}/documents`
      *
+     * Response (full envelope — items under `data`, pagination lifted from the
+     * `X-Pagination-*` response headers):
+     * ```
+     * [
+     *   'status'  => 200,
+     *   'message' => '',
+     *   'data'    => [
+     *     [
+     *       'id'         => '1032c5537d351349a9a94ad01cbe',
+     *       'account_id' => '102d25a489f34a275d31a16045fd',
+     *       'name'       => 'contract.pdf',
+     *       'status'     => 'pending_signature',   // see the STATUS_* constants
+     *       'artifacts'  => ['original' => 'https://…', 'thumbnail' => 'https://…'],
+     *       'tags'       => [],
+     *       'created_at' => '2026-06-09T17:08:49Z',
+     *     ],
+     *   ],
+     *   'pagination' => ['current_page' => 1, 'page_count' => 9, 'per_page' => 2, 'total_count' => 17],
+     * ]
+     * ```
+     *
      * @param array<string, scalar> $filters optional `status`, `method`, `search`, `sort`
-     * @return array{data?: array<int, array<string, mixed>>, meta?: array<string, mixed>} full
-     *     envelope — items live under `['data']`, pagination under `['meta']`.
+     *     (`sort` is documented on this endpoint only, e.g. `-created_at`)
+     * @return array{status?: int, message?: string, data?: array<int, array<string, mixed>>,
+     *     pagination?: array{current_page: int, page_count: int, per_page: int, total_count: int}}
      */
     public function list(int $page = 1, int $perPage = 20, array $filters = []): array
     {
@@ -101,9 +126,65 @@ class DocumentResource extends AbstractResource
             'per-page' => $perPage,
         ], $filters);
 
-        $response = $this->httpClient->get($this->accountPath('documents'), $params);
+        return $this->withPagination($this->httpClient->get($this->accountPath('documents'), $params));
+    }
 
-        return $response->getData() ?? [];
+    /**
+     * Search documents, returning a lighter representation than {@see self::list()}.
+     * `GET /accounts/{account_id}/documents/search`
+     *
+     * @param array<string, scalar> $filters additional optional filters
+     * @return array{status?: int, message?: string, data?: array<int, array<string, mixed>>,
+     *     pagination?: array{current_page: int, page_count: int, per_page: int, total_count: int}}
+     */
+    public function search(string $term, int $page = 1, int $perPage = 20, array $filters = []): array
+    {
+        $params = array_merge([
+            'search' => $term,
+            'page' => $page,
+            'per-page' => $perPage,
+        ], $filters);
+
+        return $this->withPagination($this->httpClient->get($this->accountPath('documents/search'), $params));
+    }
+
+    /**
+     * Rename a document.
+     * `PATCH /documents/{document_id}`
+     *
+     * Only allowed before the signature process starts — the document must be in `uploaded`
+     * or `metadata_ready` status with no signers yet. Once an assignment exists (or the
+     * document is certificated) the API rejects the call with
+     * `400 "Document cannot be renamed after the signature process has started."`
+     *
+     * The API normalises the name server-side: diacritics are stripped and unsupported
+     * characters become dashes, so `"renamed áç.pdf"` is stored as `"renamed ac.pdf"`.
+     * Max 255 characters.
+     *
+     * Request body: `['name' => 'Service agreement.pdf']`
+     *
+     * @return array<string, mixed> the updated document
+     * @throws ValidationException when `$name` is empty or exceeds 255 characters
+     */
+    public function rename(string $documentId, string $name): array
+    {
+        if ($name === '') {
+            throw new ValidationException('Document name cannot be empty');
+        }
+
+        if (mb_strlen($name) > self::MAX_NAME_LENGTH) {
+            throw new ValidationException(sprintf(
+                'Document name cannot exceed %d characters, got %d',
+                self::MAX_NAME_LENGTH,
+                mb_strlen($name)
+            ));
+        }
+
+        $this->logger->info('Renaming document', ['document_id' => $documentId, 'name' => $name]);
+
+        $response = $this->httpClient->patch("documents/{$documentId}", ['name' => $name]);
+
+        return $this->extractData($response->getData() ?? []);
     }
 
     /**

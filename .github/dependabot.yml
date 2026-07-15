@@ -1,0 +1,21 @@
+version: 2
+
+updates:
+  # Actions are pinned to immutable commit SHAs in the workflows; Dependabot is what
+  # keeps those pins from going stale (it rewrites the SHA and the `# vX.Y.Z` comment).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ['*']
+
+  - package-ecosystem: composer
+    directory: /
+    schedule:
+      interval: weekly
+    versioning-strategy: increase-if-necessary
+    groups:
+      dev-dependencies:
+        dependency-type: development

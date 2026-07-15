@@ -5,6 +5,114 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-07-15
+
+Full audit against the live API. Assinafy has replaced the hand-written HTML docs with a
+[Scalar](https://scalar.com) reference backed by a machine-readable OpenAPI spec at
+`https://api.assinafy.com.br/v1/docs/openapi.json` (86 operations across 10 tags), so this
+pass compared the SDK to that spec operation-by-operation and parameter-by-parameter — then
+verified every finding against the live sandbox before acting on it.
+
+That last step mattered. The spec and the running API disagree in several places, in both
+directions, and two "obvious" spec-derived fixes turned out to be wrong (see *Deliberately
+unchanged*). Coverage went from 70/86 to 84/86; the two remaining operations are browser
+OAuth redirect targets, one of which does not exist on the live API at all.
+
+See [UPGRADING.md](UPGRADING.md) for migration steps.
+
+### Security
+
+- **Credentials no longer leak into logs.** `GuzzleHttpClient::request()` logged the entire
+  request options array at debug level, writing plaintext passwords (`login()`,
+  `generateApiKey()`, `changePassword()`, `resetPassword()`), `Authorization` bearer tokens,
+  and response `access_token`s to wherever the host application ships its logs. A new
+  `Http\LogRedactor` masks them; a regression test asserts a real `login()` call leaks
+  nothing. **Rotate any credential that may have been captured in existing logs.**
+- **Dependency advisories cleared** (6 across 3 packages), notably `CVE-2026-55568`
+  (Guzzle: silent HTTPS proxy downgrade to cleartext) and `CVE-2026-55766` (psr7: CRLF
+  injection in start-line serialization). Guzzle's floor is now `^7.12.1` in `require-dev`
+  and `suggest`.
+
+### Removed (breaking)
+
+- **Webhook signature verification.** `WebhookVerifier::verify()` did HMAC-SHA256 against a
+  configured `webhook_secret`, but the API implements no signing: `secret` appears 0× in the
+  spec, the subscription endpoint has no field to register one, and real deliveries carry no
+  signature header. It could never return `true` — and the README told callers to use it as a
+  rejection guard, which dropped every event. Removed rather than left as a trap.
+  `WebhookVerifier` → `WebhookEventParser`; `webhookVerifier()` → `webhookEvents()`.
+- **`Configuration::$webhookSecret`** and `getWebhookSecret()`, along with the
+  `AssinafyClient::create()` parameter — they existed only to feed the verifier. A legacy
+  `webhook_secret` key passed to `fromArray()` is accepted and ignored.
+- **PHP 7.4 / 8.0 / 8.1 support.** All three are EOL. Minimum is now `^8.2`; CI covers
+  8.2–8.5.
+
+### Added
+
+- **`AccountResource`** (`$client->accounts()`) — the `Accounts` tag was entirely
+  unimplemented (0 of 9 operations): `list`, `create`, `get`, `update`, `delete`, `theme`,
+  `downloadLogo`, `uploadLogo`, `deleteLogo`. `list()` and `create()` are not account-scoped
+  and work on a `forAuth()` client, which matters because `GET /accounts` is the only
+  documented way to discover the account ID every other resource requires.
+- **`DocumentResource::rename()`** — `PATCH /documents/{id}`. The SDK had no `PATCH` verb at
+  all, so this was unreachable even through the raw client. Only legal while the document is
+  `uploaded`/`metadata_ready`; the API normalises the name (diacritics stripped, max 255).
+- **`DocumentResource::search()`** — `GET /accounts/{id}/documents/search`.
+- **`AssignmentResource::list()`** — `GET /assignments`. Requires an `accountId` query
+  parameter that is **not in the spec** (camelCase; `account-id` and `account_id` are both
+  rejected with `400 "Um contexto de conta é necessário"`).
+- **`WebhookEventParser::getEventPayload()`** and `getAccountId()` — the envelope's `payload`
+  key was unreachable from any helper.
+- **`HttpClientInterface::patch()`**; `delete()` accepts an optional JSON body (a few
+  endpoints document one).
+- `GuzzleHttpClient` accepts an injected `ClientInterface`, making the transport unit-testable
+  for the first time (13 new tests via `MockHandler`).
+- `.github/dependabot.yml`, and a `composer validate --strict` CI job.
+
+### Fixed
+
+- **Pagination is reachable at last.** The API sends none in the body — there is no `meta` key
+  on any endpoint and never was — but `AbstractResource` claimed the envelope was
+  `{status, message, data, meta?}` and justified `list()` returning the raw envelope "to keep
+  access to `meta`". Real pagination arrives in `X-Pagination-*` response headers, which
+  `Response` captured and the resource layer then discarded. `list()` now returns a
+  `pagination` key built from those headers. Additive: `data` is untouched.
+- **`estimateCost()` accepts signers without IDs.** The docs state IDs "are not required —
+  only the verification/notification method affects cost", and the API agrees (verified: HTTP
+  200 with a full breakdown), but `normalizeSigners()` threw `ValidationException` before any
+  request was made, so the documented "price it before the signers exist" flow was impossible.
+- `WebhookEventParser::getEventData()` drops its dead `data`/`type` fallbacks — confirmed
+  absent from real deliveries. Behaviour is unchanged (it always fell through to `object`).
+  The 1.x unit test asserted on a fabricated `data` key, so the bug tested green.
+- PHPStan crashed at PHP's default 128M limit; CI and the Makefile now pass
+  `--memory-limit=512M`.
+
+### Changed
+
+- GitHub Actions pinned to immutable commit SHAs with `persist-credentials: false`;
+  Dependabot keeps them current.
+- Docblocks now carry full request and response payloads. Several were flatly wrong —
+  `SignerDocumentResource::list()` advertised `status`/`method` filters the endpoint doesn't
+  declare, `TemplateResource::list()` advertised `sort` (declared on exactly one operation in
+  the whole spec), and `FieldResource::update()` listed fields the `PUT` doesn't accept.
+- README documents where the spec and the live API disagree, so the next audit doesn't have to
+  rediscover it.
+
+### Deliberately unchanged
+
+Both of these were flagged as defects by a spec-only reading and **refuted by live testing**.
+Recorded here because they look like bugs:
+
+- **`signer-access-code` stays in the request body.** `securitySchemes` declares it
+  `in: query`, which implies `acceptTerms()` and `verifyCode()` send the credential where the
+  server never reads it — i.e. broken auth. A differential test says otherwise: with
+  everything else held constant, no code → `400 "parâmetro … está faltando"`, code in the body
+  → `401 "Credenciais inválidas"`. The server found and rejected it, so the body *is* read.
+  The live suite now guards this: if it ever returns 400, the server stopped reading the body.
+- **`GET /v1/auth/authenticate` and `GET /v1/login-callback` remain unimplemented.** The
+  former is documented but returns a framework-level 404 — the route does not exist. The
+  latter returns HTML; it is a browser redirect target, not a JSON endpoint.
+
 ## [1.4.1] - 2026-06-05
 
 Audit pass against `https://api.assinafy.com.br/v1/docs`, verified end-to-end against the

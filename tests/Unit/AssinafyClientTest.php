@@ -11,12 +11,13 @@ use Assinafy\SDK\Resources\AuthResource;
 use Assinafy\SDK\Resources\DocumentResource;
 use Assinafy\SDK\Resources\FieldResource;
 use Assinafy\SDK\Resources\SignerDocumentResource;
+use Assinafy\SDK\Resources\AccountResource;
 use Assinafy\SDK\Resources\SignerResource;
 use Assinafy\SDK\Resources\SignerSessionResource;
 use Assinafy\SDK\Resources\TagResource;
 use Assinafy\SDK\Resources\TemplateResource;
 use Assinafy\SDK\Resources\WebhookResource;
-use Assinafy\SDK\Support\WebhookVerifier;
+use Assinafy\SDK\Support\WebhookEventParser;
 use Assinafy\SDK\Tests\Unit\Support\FakeHttpClient;
 use PHPUnit\Framework\TestCase;
 
@@ -38,7 +39,10 @@ final class AssinafyClientTest extends TestCase
         $this->assertInstanceOf(SignerSessionResource::class, $client->signerSession());
         $this->assertSame($client->signerDocuments(), $client->signerDocuments());
         $this->assertInstanceOf(SignerDocumentResource::class, $client->signerDocuments());
-        $this->assertInstanceOf(WebhookVerifier::class, $client->webhookVerifier());
+        $this->assertSame($client->accounts(), $client->accounts());
+        $this->assertInstanceOf(AccountResource::class, $client->accounts());
+        $this->assertSame($client->webhookEvents(), $client->webhookEvents());
+        $this->assertInstanceOf(WebhookEventParser::class, $client->webhookEvents());
     }
 
     public function testForAuthBuildsPublicClient(): void
