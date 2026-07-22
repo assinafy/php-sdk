@@ -18,10 +18,10 @@
         "psr/log": "^1.1|^2.0|^3.0"
     },
     "require-dev": {
-        "guzzlehttp/guzzle": "^7.12.1",
+        "guzzlehttp/guzzle": "^8.0.0",
         "phpstan/phpstan": "^2.1",
         "phpunit/phpunit": "^10.5|^11.0",
-        "squizlabs/php_codesniffer": "^3.7"
+        "squizlabs/php_codesniffer": "^4.0"
     },
     "suggest": {
         "guzzlehttp/guzzle": "^7.12.1 — required by the default HTTP client (GuzzleHttpClient). Earlier 7.x releases carry CVE-2026-55568 (silent HTTPS proxy downgrade to cleartext) and CVE-2026-55767.",
