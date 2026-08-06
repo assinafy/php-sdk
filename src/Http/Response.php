@@ -7,10 +7,15 @@ namespace Assinafy\SDK\Http;
 class Response
 {
     private int $statusCode;
+    /** @var array<string, array<int, string>|string> */
     private array $headers;
     private string $body;
+    /** @var array<array-key, mixed>|null */
     private ?array $data;
 
+    /**
+     * @param array<string, array<int, string>|string> $headers
+     */
     public function __construct(int $statusCode, array $headers, string $body)
     {
         $this->statusCode = $statusCode;
@@ -24,6 +29,9 @@ class Response
         return $this->statusCode;
     }
 
+    /**
+     * @return array<string, array<int, string>|string>
+     */
     public function getHeaders(): array
     {
         return $this->headers;
@@ -34,6 +42,9 @@ class Response
         return $this->body;
     }
 
+    /**
+     * @return array<array-key, mixed>|null
+     */
     public function getData(): ?array
     {
         return $this->data;
@@ -54,18 +65,21 @@ class Response
         return $this->statusCode >= 500;
     }
 
+    /**
+     * @return array<array-key, mixed>|null
+     */
     private function parseBody(string $body): ?array
     {
-        if (empty($body)) {
+        if ($body === '') {
             return null;
         }
 
-        $decoded = json_decode($body, true);
-
-        if (json_last_error() !== JSON_ERROR_NONE) {
+        try {
+            $decoded = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException $e) {
             return null;
         }
 
-        return $decoded;
+        return is_array($decoded) ? $decoded : null;
     }
 }

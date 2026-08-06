@@ -103,14 +103,14 @@ final class FieldResourceTest extends TestCase
         $this->http->queueJson(200, []);
 
         $values = [
-            ['field_id' => 'f1', 'value' => '1'],
-            ['field_id' => 'f2', 'value' => 'a@b.com'],
+            2 => ['field_id' => 'f1', 'value' => '1'],
+            7 => ['field_id' => 'f2', 'value' => 'a@b.com'],
         ];
         $this->fields->validateMultiple($values, 'CODE');
 
         $call = $this->http->lastCall();
         $this->assertSame('accounts/acc/fields/validate-multiple', $call['uri']);
-        $this->assertSame($values, $call['body']);
+        $this->assertSame(array_values($values), $call['body']);
         $this->assertSame(['signer-access-code' => 'CODE'], $call['query']);
     }
 

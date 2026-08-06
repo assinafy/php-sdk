@@ -31,10 +31,12 @@ class SignerSessionResource extends AbstractResource
     /**
      * Get the signer's own profile.
      * `GET /signers/self?signer-access-code={code}`
+     *
+     * @return array<string, mixed>
      */
-    public function self(string $accessCode): array
+    public function self(#[\SensitiveParameter] string $accessCode): array
     {
-        $response = $this->httpClient->get('signers/self', ['signer-access-code' => $accessCode]);
+        $response = $this->httpClient->get('signers/self', $this->accessCodeQuery($accessCode));
 
         return $this->extractData($response->getData() ?? []);
     }
@@ -42,12 +44,17 @@ class SignerSessionResource extends AbstractResource
     /**
      * Accept terms of use.
      * `PUT /signers/accept-terms`
+     *
+     * @return array<array-key, mixed>
      */
-    public function acceptTerms(string $accessCode): array
+    public function acceptTerms(#[\SensitiveParameter] string $accessCode): array
     {
-        $response = $this->httpClient->put('signers/accept-terms', [
-            'signer-access-code' => $accessCode,
-        ]);
+        $response = $this->httpClient->put(
+            'signers/accept-terms',
+            null,
+            [],
+            $this->accessCodeQuery($accessCode)
+        );
 
         return $this->extractData($response->getData() ?? []);
     }
@@ -55,13 +62,19 @@ class SignerSessionResource extends AbstractResource
     /**
      * Verify the 6-digit code sent to the signer's email/WhatsApp.
      * `POST /verify`
+     *
+     * @return array<array-key, mixed>
      */
-    public function verifyCode(string $accessCode, string $verificationCode): array
-    {
-        $response = $this->httpClient->post('verify', [
-            'signer-access-code' => $accessCode,
-            'verification-code' => $verificationCode,
-        ]);
+    public function verifyCode(
+        #[\SensitiveParameter] string $accessCode,
+        #[\SensitiveParameter] string $verificationCode
+    ): array {
+        $response = $this->httpClient->post(
+            'verify',
+            ['verification-code' => $verificationCode],
+            [],
+            $this->accessCodeQuery($accessCode)
+        );
 
         return $this->extractData($response->getData() ?? []);
     }
@@ -73,15 +86,20 @@ class SignerSessionResource extends AbstractResource
      * The `signer-access-code` is sent as a query parameter, the rest of the data
      * goes in the JSON body.
      *
-     * @param array<string, mixed> $data subset of { email, whatsapp_phone_number, has_accepted_terms }
+     * @param array<string, mixed> $data subset of { full_name, email, government_id }
+     * @return array<string, mixed> the confirmed signer data
      */
-    public function confirmData(string $documentId, string $accessCode, array $data): array
-    {
+    public function confirmData(
+        string $documentId,
+        #[\SensitiveParameter] string $accessCode,
+        #[\SensitiveParameter] array $data
+    ): array {
+        $documentId = $this->pathSegment($documentId, 'document ID');
         $response = $this->httpClient->put(
             "documents/{$documentId}/signers/confirm-data",
             $data,
             [],
-            ['signer-access-code' => $accessCode]
+            $this->accessCodeQuery($accessCode)
         );
 
         return $this->extractData($response->getData() ?? []);
@@ -90,36 +108,52 @@ class SignerSessionResource extends AbstractResource
     /**
      * Upload a signature or initial image (PNG/JPEG bytes).
      * `POST /signature?type=signature|initial&signer-access-code=…`
+     *
+     * @return array<array-key, mixed>
      */
-    public function uploadSignature(string $accessCode, string $type, string $imageBytes, string $mimeType = 'image/png'): array
-    {
+    public function uploadSignature(
+        #[\SensitiveParameter] string $accessCode,
+        string $type,
+        #[\SensitiveParameter] string $imageBytes,
+        string $mimeType = 'image/png',
+        ?bool $reuse = null
+    ): array {
         $this->assertType($type);
+
+        if ($imageBytes === '') {
+            throw new ValidationException('Signature image cannot be empty');
+        }
 
         if (!in_array($mimeType, ['image/png', 'image/jpeg'], true)) {
             throw new ValidationException("Unsupported image mime type '{$mimeType}'");
+        }
+
+        $query = array_merge(['type' => $type], $this->accessCodeQuery($accessCode));
+        if ($reuse !== null) {
+            $query['reuse'] = $reuse ? 'true' : 'false';
         }
 
         $response = $this->httpClient->postRaw(
             'signature',
             $imageBytes,
             $mimeType,
-            ['type' => $type, 'signer-access-code' => $accessCode]
+            $query
         );
 
         return $this->extractData($response->getData() ?? []);
     }
 
     /**
-     * Download the signer's saved signature or initial image (PNG bytes).
+     * Download the signer's saved signature or initial image (raw PNG/JPEG bytes).
      * `GET /signature/{type}?signer-access-code={code}`
      */
-    public function downloadSignature(string $accessCode, string $type): string
+    public function downloadSignature(#[\SensitiveParameter] string $accessCode, string $type): string
     {
         $this->assertType($type);
 
         $response = $this->httpClient->get(
             "signature/{$type}",
-            ['signer-access-code' => $accessCode]
+            $this->accessCodeQuery($accessCode)
         );
 
         return $response->getBody();
@@ -132,10 +166,19 @@ class SignerSessionResource extends AbstractResource
      * Requires the access code (and a verified code on the underlying request). The
      * response mirrors the document shape with the signer's `current_signer` and the
      * assignment items they must complete.
+     *
+     * @return array<string, mixed>
      */
-    public function currentDocument(string $accessCode): array
-    {
-        $response = $this->httpClient->get('sign', ['signer-access-code' => $accessCode]);
+    public function currentDocument(
+        #[\SensitiveParameter] string $accessCode,
+        ?bool $hasAcceptedTerms = null
+    ): array {
+        $query = $this->accessCodeQuery($accessCode);
+        if ($hasAcceptedTerms !== null) {
+            $query['has_accepted_terms'] = $hasAcceptedTerms ? 'true' : 'false';
+        }
+
+        $response = $this->httpClient->get('sign', $query);
 
         return $this->extractData($response->getData() ?? []);
     }
@@ -147,20 +190,22 @@ class SignerSessionResource extends AbstractResource
      * For virtual assignments the signer must first call {@see confirmData()}.
      *
      * @param array<int, array{itemId: string, fieldId: string, pageId: string, value: string}> $fields
-     *
-     * @throws ValidationException when no fields are provided
+     * @return array<array-key, mixed>
      */
-    public function sign(string $documentId, string $assignmentId, string $accessCode, array $fields): array
-    {
-        if ($fields === []) {
-            throw new ValidationException('At least one field value is required to sign');
-        }
+    public function sign(
+        string $documentId,
+        string $assignmentId,
+        #[\SensitiveParameter] string $accessCode,
+        #[\SensitiveParameter] array $fields
+    ): array {
+        $documentId = $this->pathSegment($documentId, 'document ID');
+        $assignmentId = $this->pathSegment($assignmentId, 'assignment ID');
 
         $response = $this->httpClient->post(
             "documents/{$documentId}/assignments/{$assignmentId}",
             array_values($fields),
             [],
-            ['signer-access-code' => $accessCode]
+            $this->accessCodeQuery($accessCode)
         );
 
         return $this->extractData($response->getData() ?? []);
@@ -170,19 +215,27 @@ class SignerSessionResource extends AbstractResource
      * Decline (reject) an assignment as a signer.
      * `PUT /documents/{documentId}/assignments/{assignmentId}/reject?signer-access-code={code}`
      *
+     * @return array<array-key, mixed>
      * @throws ValidationException when no reason is provided
      */
-    public function decline(string $documentId, string $assignmentId, string $accessCode, string $reason): array
-    {
-        if ($reason === '') {
+    public function decline(
+        string $documentId,
+        string $assignmentId,
+        #[\SensitiveParameter] string $accessCode,
+        #[\SensitiveParameter] string $reason
+    ): array {
+        if (trim($reason) === '') {
             throw new ValidationException('A decline reason is required');
         }
+
+        $documentId = $this->pathSegment($documentId, 'document ID');
+        $assignmentId = $this->pathSegment($assignmentId, 'assignment ID');
 
         $response = $this->httpClient->put(
             "documents/{$documentId}/assignments/{$assignmentId}/reject",
             ['decline_reason' => $reason],
             [],
-            ['signer-access-code' => $accessCode]
+            $this->accessCodeQuery($accessCode)
         );
 
         return $this->extractData($response->getData() ?? []);

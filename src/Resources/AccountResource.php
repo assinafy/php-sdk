@@ -15,6 +15,9 @@ namespace Assinafy\SDK\Resources;
  */
 class AccountResource extends AbstractResource
 {
+    public const GRANULARITY_MONTHLY = 'monthly';
+    public const GRANULARITY_DAILY = 'daily';
+
     /**
      * Signers see the individual user as the sender of notifications. API default.
      */
@@ -35,9 +38,9 @@ class AccountResource extends AbstractResource
      * List the accounts the authenticated credential belongs to.
      * `GET /accounts`
      *
-     * This is the only documented way to discover an account ID, so it is deliberately NOT
-     * account-scoped: it works on a client built with {@see \Assinafy\SDK\AssinafyClient::forAuth()}
-     * — i.e. before you have an account ID to configure.
+     * This is the documented way to discover account IDs, so it is deliberately not
+     * account-scoped. It accepts the configured API key/global Bearer credential, or an
+     * OAuth access token passed explicitly.
      *
      * Request: no parameters.
      *
@@ -48,7 +51,7 @@ class AccountResource extends AbstractResource
      *   'message' => '',
      *   'data'    => [
      *     [
-     *       'id'                => '102d25a489f34a275d31a16045fd',
+     *       'id'                => '64f000000000000000000001',
      *       'name'              => 'Acme Inc.',
      *       'roles'             => ['owner'],
      *       'is_delete_allowed' => true,
@@ -60,9 +63,13 @@ class AccountResource extends AbstractResource
      *
      * @return array{status?: int, message?: string, data?: array<int, array<string, mixed>>}
      */
-    public function list(): array
+    public function list(#[\SensitiveParameter] ?string $accessToken = null): array
     {
-        return $this->withPagination($this->httpClient->get('accounts'));
+        return $this->withPagination($this->httpClient->get(
+            'accounts',
+            [],
+            $this->bearerHeaders($accessToken)
+        ));
     }
 
     /**
@@ -72,7 +79,7 @@ class AccountResource extends AbstractResource
      * Response (unwrapped `data`):
      * ```
      * [
-     *   'id'              => '102d25a489f34a275d31a16045fd',
+     *   'id'              => '64f000000000000000000001',
      *   'name'            => 'Acme Inc.',
      *   'primary_color'   => null,   // hex without '#', e.g. '2072b9'
      *   'secondary_color' => null,
@@ -104,8 +111,15 @@ class AccountResource extends AbstractResource
      * @return array<string, mixed> the created account
      * @throws \Assinafy\SDK\Exceptions\ValidationException on an unknown sender type
      */
-    public function create(string $name, ?string $notificationSenderType = null): array
-    {
+    public function create(
+        string $name,
+        ?string $notificationSenderType = null,
+        #[\SensitiveParameter] ?string $accessToken = null
+    ): array {
+        if (trim($name) === '') {
+            throw new \Assinafy\SDK\Exceptions\ValidationException('Account name cannot be empty');
+        }
+
         $payload = ['name' => $name];
 
         if ($notificationSenderType !== null) {
@@ -113,7 +127,11 @@ class AccountResource extends AbstractResource
             $payload['notification_sender_type'] = $notificationSenderType;
         }
 
-        $response = $this->httpClient->post('accounts', $payload);
+        $response = $this->httpClient->post(
+            'accounts',
+            $payload,
+            $this->bearerHeaders($accessToken)
+        );
 
         return $this->extractData($response->getData() ?? []);
     }
@@ -133,6 +151,11 @@ class AccountResource extends AbstractResource
         $payload = [];
 
         if ($name !== null) {
+            if (trim($name) === '') {
+                throw new \Assinafy\SDK\Exceptions\ValidationException(
+                    'Account name cannot be empty'
+                );
+            }
             $payload['name'] = $name;
         }
 
@@ -159,10 +182,9 @@ class AccountResource extends AbstractResource
      * Destructive and irreversible: removes the workspace and every document, signer, tag
      * and field in it.
      *
-     * Request body: `['force' => true]` — sent as JSON per the documented schema. Unlike the
-     * rest of this class, this call is NOT live-verified: exercising it would have destroyed
-     * the sandbox workspace, so it follows the spec exactly. If the API turns out to expect
-     * `force` as a query parameter instead, this is the first place to look.
+     * Request body: `['force' => true]` — sent as JSON per the documented schema. The
+     * lifecycle is live-tested only against a disposable sandbox workspace; the configured
+     * workspace is never used as the deletion target.
      *
      * @param bool $force cancel an active paid subscription instead of refusing to delete
      * @return array<string, mixed>
@@ -170,7 +192,7 @@ class AccountResource extends AbstractResource
     public function delete(bool $force = false): array
     {
         $this->logger->info('Deleting account', [
-            'account_id' => $this->config->getAccountId(),
+            'account_id' => $this->requireAccountId(),
             'force' => $force,
         ]);
 
@@ -205,6 +227,31 @@ class AccountResource extends AbstractResource
     }
 
     /**
+     * Return the configured account's document-funnel KPI series.
+     * `GET /accounts/{account_id}/stats`
+     *
+     * Monthly mode returns the latest 12 months. Daily mode requires `$month`
+     * in `YYYY-MM` form and returns every day in that month. Both series are
+     * zero-filled by the API.
+     *
+     * @return array<int, array{period: string, documents_uploaded: int, documents_sent: int,
+     *     signature_requests: int, signature_requests_email: int,
+     *     signature_requests_whatsapp: int, signature_requests_viewed: int,
+     *     signature_requests_completed: int, documents_certified: int}>
+     */
+    public function stats(
+        string $granularity = self::GRANULARITY_MONTHLY,
+        ?string $month = null
+    ): array {
+        $response = $this->httpClient->get(
+            $this->accountPath('stats'),
+            $this->statsQuery($granularity, $month)
+        );
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    /**
      * Download the account logo.
      * `GET /accounts/{account_id}/logo`
      *
@@ -227,9 +274,9 @@ class AccountResource extends AbstractResource
      * @return array<string, mixed>
      * @throws \InvalidArgumentException when the file does not exist
      */
-    public function uploadLogo(string $filePath): array
+    public function uploadLogo(#[\SensitiveParameter] string $filePath): array
     {
-        $this->logger->info('Uploading account logo', ['file' => $filePath]);
+        $this->logger->info('Uploading account logo');
 
         $response = $this->httpClient->uploadFile($this->accountPath('logo'), $filePath);
 

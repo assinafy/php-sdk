@@ -5,18 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.0.0] - 2026-07-15
+## [Unreleased]
 
-Full audit against the live API. Assinafy has replaced the hand-written HTML docs with a
-[Scalar](https://scalar.com) reference backed by a machine-readable OpenAPI spec at
-`https://api.assinafy.com.br/v1/docs/openapi.json` (86 operations across 10 tags), so this
-pass compared the SDK to that spec operation-by-operation and parameter-by-parameter — then
-verified every finding against the live sandbox before acting on it.
+## [2.0.0] - 2026-08-06
 
-That last step mattered. The spec and the running API disagree in several places, in both
-directions, and two "obvious" spec-derived fixes turned out to be wrong (see *Deliberately
-unchanged*). Coverage went from 70/86 to 84/86; the two remaining operations are browser
-OAuth redirect targets, one of which does not exist on the live API at all.
+This release is a full audit against the current Assinafy API reference and
+running sandbox. The machine-readable OpenAPI document fetched on 2026-08-05 contains 89
+operations on 68 paths. Coverage is 89/89 operations: the two browser-facing OAuth operations
+are URL builders, while every JSON, multipart, binary, and signer operation has a resource
+method. Five additional live template-management routes are retained under regression coverage
+even though they are absent from OpenAPI.
+
+The specification and running API still disagree in a few places. The release documentation
+records those differences explicitly so a future spec-only audit does not remove working
+functionality or reintroduce an invalid request shape.
 
 See [UPGRADING.md](UPGRADING.md) for migration steps.
 
@@ -28,10 +30,13 @@ See [UPGRADING.md](UPGRADING.md) for migration steps.
   and response `access_token`s to wherever the host application ships its logs. A new
   `Http\LogRedactor` masks them; a regression test asserts a real `login()` call leaks
   nothing. **Rotate any credential that may have been captured in existing logs.**
-- **Dependency advisories cleared** (6 across 3 packages), notably `CVE-2026-55568`
-  (Guzzle: silent HTTPS proxy downgrade to cleartext) and `CVE-2026-55766` (psr7: CRLF
-  injection in start-line serialization). Guzzle's floor is now `^7.12.1` in `require-dev`
-  and `suggest`.
+- **Dependency advisories cleared.** Guzzle is now a runtime dependency at
+  `^7.15.2 || ^8.0.2` rather than a development-only suggestion. The lowest/highest dependency
+  CI jobs exercise both supported major lines, including their different exception hierarchies.
+  `ext-mbstring` is also declared because validation uses multibyte-safe string operations.
+- **Remote base URLs require HTTPS.** Plain HTTP is accepted only for loopback development
+  hosts (`localhost`/`*.localhost`, `127.0.0.1`, and `::1`); credentials, queries, and fragments
+  are rejected in base URLs.
 
 ### Removed (breaking)
 
@@ -50,10 +55,10 @@ See [UPGRADING.md](UPGRADING.md) for migration steps.
 ### Added
 
 - **`AccountResource`** (`$client->accounts()`) — the `Accounts` tag was entirely
-  unimplemented (0 of 9 operations): `list`, `create`, `get`, `update`, `delete`, `theme`,
-  `downloadLogo`, `uploadLogo`, `deleteLogo`. `list()` and `create()` are not account-scoped
-  and work on a `forAuth()` client, which matters because `GET /accounts` is the only
-  documented way to discover the account ID every other resource requires.
+  unimplemented in 1.x: `list`, `create`, `get`, `update`, `delete`, `theme`, `stats`,
+  `downloadLogo`, `uploadLogo`, and `deleteLogo`. `list()` and `create()` are not
+  account-scoped. A bootstrap client must pass the login Bearer token to those methods, or use
+  a globally Bearer-authenticated client; `forAuth()` alone intentionally sends no credentials.
 - **`DocumentResource::rename()`** — `PATCH /documents/{id}`. The SDK had no `PATCH` verb at
   all, so this was unreachable even through the raw client. Only legal while the document is
   `uploaded`/`metadata_ready`; the API normalises the name (diacritics stripped, max 255).
@@ -63,11 +68,22 @@ See [UPGRADING.md](UPGRADING.md) for migration steps.
   rejected with `400 "Um contexto de conta é necessário"`).
 - **`WebhookEventParser::getEventPayload()`** and `getAccountId()` — the envelope's `payload`
   key was unreachable from any helper.
-- **`HttpClientInterface::patch()`**; `delete()` accepts an optional JSON body (a few
-  endpoints document one).
+- **`HttpClientInterface::patch()`**; `post()`, `put()`, and `patch()` now accept nullable
+  data so `null` sends no request body, while an explicit array sends JSON. `delete()` accepts
+  optional query parameters and an optional JSON body.
 - `GuzzleHttpClient` accepts an injected `ClientInterface`, making the transport unit-testable
-  for the first time (13 new tests via `MockHandler`).
+  through a comprehensive `MockHandler` suite across both supported Guzzle majors.
 - `.github/dependabot.yml`, and a `composer validate --strict` CI job.
+- **Global Bearer authentication.** `Configuration::forBearer()` and
+  `AssinafyClient::forBearer()` apply `Authorization: Bearer ...` to every workspace resource.
+  API-key lifecycle and password-change methods accept nullable per-call tokens so `null` uses
+  the configured API-key or global-Bearer authentication.
+- **OAuth browser helpers.** `AuthResource::socialLoginUrl()` and
+  `socialLoginCallbackUrl()` represent the two non-JSON browser operations without asking the
+  server-side JSON transport to follow redirects or parse HTML.
+- **`SignerResource::normalizePhoneNumber()`** is now a public shared E.164 normalizer.
+  Signer create/update require an explicit leading `+` and country code, accept common visual
+  separators, and validate 8–15 digits instead of guessing a country for local input.
 
 ### Fixed
 
@@ -81,6 +97,9 @@ See [UPGRADING.md](UPGRADING.md) for migration steps.
   only the verification/notification method affects cost", and the API agrees (verified: HTTP
   200 with a full breakdown), but `normalizeSigners()` threw `ValidationException` before any
   request was made, so the documented "price it before the signers exist" flow was impossible.
+- **Assignment notification channels are independent of verification.** OpenAPI permits an
+  empty array, Email, WhatsApp, or both regardless of `verification_method`; the SDK no longer
+  rejects those valid combinations or truncates them to one channel.
 - `WebhookEventParser::getEventData()` drops its dead `data`/`type` fallbacks — confirmed
   absent from real deliveries. Behaviour is unchanged (it always fell through to `object`).
   The 1.x unit test asserted on a fabricated `data` key, so the bug tested green.
@@ -98,20 +117,38 @@ See [UPGRADING.md](UPGRADING.md) for migration steps.
 - README documents where the spec and the live API disagree, so the next audit doesn't have to
   rediscover it.
 
-### Deliberately unchanged
+### Published/runtime divergences retained
 
-Both of these were flagged as defects by a spec-only reading and **refuted by live testing**.
-Recorded here because they look like bugs:
-
-- **`signer-access-code` stays in the request body.** `securitySchemes` declares it
-  `in: query`, which implies `acceptTerms()` and `verifyCode()` send the credential where the
-  server never reads it — i.e. broken auth. A differential test says otherwise: with
-  everything else held constant, no code → `400 "parâmetro … está faltando"`, code in the body
-  → `401 "Credenciais inválidas"`. The server found and rejected it, so the body *is* read.
-  The live suite now guards this: if it ever returns 400, the server stopped reading the body.
-- **`GET /v1/auth/authenticate` and `GET /v1/login-callback` remain unimplemented.** The
-  former is documented but returns a framework-level 404 — the route does not exist. The
-  latter returns HTML; it is a browser redirect target, not a JSON endpoint.
+- **Signer authentication uses the `signer-access-code` query parameter.** The SDK follows
+  the current OpenAPI security scheme consistently. `acceptTerms()` sends that query parameter
+  with no request body; `verifyCode()` sends only the verification code in JSON.
+- **Signer-access-code acquisition is inbox-driven.** Assignment `signing_urls` contain
+  `signer_id` and `url`, but do not expose the one-time access code. Deriving a code from a URL
+  path segment produced `401` in the sandbox. `sendToken()` delivers the code to the assigned
+  signer's inbox; authenticated signer-read integration checks are therefore separately opt-in
+  through `ASSINAFY_SIGNER_ID` and `ASSINAFY_SIGNER_ACCESS_CODE`, and are not reported as live
+  successes when those credentials are absent.
+- **Public send-token keeps the working runtime body.** OpenAPI currently shows `{email}`,
+  while the sandbox requires `{recipient, channel}` and rejects a recipient who is not already
+  a signer assigned to the target document. The SDK sends the runtime body shape; live tests use
+  an assigned signer.
+- **Authenticated-user responses are normalized.** OpenAPI declares `GET /users/self` as
+  `data: AuthUser`, while the sandbox returns `data: {user: AuthUser, accounts: AuthAccount[]}`.
+  `UserResource::get()` returns `data.user` for the sandbox shape and still accepts the published
+  shape, keeping its `AuthUser` return contract stable.
+- **Published statistics methods are retained despite a sandbox deployment gap.** Both
+  `GET /accounts/{accountId}/stats` and `GET /users/self/stats` returned an application-level
+  `404` route-not-deployed response in the sandbox on 2026-08-05. Their SDK methods remain
+  because both operations are published and count toward 89/89 coverage; they are not presented
+  as currently runnable sandbox functionality.
+- **Document-tag operations are published; five template-management operations are not.**
+  Document `listTags()`, `replaceTags()`, `appendTags()`, and `detachTag()` map directly to
+  current OpenAPI operations. The body description calls its strings tag IDs, but the sandbox
+  and SDK use tag names and auto-create missing names. Template create/get/update/delete and page
+  download remain available because the live API supports them and regression tests cover them.
+- **OAuth start and callback are browser operations, not missing SDK functionality.** The SDK
+  returns their absolute URLs. The current start route produces the documented redirect; the
+  callback returns browser content rather than a JSON resource.
 
 ## [1.4.1] - 2026-06-05
 
@@ -194,6 +231,8 @@ each new endpoint below was verified end-to-end against the production API befor
 - **`DocumentResource::assertArtifact()`** promoted to `public static` so
   `SignerDocumentResource::download()` validates artifact names through the same list (DRY).
 
+[Unreleased]: https://github.com/assinafy/php-sdk/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/assinafy/php-sdk/compare/v1.4.1...v2.0.0
 [1.4.1]: https://github.com/assinafy/php-sdk/releases/tag/v1.4.1
 [1.4.0]: https://github.com/assinafy/php-sdk/releases/tag/v1.4.0
 
@@ -372,7 +411,7 @@ All new endpoints from the official API catalog added without breaking existing 
 - Initial release of framework-agnostic PHP SDK
 - PSR-4 autoloading
 - PSR-3 logger interface support
-- PSR-18 HTTP client interface
+- SDK-specific injectable HTTP client interface (it is not PSR-18)
 - Document management (upload, download, status tracking)
 - Signer management (create, list, search)
 - Assignment management (create, cancel, resend)

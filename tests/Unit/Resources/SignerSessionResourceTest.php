@@ -40,7 +40,8 @@ final class SignerSessionResourceTest extends TestCase
         $call = $this->http->lastCall();
         $this->assertSame('PUT', $call['method']);
         $this->assertSame('signers/accept-terms', $call['uri']);
-        $this->assertSame(['signer-access-code' => 'CODE'], $call['body']);
+        $this->assertNull($call['body']);
+        $this->assertSame(['signer-access-code' => 'CODE'], $call['query']);
     }
 
     public function testVerifyCode(): void
@@ -50,10 +51,8 @@ final class SignerSessionResourceTest extends TestCase
 
         $call = $this->http->lastCall();
         $this->assertSame('verify', $call['uri']);
-        $this->assertSame([
-            'signer-access-code' => 'CODE',
-            'verification-code' => '123456',
-        ], $call['body']);
+        $this->assertSame(['verification-code' => '123456'], $call['body']);
+        $this->assertSame(['signer-access-code' => 'CODE'], $call['query']);
     }
 
     public function testConfirmDataKeepsAccessCodeOnQuery(): void
@@ -61,14 +60,14 @@ final class SignerSessionResourceTest extends TestCase
         $this->http->queueJson(200, []);
         $this->session->confirmData('doc1', 'CODE WITH SPACE', [
             'email' => 'a@b.com',
-            'has_accepted_terms' => true,
+            'government_id' => '12345678900',
         ]);
 
         $call = $this->http->lastCall();
         $this->assertSame('PUT', $call['method']);
         $this->assertSame('documents/doc1/signers/confirm-data', $call['uri']);
         $this->assertSame(['signer-access-code' => 'CODE WITH SPACE'], $call['query']);
-        $this->assertSame(['email' => 'a@b.com', 'has_accepted_terms' => true], $call['body']);
+        $this->assertSame(['email' => 'a@b.com', 'government_id' => '12345678900'], $call['body']);
     }
 
     public function testUploadSignatureSendsRawBinary(): void
@@ -82,6 +81,23 @@ final class SignerSessionResourceTest extends TestCase
         $this->assertSame('image/png', $call['content_type']);
         $this->assertSame("\x89PNG\r\n", $call['body']);
         $this->assertSame(['type' => 'signature', 'signer-access-code' => 'CODE'], $call['query']);
+    }
+
+    public function testUploadSignatureSendsOptionalReuseQuery(): void
+    {
+        $this->http->queueJson(200, []);
+        $this->session->uploadSignature(
+            'CODE',
+            SignerSessionResource::TYPE_INITIAL,
+            "\x89PNG",
+            'image/png',
+            true
+        );
+
+        $this->assertSame(
+            ['type' => 'initial', 'signer-access-code' => 'CODE', 'reuse' => 'true'],
+            $this->http->lastCall()['query']
+        );
     }
 
     public function testUploadSignatureRejectsBadType(): void
@@ -118,6 +134,17 @@ final class SignerSessionResourceTest extends TestCase
         $this->assertSame(['signer-access-code' => 'CODE'], $call['query']);
     }
 
+    public function testCurrentDocumentSendsOptionalTermsState(): void
+    {
+        $this->http->queueJson(200, ['id' => 'doc1']);
+        $this->session->currentDocument('CODE', true);
+
+        $this->assertSame(
+            ['signer-access-code' => 'CODE', 'has_accepted_terms' => 'true'],
+            $this->http->lastCall()['query']
+        );
+    }
+
     public function testSignPostsFieldArrayWithAccessCodeOnQuery(): void
     {
         $this->http->queueJson(200, []);
@@ -132,10 +159,12 @@ final class SignerSessionResourceTest extends TestCase
         $this->assertSame(['signer-access-code' => 'CODE'], $call['query']);
     }
 
-    public function testSignRejectsEmptyFields(): void
+    public function testSignAllowsEmptyFieldsForVirtualAssignments(): void
     {
-        $this->expectException(ValidationException::class);
+        $this->http->queueJson(200, []);
         $this->session->sign('doc1', 'a1', 'CODE', []);
+
+        $this->assertSame([], $this->http->lastCall()['body']);
     }
 
     public function testDeclineSendsReasonAndAccessCode(): void

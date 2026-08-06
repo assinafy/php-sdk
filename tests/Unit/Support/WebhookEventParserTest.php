@@ -17,22 +17,21 @@ final class WebhookEventParserTest extends TestCase
     }
 
     /**
-     * Mirrors a real delivery captured from the sandbox. The envelope carries `object` (the
-     * entity) and `payload` (event-specific detail); there is no `data` key, which is why the
-     * 1.x `getEventData()` fallback chain never fired against real traffic.
+     * Mirrors the current documented delivery envelope. It carries `object` (the entity)
+     * and `payload` (event-specific detail); there is no `data` key.
      *
      * @return array<string, mixed>
      */
-    private static function realDelivery(): array
+    private static function documentedDelivery(): array
     {
         return [
             'id' => 8629,
             'event' => 'signer_signed_document',
             'message' => 'Signer signed the document',
-            'subject' => 'Document',
-            'origin' => 'api',
-            'account_id' => '102d25a489f34a275d31a16045fd',
-            'created_at' => '2026-06-09T17:08:49Z',
+            'subject' => ['id' => '64f000000000000000000002', 'type' => 'Signer'],
+            'origin' => ['ip' => '192.0.2.10', 'user-agent' => 'Example Browser'],
+            'account_id' => '64f000000000000000000001',
+            'created_at' => 1781024929,
             'object' => ['id' => '1032c5537d351349a9a94ad01cbe', 'type' => 'Document'],
             'payload' => ['signer_id' => '19e6b92e7895332ed9708535d8c'],
         ];
@@ -52,10 +51,10 @@ final class WebhookEventParserTest extends TestCase
 
     public function testParsesARealDeliveryEnvelope(): void
     {
-        $event = $this->parser->extractEvent((string) json_encode(self::realDelivery()));
+        $event = $this->parser->extractEvent((string) json_encode(self::documentedDelivery()));
 
         $this->assertSame('signer_signed_document', $this->parser->getEventType($event));
-        $this->assertSame('102d25a489f34a275d31a16045fd', $this->parser->getAccountId($event));
+        $this->assertSame('64f000000000000000000001', $this->parser->getAccountId($event));
         $this->assertSame(
             ['id' => '1032c5537d351349a9a94ad01cbe', 'type' => 'Document'],
             $this->parser->getEventData($event)
@@ -68,7 +67,7 @@ final class WebhookEventParserTest extends TestCase
 
     public function testObjectAndPayloadAreDistinct(): void
     {
-        $event = $this->parser->extractEvent((string) json_encode(self::realDelivery()));
+        $event = $this->parser->extractEvent((string) json_encode(self::documentedDelivery()));
 
         $this->assertNotSame($this->parser->getEventData($event), $this->parser->getEventPayload($event));
     }

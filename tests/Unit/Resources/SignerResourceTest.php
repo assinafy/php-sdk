@@ -71,9 +71,23 @@ final class SignerResourceTest extends TestCase
     {
         $this->http->queueJson(201, ['id' => 's3']);
 
-        $this->signers->create('Alice', null, '(48) 99999-0000');
+        $this->signers->create('Alice', null, '+55 (48) 99999-0000');
 
-        $this->assertSame('+48999990000', $this->http->lastCall()['body']['whatsapp_phone_number']);
+        $this->assertSame('+5548999990000', $this->http->lastCall()['body']['whatsapp_phone_number']);
+    }
+
+    public function testCreateRejectsLocalOrMalformedPhoneNumbers(): void
+    {
+        foreach (['(48) 99999-0000', '+55abc48999990000'] as $phone) {
+            try {
+                $this->signers->create('Alice', null, $phone);
+                $this->fail("Expected invalid phone: {$phone}");
+            } catch (ValidationException $e) {
+                $this->assertStringContainsString('phone', strtolower($e->getMessage()));
+            }
+        }
+
+        $this->assertSame([], $this->http->calls);
     }
 
     public function testListUsesHyphenatedPerPage(): void

@@ -12,8 +12,9 @@ use Assinafy\SDK\Exceptions\ValidationException;
  *
  * Field definitions describe the inputs (text, CPF, e-mail, date, …) that can be
  * placed on a document when building a `collect` assignment. The `validate` and
- * `validateMultiple` endpoints can be called either by an authenticated account
- * user (default) or by a signer — pass `$signerAccessCode` for the latter.
+ * `validateMultiple` endpoints remain workspace-authenticated in the published
+ * OpenAPI contract. Pass `$signerAccessCode` only when the workflow also needs
+ * signer context; it does not replace API-key or bearer authentication.
  *
  * @see https://api.assinafy.com.br/v1/docs
  */
@@ -25,7 +26,8 @@ class FieldResource extends AbstractResource
      *
      * @param string               $type    field type code (see {@see types()})
      * @param string               $name    label shown for the input
-     * @param array<string, mixed> $options optional `regex`, `is_required`, `is_active`
+     * @param array<string, mixed> $options optional `regex` and `is_required`
+     * @return array<string, mixed> the created field definition
      *
      * @throws ValidationException when type or name is empty
      */
@@ -38,6 +40,7 @@ class FieldResource extends AbstractResource
             throw new ValidationException('Field name is required', ['name' => $name]);
         }
 
+        unset($options['type'], $options['name']);
         $payload = array_merge(['type' => $type, 'name' => $name], $options);
 
         $response = $this->httpClient->post($this->accountPath('fields'), $payload);
@@ -69,9 +72,12 @@ class FieldResource extends AbstractResource
     /**
      * Retrieve a single field definition.
      * `GET /accounts/{account_id}/fields/{field_id}`
+     *
+     * @return array<string, mixed>
      */
     public function get(string $fieldId): array
     {
+        $fieldId = $this->pathSegment($fieldId, 'field ID');
         $response = $this->httpClient->get($this->accountPath("fields/{$fieldId}"));
 
         return $this->extractData($response->getData() ?? []);
@@ -81,10 +87,16 @@ class FieldResource extends AbstractResource
      * Update a field definition.
      * `PUT /accounts/{account_id}/fields/{field_id}`
      *
-     * @param array<string, mixed> $data subset of `{ type, name, regex, is_required, is_active }`
+     * @param array<string, mixed> $data subset of `{ name, regex, is_active }`
+     * @return array<string, mixed> the updated field definition
      */
     public function update(string $fieldId, array $data): array
     {
+        if ($data === []) {
+            throw new ValidationException('Provide at least one field property to update');
+        }
+
+        $fieldId = $this->pathSegment($fieldId, 'field ID');
         $response = $this->httpClient->put($this->accountPath("fields/{$fieldId}"), $data);
 
         return $this->extractData($response->getData() ?? []);
@@ -93,9 +105,12 @@ class FieldResource extends AbstractResource
     /**
      * Delete a field definition. A field already used in a document cannot be deleted.
      * `DELETE /accounts/{account_id}/fields/{field_id}`
+     *
+     * @return array<array-key, mixed>
      */
     public function delete(string $fieldId): array
     {
+        $fieldId = $this->pathSegment($fieldId, 'field ID');
         $response = $this->httpClient->delete($this->accountPath("fields/{$fieldId}"));
 
         return $this->extractData($response->getData() ?? []);
@@ -105,11 +120,16 @@ class FieldResource extends AbstractResource
      * Validate a single input value against a field definition.
      * `POST /accounts/{account_id}/fields/{field_id}/validate`
      *
-     * @param string|null $signerAccessCode pass when validating as a signer rather than
-     *                                       as an authenticated account user
+     * @param string|null $signerAccessCode optional signer context in addition to
+     *                                       workspace authentication
+     * @return array<string, mixed> validation result
      */
-    public function validate(string $fieldId, string $value, ?string $signerAccessCode = null): array
-    {
+    public function validate(
+        string $fieldId,
+        #[\SensitiveParameter] mixed $value,
+        #[\SensitiveParameter] ?string $signerAccessCode = null
+    ): array {
+        $fieldId = $this->pathSegment($fieldId, 'field ID');
         $response = $this->httpClient->post(
             $this->accountPath("fields/{$fieldId}/validate"),
             ['value' => $value],
@@ -125,15 +145,17 @@ class FieldResource extends AbstractResource
      * `POST /accounts/{account_id}/fields/validate-multiple`
      *
      * @param array<int, array{field_id: string, value: mixed}> $values
-     * @param string|null                                       $signerAccessCode pass when
-     *     validating as a signer rather than as an authenticated account user
+     * @param string|null                                       $signerAccessCode optional signer
+     *     context in addition to workspace authentication
      * @return array<int, array<string, mixed>>
      */
-    public function validateMultiple(array $values, ?string $signerAccessCode = null): array
-    {
+    public function validateMultiple(
+        #[\SensitiveParameter] array $values,
+        #[\SensitiveParameter] ?string $signerAccessCode = null
+    ): array {
         $response = $this->httpClient->post(
             $this->accountPath('fields/validate-multiple'),
-            $values,
+            array_values($values),
             [],
             $this->accessCodeQuery($signerAccessCode)
         );
@@ -152,13 +174,5 @@ class FieldResource extends AbstractResource
         $response = $this->httpClient->get('field-types');
 
         return $this->extractData($response->getData() ?? []);
-    }
-
-    /**
-     * @return array<string, string>
-     */
-    private function accessCodeQuery(?string $signerAccessCode): array
-    {
-        return $signerAccessCode !== null ? ['signer-access-code' => $signerAccessCode] : [];
     }
 }

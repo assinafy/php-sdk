@@ -2,91 +2,109 @@
 
 ## Requirements
 
-- PHP 8.1 or higher
-- Composer
-- ext-json
+- PHP 8.2, 8.3, 8.4, or 8.5
+- Composer 2.10 or newer
+- The PHP `json` and `mbstring` extensions
+- TLS trust roots (CA certificates) suitable for HTTPS API requests
 
-## Installation via Composer
+PHP uses annually supported release branches rather than an LTS designation. The
+SDK tests every currently supported branch; use PHP 8.5 for new deployments.
+
+The SDK includes Guzzle as its default HTTP transport. Applications do not need to
+install a separate HTTP client.
+
+## Install with Composer
+
+Version 2.0.0 is available as repository tag `v2.0.0`, but Packagist does not currently expose
+`assinafy/php-sdk`. After the package is published there, install it with:
 
 ```bash
-composer require assinafy/php-sdk
+composer require assinafy/php-sdk:^2.0
 ```
 
-### Installing with Guzzle HTTP Client
-
-The SDK requires an HTTP client. We recommend Guzzle:
+Until that publication is complete, Composer can install the stable `v2.0.0` tag directly from
+the public GitHub mirror:
 
 ```bash
-composer require assinafy/php-sdk guzzlehttp/guzzle
+composer config repositories.assinafy vcs https://github.com/assinafy/php-sdk.git
+composer require assinafy/php-sdk:2.0.0
 ```
 
-### Installing with Logging Support
-
-For logging capabilities, install Monolog:
+Optional PSR-3 logging integrations, such as Monolog, can be installed separately:
 
 ```bash
-composer require assinafy/php-sdk guzzlehttp/guzzle monolog/monolog
+composer require monolog/monolog
 ```
 
-## Docker Setup
-
-The SDK includes a Docker Compose environment for development and testing.
-
-### Starting the Environment
+If developing the SDK itself, clone the public mirror and install development
+dependencies:
 
 ```bash
-docker-compose up -d
-```
-
-This will start:
-- PHP 8.3 FPM container
-- MySQL 8.0 database (host: mysql, user: root, password: root)
-- Nginx web server on port 8080
-
-### Installing Dependencies
-
-```bash
-docker-compose exec php composer install
-```
-
-### Running Tests
-
-```bash
-docker-compose exec php vendor/bin/phpunit
-```
-
-### Stopping the Environment
-
-```bash
-docker-compose down
-```
-
-## Manual Installation
-
-If you prefer not to use Composer, you can clone the repository:
-
-```bash
-git clone https://github.com/your-org/assinafy-php-sdk.git
-cd assinafy-php-sdk
+git clone https://github.com/assinafy/php-sdk.git
+cd php-sdk
 composer install
 ```
 
-## Configuration
+## Configure credentials
 
-### Environment Variables
+Never commit API keys. Supply credentials with your deployment platform's secret
+manager or environment configuration:
 
-Create a `.env` file in your project root:
-
-```env
-ASSINAFY_API_KEY=your-api-key
-ASSINAFY_ACCOUNT_ID=your-account-id
-ASSINAFY_WEBHOOK_SECRET=your-webhook-secret
-ASSINAFY_BASE_URL=https://api.assinafy.com.br/v1
+```bash
+export ASSINAFY_API_KEY='your-api-key'
+export ASSINAFY_ACCOUNT_ID='your-account-id'
 ```
 
-### Laravel Configuration
+The SDK does not load `.env` files itself. Framework environment helpers or a
+package such as `vlucas/phpdotenv` may be used by the host application.
 
-Add to `config/services.php`:
+Production is the default API target:
+
+```php
+<?php
+
+use Assinafy\SDK\AssinafyClient;
+
+$apiKey = getenv('ASSINAFY_API_KEY');
+$accountId = getenv('ASSINAFY_ACCOUNT_ID');
+
+if (!is_string($apiKey) || $apiKey === '' || !is_string($accountId) || $accountId === '') {
+    throw new RuntimeException('Assinafy credentials are not configured');
+}
+
+$client = AssinafyClient::create(
+    apiKey: $apiKey,
+    accountId: $accountId,
+);
+```
+
+Select the sandbox explicitly for development and live integration tests:
+
+```php
+use Assinafy\SDK\AssinafyClient;
+use Assinafy\SDK\Configuration;
+
+$client = AssinafyClient::create(
+    apiKey: $apiKey,
+    accountId: $accountId,
+    baseUrl: Configuration::SANDBOX_BASE_URL,
+);
+```
+
+The base URLs are:
+
+- Production: `https://api.assinafy.com.br/v1`
+- Sandbox: `https://sandbox.assinafy.com.br/v1`
+
+Custom remote base URLs must use HTTPS. Plain HTTP is accepted only for local loopback
+development (`localhost`, `*.localhost`, `127.0.0.1`, or `::1`, with an optional port). A base URL
+must be absolute and include a host, and it cannot contain embedded credentials, a query string,
+or a fragment. Do not disable TLS verification to work around certificate errors.
+
+## Framework configuration
+
+In Laravel, credentials can be exposed through `config/services.php` and injected
+where the client is constructed:
 
 ```php
 'assinafy' => [
@@ -96,77 +114,118 @@ Add to `config/services.php`:
 ],
 ```
 
-### Symfony Configuration
-
-Add to `config/packages/assinafy.yaml`:
+In Symfony, declare environment-backed parameters or service arguments:
 
 ```yaml
 parameters:
     assinafy.api_key: '%env(ASSINAFY_API_KEY)%'
     assinafy.account_id: '%env(ASSINAFY_ACCOUNT_ID)%'
-    assinafy.base_url: '%env(ASSINAFY_BASE_URL)%'
+    assinafy.base_url: '%env(default:assinafy_default_base_url:ASSINAFY_BASE_URL)%'
+    assinafy_default_base_url: 'https://api.assinafy.com.br/v1'
 ```
 
-## Verification
+## Verify the installation
 
-Test your installation:
+Constructing the client verifies that autoloading, credentials, and the default
+transport are available without making an API request:
 
 ```php
 <?php
 
-require 'vendor/autoload.php';
+require __DIR__ . '/vendor/autoload.php';
 
 use Assinafy\SDK\AssinafyClient;
+use Assinafy\SDK\Configuration;
 
 $client = AssinafyClient::create(
-    apiKey: $_ENV['ASSINAFY_API_KEY'],
-    accountId: $_ENV['ASSINAFY_ACCOUNT_ID']
+    apiKey: (string) getenv('ASSINAFY_API_KEY'),
+    accountId: (string) getenv('ASSINAFY_ACCOUNT_ID'),
+    baseUrl: Configuration::SANDBOX_BASE_URL,
 );
 
-try {
-    $documents = $client->documents()->list(page: 1, perPage: 5);
-    echo "Connection successful! Found " . count($documents['data'] ?? []) . " documents.\n";
-} catch (\Exception $e) {
-    echo "Connection failed: {$e->getMessage()}\n";
-}
+echo "Assinafy SDK configured for {$client->getConfig()->getBaseUrl()}\n";
 ```
+
+## Docker development environment
+
+The included Compose environment runs PHP 8.5 FPM, MySQL 8.0, and Nginx:
+
+```bash
+docker compose up -d --build
+docker compose exec php composer install
+docker compose exec php vendor/bin/phpunit --testsuite=unit
+docker compose down
+```
+
+The web service listens on `http://localhost:8080`. MySQL is bound to
+`127.0.0.1:3306` for local development only.
+
+## Live sandbox tests
+
+Live tests create and modify sandbox resources and can consume sandbox credits.
+Run them only with dedicated sandbox credentials and force the sandbox URL:
+
+```bash
+ASSINAFY_INTEGRATION=1 \
+ASSINAFY_API_KEY='sandbox-key' \
+ASSINAFY_ACCOUNT_ID='sandbox-account-id' \
+ASSINAFY_BASE_URL='https://sandbox.assinafy.com.br/v1' \
+vendor/bin/phpunit --testsuite=integration
+```
+
+GitHub Actions provides the manual **Sandbox integration** workflow. Configure the
+protected `sandbox` environment with these secrets before dispatching it:
+
+- `ASSINAFY_SANDBOX_API_KEY`
+- `ASSINAFY_SANDBOX_ACCOUNT_ID`
+- `ASSINAFY_SANDBOX_TEST_EMAIL` (required only for notification tests)
+- `ASSINAFY_SANDBOX_TEST_EMAIL_ALT` (required only for notification tests)
+- `ASSINAFY_SANDBOX_SIGNER_ID` (optional; set together with the access code)
+- `ASSINAFY_SANDBOX_SIGNER_ACCESS_CODE` (optional; enables signer-read checks)
+
+The workflow hard-codes and verifies the sandbox hostname; credentials are never
+stored in the repository. Notification and disposable-account deletion tests are
+disabled by default and require explicit workflow-dispatch options. In GitLab,
+set `RUN_ASSINAFY_NOTIFICATION_TESTS=1` or
+`RUN_ASSINAFY_DESTRUCTIVE_TESTS=1` when starting the protected sandbox job.
 
 ## Troubleshooting
 
-### "Class not found" errors
+### Missing PHP extension
 
-Make sure Composer autoloading is working:
-
-```bash
-composer dump-autoload
-```
-
-### HTTP client not found
-
-Install Guzzle:
+Confirm the required runtime extensions and dependency platform requirements:
 
 ```bash
-composer require guzzlehttp/guzzle
+php -m | grep -E 'json|mbstring'
+composer check-platform-reqs
 ```
 
-### SSL/TLS errors
+### Autoloading errors
 
-Make sure your PHP installation has up-to-date CA certificates:
+Regenerate Composer's optimized autoloader:
 
 ```bash
-php -r "print_r(openssl_get_cert_locations());"
+composer dump-autoload --optimize
 ```
 
-### API authentication errors
+### TLS errors
 
-Verify your credentials:
-1. Check that your API key is correct
-2. Verify your account ID
-3. Ensure your account is active in Assinafy dashboard
+Check PHP's configured CA locations and update the operating system CA bundle:
 
-## Next Steps
+```bash
+php -r 'print_r(openssl_get_cert_locations());'
+```
 
-- Read the [README](../README.md) for usage examples
-- Check [EXAMPLES.md](EXAMPLES.md) for detailed code samples
-- Review the API documentation at https://api.assinafy.com.br/v1/docs
+Do not disable TLS certificate verification.
 
+### Authentication errors
+
+Verify that the API key belongs to the target environment, the account ID is
+correct, the account is active, and the base URL is the intended production or
+sandbox endpoint. Do not log credential values while diagnosing authentication.
+
+## Next steps
+
+- Read the [README](../README.md) for usage examples.
+- See [EXAMPLES.md](EXAMPLES.md) for complete workflows.
+- Consult the [Assinafy API documentation](https://api.assinafy.com.br/v1/docs).

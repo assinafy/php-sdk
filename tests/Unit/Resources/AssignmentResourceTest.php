@@ -50,7 +50,7 @@ final class AssignmentResourceTest extends TestCase
             [
                 'id' => 's1',
                 'verification_method' => AssignmentResource::VERIFICATION_WHATSAPP,
-                'notification_methods' => ['Email', 'Whatsapp'],
+                'notification_methods' => ['Whatsapp'],
             ],
         ]);
 
@@ -60,9 +60,32 @@ final class AssignmentResourceTest extends TestCase
             'signers' => [[
                 'id' => 's1',
                 'verification_method' => 'Whatsapp',
-                'notification_methods' => ['Email', 'Whatsapp'],
+                'notification_methods' => ['Whatsapp'],
             ]],
         ], $call['body']);
+    }
+
+    public function testCreateSupportsAllDocumentedNotificationChannelCombinations(): void
+    {
+        $this->http->queueJson(201, ['id' => 'a1']);
+
+        $this->assignments->create('doc1', [[
+            'id' => 's1',
+            'verification_method' => AssignmentResource::VERIFICATION_EMAIL,
+            'notification_methods' => [
+                3 => AssignmentResource::NOTIFICATION_EMAIL,
+                8 => AssignmentResource::NOTIFICATION_WHATSAPP,
+            ],
+        ]], options: [
+            'copy_receivers' => [5 => 'copy-1'],
+        ]);
+
+        $body = $this->http->lastCall()['body'];
+        $this->assertSame(
+            [AssignmentResource::NOTIFICATION_EMAIL, AssignmentResource::NOTIFICATION_WHATSAPP],
+            $body['signers'][0]['notification_methods']
+        );
+        $this->assertSame(['copy-1'], $body['copy_receivers']);
     }
 
     public function testCreateRejectsInvalidMethod(): void
@@ -124,6 +147,22 @@ final class AssignmentResourceTest extends TestCase
         $this->assertSame(['expires_at' => '2027-01-01T00:00:00Z'], $call['body']);
     }
 
+    public function testCreateRejectsInvalidExpirationBeforeRequest(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->assignments->create('doc1', ['s1'], options: ['expires_at' => 'tomorrow']);
+    }
+
+    public function testCreateRejectsNormalizedInvalidCalendarDateBeforeRequest(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->assignments->create(
+            'doc1',
+            ['s1'],
+            options: ['expires_at' => '2026-02-30T12:00:00Z']
+        );
+    }
+
     public function testCreatePassesStepForSequentialSigning(): void
     {
         $this->http->queueJson(201, ['id' => 'a1']);
@@ -136,6 +175,24 @@ final class AssignmentResourceTest extends TestCase
         $signers = $this->http->lastCall()['body']['signers'];
         $this->assertSame(['id' => 's1', 'step' => 1], $signers[0]);
         $this->assertSame(['id' => 's2', 'step' => 2], $signers[1]);
+    }
+
+    public function testCreateRejectsHugeNonSequentialStepWithoutAllocatingARange(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->expectExceptionMessage('contiguous');
+
+        $this->assignments->create('doc1', [['id' => 's1', 'step' => PHP_INT_MAX]]);
+    }
+
+    public function testCreateRejectsInvalidUtcOffsetBeforeRequest(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->assignments->create(
+            'doc1',
+            ['s1'],
+            options: ['expires_at' => '2026-08-05T12:00:00+24:00']
+        );
     }
 
     public function testWhatsappNotifications(): void
@@ -189,6 +246,48 @@ final class AssignmentResourceTest extends TestCase
         $this->assignments->estimateCost('doc1', ['s1']);
 
         $this->assertSame([['id' => 's1']], $this->http->lastCall()['body']['signers']);
+    }
+
+    public function testCollectEstimateAllowsNoSignersWhenEntriesAreProvided(): void
+    {
+        $this->http->queueJson(200, ['total_credits' => 0]);
+
+        $this->assignments->estimateCost(
+            'doc1',
+            [],
+            AssignmentResource::METHOD_COLLECT,
+            ['entries' => [['page_id' => 'page1', 'fields' => []]]]
+        );
+
+        $call = $this->http->lastCall();
+        $this->assertSame([], $call['body']['signers']);
+        $this->assertSame([['page_id' => 'page1', 'fields' => []]], $call['body']['entries']);
+    }
+
+    public function testCollectEntriesAndNestedFieldsAreReindexedForJson(): void
+    {
+        $this->http->queueJson(200, ['total_credits' => 0]);
+
+        $this->assignments->estimateCost(
+            'doc1',
+            [],
+            AssignmentResource::METHOD_COLLECT,
+            ['entries' => [4 => [
+                'page_id' => 'page1',
+                'fields' => [7 => ['field_id' => 'field1']],
+            ]]]
+        );
+
+        $this->assertSame(
+            [['page_id' => 'page1', 'fields' => [['field_id' => 'field1']]]],
+            $this->http->lastCall()['body']['entries']
+        );
+    }
+
+    public function testCollectEstimateRequiresEntries(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->assignments->estimateCost('doc1', [], AssignmentResource::METHOD_COLLECT);
     }
 
     /** Creating an assignment still needs to know who signs. */

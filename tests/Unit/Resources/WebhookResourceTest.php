@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Assinafy\SDK\Tests\Unit\Resources;
 
 use Assinafy\SDK\Configuration;
+use Assinafy\SDK\Exceptions\ValidationException;
 use Assinafy\SDK\Resources\WebhookResource;
 use Assinafy\SDK\Tests\Unit\Support\FakeHttpClient;
 use PHPUnit\Framework\TestCase;
@@ -57,6 +58,16 @@ final class WebhookResourceTest extends TestCase
             [WebhookResource::EVENT_SIGNER_SIGNED],
             $http->lastCall()['body']['events']
         );
+    }
+
+    public function testRegisterRejectsNonHttpWebhookUrl(): void
+    {
+        [, $webhooks] = $this->build();
+
+        $this->expectException(ValidationException::class);
+        $this->expectExceptionMessage('absolute HTTP or HTTPS URL');
+
+        $webhooks->register('ftp://example.com/hook', 'a@b.com');
     }
 
     public function testGet(): void
@@ -132,7 +143,12 @@ final class WebhookResourceTest extends TestCase
         $call = $http->lastCall();
         $this->assertSame('GET', $call['method']);
         $this->assertSame('accounts/a/webhooks', $call['uri']);
-        $this->assertSame(['event' => 'document_ready', 'delivered' => 'false'], $call['query']);
+        $this->assertSame([
+            'page' => 1,
+            'per-page' => 20,
+            'event' => 'document_ready',
+            'delivered' => 'false',
+        ], $call['query']);
         $this->assertArrayHasKey('data', $result);
     }
 

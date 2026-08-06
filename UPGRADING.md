@@ -2,8 +2,17 @@
 
 ## 1.x → 2.0.0
 
-Most code needs no changes. The breaking changes are concentrated in three areas: the PHP
-version floor, webhook handling, and the `Configuration` constructor.
+Most code needs no changes. The main migration points are the PHP version floor, webhook
+handling, the `Configuration` constructor, and custom transport signatures.
+
+Version 2.0.0 is available as repository tag `v2.0.0`, but Packagist does not currently expose
+`assinafy/php-sdk`. Use the tagged VCS/path-repository instructions in
+[docs/INSTALLATION.md](docs/INSTALLATION.md), and switch to `assinafy/php-sdk:^2.0` after
+Packagist publication.
+
+The current audit covers all 89 operations on the 68 paths in the 2026-08-05 OpenAPI document.
+The two browser OAuth operations are represented by URL builders, and five additional
+template-management routes are retained because the running sandbox supports them.
 
 ### PHP 8.2 is now the minimum
 
@@ -102,15 +111,44 @@ Configuration::fromArray([
 ]);
 ```
 
-### `HttpClientInterface` gained methods
+### Remote base URLs now require HTTPS
+
+To prevent credentials from crossing cleartext connections, 2.0 rejects `http://` base URLs for
+remote hosts. Plain HTTP remains available only for loopback development hosts: `localhost`,
+`*.localhost`, `127.0.0.1`, and `::1`. Base URLs must be absolute and cannot embed credentials, a
+query string, or a fragment.
+
+Replace a remote `http://` endpoint with a valid HTTPS URL and trusted certificate. Do not disable
+TLS verification. Local test servers may continue to use, for example,
+`http://127.0.0.1:8080/v1`.
+
+### `HttpClientInterface` changed
 
 Only relevant if you implement the interface yourself (the shipped `GuzzleHttpClient` is
 unaffected):
 
-- **Added** `patch(string $uri, array $data = [], array $headers = [], array $query = []): Response`
-- **Changed** `delete()` now takes a fourth `array $data = []` for a JSON body. Existing
-  implementations keep compiling if you add the parameter; ignore it unless you call
-  `accounts()->delete(force: true)`.
+- **Added** `patch(string $uri, ?array $data = null, array $headers = [], array $query = []): Response`.
+- **Changed** `post()` and `put()` to the same nullable-data convention and added the optional
+  query argument: `(?array $data = null, array $headers = [], array $query = [])`.
+- **Changed** `delete()` to
+  `(string $uri, array $headers = [], array $query = [], array $data = [])` so callers can send
+  query parameters or the JSON body used by account deletion.
+
+For `post()`, `put()`, and `patch()`, `null` means no request body. Passing an explicit array,
+including `[]`, sends JSON. This distinction is required by no-body operations such as signer
+terms acceptance and webhook deactivation. Update custom implementations to match the nullable
+signatures exactly.
+
+Guzzle is now a required runtime dependency
+(`guzzlehttp/guzzle:^7.15.2 || ^8.0.2`), not a development-only suggestion. The SDK supports both
+Guzzle 7 and 8 and normalizes their different exception hierarchies. The SDK transport remains
+its own `HttpClientInterface`; 2.0 does not claim PSR-18 interoperability.
+
+If your application subclasses an SDK resource, review overridden method signatures before
+upgrading. Several public resource methods gained optional token, query, or payload parameters,
+and PHP requires compatible overrides. Resource classes remain extensible, but overriding them
+is an advanced integration point rather than a version-stable interface; prefer composition for
+application-specific behavior.
 
 ### `list()` now returns a `pagination` key
 
@@ -148,6 +186,25 @@ $client->assignments()->estimateCost($documentId, [
 
 `create()` still requires IDs — it has to know who signs.
 
+The same audit removed an incorrect coupling between verification and notification. A signer may
+verify by Email or WhatsApp while `notification_methods` is independently empty or contains
+Email, WhatsApp, or both. Remove workarounds that forced a single matching channel.
+
+### Signer phone numbers require an explicit country code
+
+The 1.x private normalizer stripped every non-digit and blindly prepended `+`, which could turn a
+local number into an ambiguous international value. Create/update now require a leading `+` and
+country code, accept common visual separators, and enforce 8–15 digits. The shared behavior is
+public for callers that normalize input before building a request:
+
+```php
+$phone = SignerResource::normalizePhoneNumber('+55 (48) 99999-0000');
+// +5548999990000
+```
+
+Local numbers such as `48999990000` now throw `ValidationException`; add the correct country code
+at the source rather than assuming one in the SDK.
+
 ### Credentials are redacted from logs
 
 No API change, but worth knowing if you parse your own logs.
@@ -160,5 +217,83 @@ with `[redacted]`. Rotate any credential that may have been captured in existing
 ### New: `$client->accounts()`
 
 The `Accounts` tag was entirely unimplemented in 1.x. `accounts()->list()` is the documented
-way to discover the account ID that every other resource needs, and works on a `forAuth()`
-client. See the README.
+way to discover the account ID that every other resource needs. A `forAuth()` client is public
+and sends no credentials, so pass the Bearer token returned by login:
+
+```php
+$bootstrap = AssinafyClient::forAuth(Configuration::SANDBOX_BASE_URL);
+$session = $bootstrap->auth()->login($email, $password);
+$accounts = $bootstrap->accounts()->list($session['access_token']);
+```
+
+### New: global Bearer authentication
+
+API-key clients continue to work. For a user-session workflow, configure the access token once
+and every workspace resource will send `Authorization: Bearer ...`:
+
+```php
+$client = AssinafyClient::forBearer(
+    accessToken: $session['access_token'],
+    accountId: $accounts['data'][0]['id'],
+    baseUrl: Configuration::SANDBOX_BASE_URL,
+);
+
+$profile = $client->users()->get();
+$documents = $client->documents()->list();
+```
+
+The per-call token arguments remain useful on a public bootstrap client. API-key lifecycle
+methods now use nullable tokens:
+
+```php
+$client->auth()->generateApiKey(null, $currentPassword);
+$client->auth()->getApiKey();
+$client->auth()->deleteApiKey();
+$client->auth()->changePassword(null, $email, $currentPassword, $newPassword);
+```
+
+Passing `null` uses the client's configured API key or global Bearer token. On a `forAuth()`
+client, supply the explicit login token instead; the SDK rejects an unauthenticated call before
+network I/O.
+
+### Signer access codes moved to the query string
+
+All signer-facing methods now follow the OpenAPI security scheme and send the credential as
+`?signer-access-code=...`. If a custom transport or recorded request assertion expected the code
+inside JSON, update it. `signerSession()->acceptTerms($accessCode)` sends the query parameter and
+no request body; `verifyCode()` sends only `{ "verification-code": "..." }` as JSON.
+
+Do not derive this code from an assignment's `signing_urls`. Those objects expose `signer_id` and
+`url`, but the sandbox does not expose the one-time access code in a usable URL path segment; the
+attempt returned `401` on 2026-08-05. Use `documents()->sendToken()` for a signer already assigned
+to the document, then obtain the code from that signer's controlled inbox. Live signer-read tests
+require explicit `ASSINAFY_SIGNER_ID` and `ASSINAFY_SIGNER_ACCESS_CODE` values and are independent
+from notification-delivery tests.
+
+### Browser OAuth operations are URL builders
+
+The two published browser operations are implemented as
+`auth()->socialLoginUrl()` and `auth()->socialLoginCallbackUrl()`. They return absolute URLs so
+the application can redirect a browser; they do not run a redirect/HTML response through the
+JSON transport.
+
+### Preserve documented/runtime divergences
+
+- Document-tag list/replace/append/detach operations are in the current OpenAPI document and
+  map directly to `DocumentResource` methods. Although the body description calls the strings
+  tag IDs, the sandbox and SDK use tag names and auto-create missing names.
+- `GET /users/self` is published with `data: AuthUser`, but the sandbox returns
+  `data: {user: AuthUser, accounts: AuthAccount[]}`. `users()->get()` now normalizes either shape
+  to `AuthUser`; code using the SDK method keeps a stable return, while code coupled to a raw
+  transport response should account for the nested sandbox payload.
+- The published account and authenticated-user statistics routes both returned an
+  application-level `404` route-not-deployed response in the sandbox on 2026-08-05. The SDK
+  retains `accounts()->stats()` and `users()->stats()` for 89/89 OpenAPI coverage, but callers
+  must treat deployment availability separately from publication in the contract.
+- Public `send-token` is documented with `{email}`, but the sandbox requires
+  `{recipient, channel}` and accepts only a recipient who is already a signer assigned to the
+  target document. The SDK deliberately uses the runtime request shape; ensure the assignment
+  exists before calling it.
+- Template list and create-document-from-template operations are published. Template
+  create/get/update/delete/page-download are not, but remain available because live tests prove
+  the routes work. Do not remove them based only on an OpenAPI diff.

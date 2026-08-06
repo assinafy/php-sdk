@@ -1,467 +1,238 @@
-# Architecture Documentation
+# Architecture
 
 ## Overview
 
-The Assinafy PHP SDK follows clean architecture principles with clear separation of concerns, dependency inversion, and adherence to SOLID principles.
+The Assinafy PHP SDK is a small, synchronous client for the Assinafy v1 API. It uses a facade over focused resource classes, a project-specific HTTP abstraction, PSR-3 logging, strict PHP types, and explicit exception mapping.
 
-## Directory Structure
+The package targets PHP 8.2 through 8.5, the complete supported CI matrix. The authoritative endpoint mapping, including known differences between the published OpenAPI document and sandbox behavior, is in [docs/API_REFERENCE.md](docs/API_REFERENCE.md).
 
-```
+## Directory structure
+
+```text
 assinafy-php-sdk/
 ├── src/
-│   ├── AssinafyClient.php          # Main SDK entry point
-│   ├── Configuration.php            # Configuration object
-│   ├── Exceptions/                  # Exception hierarchy
-│   │   ├── AssinafyException.php
+│   ├── AssinafyClient.php
+│   ├── Configuration.php
+│   ├── Exceptions/
 │   │   ├── ApiException.php
-│   │   ├── ValidationException.php
-│   │   └── NetworkException.php
-│   ├── Http/                        # HTTP abstraction layer
-│   │   ├── HttpClientInterface.php
+│   │   ├── AssinafyException.php
+│   │   ├── NetworkException.php
+│   │   └── ValidationException.php
+│   ├── Http/
 │   │   ├── GuzzleHttpClient.php
+│   │   ├── HttpClientInterface.php
+│   │   ├── LogRedactor.php
 │   │   └── Response.php
-│   ├── Resources/                   # API resource classes
+│   ├── Resources/
 │   │   ├── AbstractResource.php
-│   │   ├── DocumentResource.php
-│   │   ├── SignerResource.php
+│   │   ├── AccountResource.php
 │   │   ├── AssignmentResource.php
-│   │   ├── TemplateResource.php
-│   │   ├── TagResource.php
-│   │   ├── FieldResource.php
-│   │   ├── WebhookResource.php
 │   │   ├── AuthResource.php
+│   │   ├── DocumentResource.php
+│   │   ├── FieldResource.php
+│   │   ├── SignerDocumentResource.php
+│   │   ├── SignerResource.php
 │   │   ├── SignerSessionResource.php
-│   │   └── SignerDocumentResource.php
-│   └── Support/                     # Helper classes
-│       └── WebhookVerifier.php
-├── tests/                           # PHPUnit test suites
-│   ├── Unit/                        #   - mocked HTTP, no network
-│   └── Integration/                 #   - opt-in live API tests
-├── docs/                            # Documentation
-│   ├── index.php
+│   │   ├── TagResource.php
+│   │   ├── TemplateResource.php
+│   │   ├── UserResource.php
+│   │   └── WebhookResource.php
+│   └── Support/
+│       ├── MutableLogger.php
+│       └── WebhookEventParser.php
+├── tests/
+│   ├── Unit/
+│   └── Integration/
+├── docs/
+│   ├── API_REFERENCE.md
 │   ├── EXAMPLES.md
-│   └── INSTALLATION.md
-├── docker/                          # Docker setup
-│   ├── Dockerfile
-│   └── nginx/
-│       └── default.conf
+│   ├── INSTALLATION.md
+│   ├── index.php
+│   └── quickstart.php
 ├── composer.json
-├── docker-compose.yml
-├── README.md
-├── MIGRATION.md
-└── ARCHITECTURE.md
+├── phpstan.neon
+├── phpcs.xml
+└── phpunit.xml
 ```
 
-## Layers
+## Components
 
-### 1. Presentation Layer (Client)
+### Client facade
 
-**AssinafyClient** is the main entry point for users:
+`AssinafyClient` owns the configuration, transport, and logger proxy. Resource accessors are lazy and return the same resource instance for the lifetime of the client.
 
 ```php
-$client = AssinafyClient::create($apiKey, $accountId);
-$client->documents()->upload(...);
-```
+use Assinafy\SDK\AssinafyClient;
+use Assinafy\SDK\Configuration;
 
-**Responsibilities:**
-- Facade for all SDK functionality
-- Factory for resource classes
-- Dependency injection management
-
-### 2. Resource Layer
-
-Resource classes encapsulate domain logic for each API resource:
-
-- **DocumentResource**: Document operations, including artifacts, public endpoints, document tags, and template-driven creation
-- **SignerResource**: Workspace signer CRUD
-- **AssignmentResource**: Signature requests (virtual + collect), cost estimation, resend, expiration reset, WhatsApp notification history
-- **TemplateResource**: Template create (PDF upload), list, retrieval, update, delete, and page download
-- **TagResource**: Workspace tag CRUD
-- **FieldResource**: Field-definition CRUD, value validation, and the global type catalog
-- **WebhookResource**: Webhook subscription upsert / read / inactivate, plus dispatch history, retry, and event-type discovery
-- **AuthResource**: Login, social login, API-key lifecycle, password reset / change
-- **SignerSessionResource**: Signer-facing session endpoints authenticated with a `signer-access-code` (identity, signature image, sign/decline)
-- **SignerDocumentResource**: Signer-facing document list / sign-multiple / decline-multiple / download, authenticated with a `signer-access-code`
-
-**Pattern**: Each resource extends `AbstractResource` and follows the same structure.
-
-### 3. HTTP Layer
-
-Abstraction over HTTP communication:
-
-**HttpClientInterface**:
-- Defines contract for HTTP operations
-- Allows swapping implementations
-
-**GuzzleHttpClient**:
-- Default implementation using Guzzle
-- Handles request/response transformation
-- Implements error handling
-
-**Response**:
-- Value object for HTTP responses
-- Automatic JSON parsing
-- Status checking helpers
-
-### 4. Configuration Layer
-
-**Configuration** class:
-- Immutable configuration object
-- Validation of required parameters
-- Default value management
-- Factory methods for various input formats
-
-### 5. Exception Layer
-
-Hierarchical exception structure:
-
-```
-AssinafyException (base)
-├── ApiException (HTTP errors)
-├── ValidationException (validation errors)
-└── NetworkException (network errors)
-```
-
-### 6. Support Layer
-
-Helper classes that don't fit other layers:
-
-- **WebhookVerifier**: HMAC signature verification
-
-## Design Patterns
-
-### 1. Facade Pattern
-
-`AssinafyClient` provides a simplified interface:
-
-```php
-$client->uploadAndRequestSignatures(...);
-```
-
-Instead of:
-```php
-$document = $client->documents()->upload(...);
-$client->documents()->waitUntilReady($documentId);
-$signer = $client->signers()->create(...);
-$assignment = $client->assignments()->create(...);
-```
-
-### 2. Factory Pattern
-
-Multiple factory methods for flexibility:
-
-```php
-AssinafyClient::create($apiKey, $accountId);
-AssinafyClient::fromArray($config);
-new AssinafyClient($config, $httpClient, $logger);
-```
-
-### 3. Strategy Pattern
-
-HTTP client is pluggable:
-
-```php
-interface HttpClientInterface {
-    public function get(string $uri, ...): Response;
-    public function post(string $uri, ...): Response;
+$apiKey = getenv('ASSINAFY_API_KEY');
+$accountId = getenv('ASSINAFY_ACCOUNT_ID');
+if (!is_string($apiKey) || $apiKey === '' || !is_string($accountId) || $accountId === '') {
+    throw new RuntimeException('Assinafy sandbox credentials are not configured.');
 }
 
-class GuzzleHttpClient implements HttpClientInterface { }
-class CustomHttpClient implements HttpClientInterface { }
+$client = AssinafyClient::create(
+    apiKey: $apiKey,
+    accountId: $accountId,
+    baseUrl: Configuration::SANDBOX_BASE_URL,
+);
+
+$documents = $client->documents();
+$user = $client->users()->get();
 ```
 
-### 4. Template Method Pattern
+`AssinafyClient::forAuth()` creates a public client for login, password-reset, OAuth URL helpers,
+and public document operations. It sends neither `X-Api-Key` nor `Authorization`; protected
+bootstrap methods must receive the login token explicitly. Once an account ID is known,
+`AssinafyClient::forBearer()` configures `Authorization: Bearer ...` once for every workspace
+resource. Account-scoped methods reject public configuration instead of sending placeholder
+credentials.
 
-`AbstractResource` defines common behavior:
+The high-level `uploadAndRequestSignatures()` workflow validates every signer description before uploading, uploads a PDF, optionally waits for document readiness, resolves or creates signers, and creates a virtual assignment.
+
+### Resource layer
+
+Each resource extends `AbstractResource`, which centralizes account paths, path-segment validation, pagination normalization, Bearer headers, signer access-code queries, and response data extraction.
+
+| Accessor | Responsibility |
+|---|---|
+| `accounts()` | Account discovery and management, branding, and account statistics |
+| `assignments()` | Signature requests, cost estimates, resend operations, expiration resets, and WhatsApp history |
+| `auth()` | Login, social login, OAuth URL builders, password flows, and API-key lifecycle |
+| `documents()` | Document upload, retrieval, search, downloads, tags, verification, and template-driven creation |
+| `fields()` | Field definitions, validation, and the global field-type catalog |
+| `signers()` | Workspace signer CRUD, email lookup, and explicit-country-code E.164 normalization |
+| `signerSession()` | End-signer identity, verification, data confirmation, signature image, signing, and decline operations |
+| `signerDocuments()` | End-signer document lookup, search, bulk actions, and downloads |
+| `tags()` | Account tag CRUD |
+| `templates()` | Template upload, polling, retrieval, update, deletion, and page downloads |
+| `users()` | Authenticated user profile and cross-account statistics |
+| `webhooks()` | Subscription configuration, event types, delivery history, and retry |
+
+Workspace resources use either the configured `X-Api-Key` or the global Bearer header supplied by
+`forBearer()`. Selected bootstrap methods can override configured authentication with an explicit
+Bearer token; a null token falls back to the client configuration. Signer-facing resources put
+the access code in the `signer-access-code` query parameter, matching the OpenAPI security scheme,
+and keep it separate from workspace authentication.
+
+### HTTP layer
+
+`HttpClientInterface` is the SDK's own transport contract. It is intentionally small and is not a claim that the SDK accepts any arbitrary HTTP client implementation directly. `GuzzleHttpClient` is the default adapter, backed by the required Guzzle runtime dependency, and implements JSON requests, multipart uploads, raw image uploads, binary downloads, timeouts, logging, and exception translation. Nullable `post()`/`put()`/`patch()` data distinguishes no body (`null`) from an explicit JSON array (`[]`).
+
+`Response` stores the status, headers, raw body, and parsed JSON body. Most resource methods unwrap the API's `data` field; paginated methods retain the response envelope and add a normalized `pagination` entry derived from `X-Pagination-*` headers.
+
+`LogRedactor` can sanitize request options, JSON bodies, query-string credentials, Bearer tokens,
+API keys, signer codes, verification codes, and password fields. The default transport logs only
+payload-free request summaries and response metadata; it does not log request or response bodies.
+
+### Configuration
+
+`Configuration` validates mutually exclusive API-key/Bearer credentials, account ID, base URL,
+and positive timeout values. Remote base URLs require HTTPS; plain HTTP is restricted to
+loopback development hosts. It exposes production and sandbox base URL constants:
 
 ```php
-abstract class AbstractResource
-{
-    protected function extractData(array $response): array { }
-    protected function accountPath(string $suffix = ''): string { }
-}
+Configuration::DEFAULT_BASE_URL; // production
+Configuration::SANDBOX_BASE_URL; // sandbox
 ```
 
-### 5. Dependency Injection
+Configuration is read-only after construction. `Configuration::forPublic()` uses internal
+sentinel values that are never emitted as authentication headers. `Configuration::forBearer()`
+stores an access token and emits `Authorization` instead of `X-Api-Key` for all workspace calls.
 
-All dependencies injected via constructor:
+### Logging
 
-```php
-public function __construct(
-    HttpClientInterface $httpClient,
-    Configuration $config,
-    ?LoggerInterface $logger = null
-)
-```
-
-## SOLID Principles
-
-### Single Responsibility Principle
-
-Each class has one reason to change:
-- `Configuration`: Manages configuration
-- `DocumentResource`: Document operations
-- `GuzzleHttpClient`: HTTP communication
-- `WebhookVerifier`: Signature verification
-
-### Open/Closed Principle
-
-Open for extension, closed for modification:
-- Add new HTTP clients via interface
-- Add new loggers via PSR-3
-- Extend resources without changing core
-
-### Liskov Substitution Principle
-
-Any `HttpClientInterface` can replace `GuzzleHttpClient`:
-
-```php
-$client = new AssinafyClient($config, new CustomHttpClient());
-```
-
-### Interface Segregation Principle
-
-Small, focused interfaces:
-- `HttpClientInterface`: Only HTTP methods
-- `LoggerInterface` (PSR-3): Only logging methods
-
-### Dependency Inversion Principle
-
-Depend on abstractions:
-- Resources depend on `HttpClientInterface`, not Guzzle
-- Client depends on `LoggerInterface`, not Monolog
-
-## Data Flow
-
-### Upload and Request Signatures
-
-```
-User Code
-    ↓
-AssinafyClient::uploadAndRequestSignatures()
-    ↓
-DocumentResource::upload()
-    ↓
-HttpClientInterface::uploadFile()
-    ↓
-GuzzleHttpClient::request()
-    ↓
-Guzzle HTTP Client
-    ↓
-Assinafy API
-```
-
-### Webhook Verification
-
-```
-Webhook Request
-    ↓
-User Webhook Handler
-    ↓
-WebhookVerifier::verify()
-    ↓
-HMAC Comparison
-    ↓
-Event Processing
-```
-
-## Error Handling Strategy
-
-### Exception Hierarchy
-
-```php
-try {
-    $document = $client->documents()->upload(...);
-} catch (ValidationException $e) {
-    $errors = $e->getErrors();
-} catch (ApiException $e) {
-    $statusCode = $e->getStatusCode();
-    $responseData = $e->getResponseData();
-} catch (NetworkException $e) {
-    echo "Network error: {$e->getMessage()}";
-} catch (AssinafyException $e) {
-    $context = $e->getContext();
-}
-```
-
-### HTTP Error Mapping
-
-- 400-499: `ApiException` (client errors)
-- 500-599: `ApiException` (server errors)
-- Network failures: `NetworkException`
-- Invalid input: `ValidationException`
-
-## Extensibility Points
-
-### 1. Custom HTTP Client
-
-```php
-class MyHttpClient implements HttpClientInterface
-{
-    public function get(string $uri, array $params = [], array $headers = []): Response
-    {
-    }
-}
-
-$client = new AssinafyClient($config, new MyHttpClient());
-```
-
-### 2. Custom Logger
+The SDK accepts any PSR-3 `LoggerInterface`; otherwise it uses `NullLogger`. `MutableLogger` is an internal proxy shared by the default transport and lazily created resources. Calling `AssinafyClient::setLogger()` updates that proxy, so resources obtained before the logger change also use the new logger.
 
 ```php
 use Psr\Log\LoggerInterface;
 
-class MyLogger implements LoggerInterface
-{
-}
-
-$client->setLogger(new MyLogger());
+/** @var LoggerInterface $logger */
+$client->setLogger($logger);
 ```
 
-### 3. Custom Resource
+Applications should still avoid logging their own raw request bodies or webhook payloads. `LogRedactor` protects logging performed through the SDK's default transport, not unrelated application logging.
 
-```php
-class CustomResource extends AbstractResource
-{
-    public function myCustomMethod(): array
-    {
-        $response = $this->httpClient->get('custom-endpoint');
-        return $response->getData();
-    }
-}
+### Webhook parsing
+
+The API contract has no webhook secret registration field or signature header. The SDK therefore does not expose an HMAC verification API. `WebhookEventParser` only decodes the delivery envelope and reads its type, entity data, event-specific payload, and account ID.
+
+Webhook bodies must be treated as untrusted input. A handler should use HTTPS, apply network controls where possible, return promptly, make processing idempotent, and re-fetch the referenced entity through an authenticated resource before acting.
+
+### Exceptions
+
+```text
+AssinafyException
+├── ApiException
+├── NetworkException
+└── ValidationException
 ```
 
-### 4. Middleware Pattern (Future)
+- `ApiException` represents non-success API responses and retains the HTTP status and parsed response data.
+- `NetworkException` represents connection, DNS, TLS, and timeout failures.
+- `ValidationException` represents SDK validation failures that use structured validation errors.
+- Some local precondition failures intentionally use `InvalidArgumentException` or `RuntimeException`, as documented per method.
 
-```php
-$client->addMiddleware(new RateLimitMiddleware());
-$client->addMiddleware(new RetryMiddleware());
+## Object and request flow
+
+An ordinary resource request follows this path:
+
+```text
+Application
+  -> AssinafyClient resource accessor
+  -> resource validation and request shaping
+  -> HttpClientInterface
+  -> GuzzleHttpClient
+  -> Assinafy v1 API
+  -> Response
+  -> resource envelope/data normalization
+  -> application
 ```
 
-## Testing Strategy
+The upload-and-assign helper composes existing public methods rather than duplicating their HTTP logic:
 
-### Unit Tests
-
-Test each class in isolation:
-
-```php
-class DocumentResourceTest extends TestCase
-{
-    public function testUpload()
-    {
-        $httpClient = $this->createMock(HttpClientInterface::class);
-        $config = new Configuration('key', 'account');
-        
-        $resource = new DocumentResource($httpClient, $config);
-    }
-}
+```text
+uploadAndRequestSignatures()
+  -> validate signer descriptions
+  -> documents()->upload()
+  -> documents()->waitUntilReady() when enabled
+  -> signers()->findByEmail() or signers()->create()
+  -> assignments()->create()
 ```
 
-### Integration Tests
+## Design principles
 
-Test with real API:
+- **Single responsibility:** configuration, transport, response parsing, redaction, resources, and event parsing are separate concerns.
+- **Dependency inversion:** resources depend on `HttpClientInterface` and `LoggerInterface`, not concrete logging packages.
+- **Open for adapters:** applications can supply a custom implementation of `HttpClientInterface` and any PSR-3 logger.
+- **KISS:** resource methods mirror one API operation or a clearly documented local composite helper.
+- **DRY:** shared account paths, authentication queries, pagination, response extraction, validation, and logging propagation are centralized.
 
-```php
-$client = AssinafyClient::create($_ENV['API_KEY'], $_ENV['ACCOUNT_ID']);
-$document = $client->documents()->upload('test.pdf', 'Test.pdf');
+## Testing strategy
+
+Unit tests use `tests/Unit/Support/FakeHttpClient.php`, a recording implementation of `HttpClientInterface`. It queues deterministic responses and records method, URI, query, body, and headers. This keeps unit tests offline and verifies request contracts directly.
+
+Integration tests are opt-in and target the sandbox. Credentials are supplied only through environment variables; they are never committed to documentation or source code.
+
+```bash
+composer test
+composer phpstan
+composer phpcs
+
+# Explicitly opt in to sandbox tests after setting secret environment variables.
+ASSINAFY_INTEGRATION=1 composer test:integration
 ```
 
-### Mock HTTP Client
+## Security boundaries
 
-```php
-$mockClient = new MockHttpClient([
-    new Response(200, [], '{"data": {...}}'),
-]);
+- Production and sandbox defaults use HTTPS.
+- Custom remote base URLs require HTTPS; HTTP is restricted to loopback development hosts.
+- Secrets belong in environment variables or a secret manager, not in code or committed fixtures.
+- Signer access codes are query credentials and must be handled like passwords.
+- SDK transport logs pass through `LogRedactor`.
+- Incoming webhook data is parsed, not authenticated; re-fetch authoritative state before side effects.
+- Public clients cannot call account-scoped paths accidentally.
 
-$client = new AssinafyClient($config, $mockClient);
-```
+## Compatibility and change control
 
-## Performance Considerations
-
-### 1. Lazy Loading
-
-Resources are created on-demand:
-
-```php
-public function documents(): DocumentResource
-{
-    if ($this->documents === null) {
-        $this->documents = new DocumentResource(...);
-    }
-    return $this->documents;
-}
-```
-
-### 2. Connection Pooling
-
-Guzzle maintains connection pool automatically.
-
-### 3. Timeout Configuration
-
-```php
-new Configuration(
-    apiKey: '...',
-    accountId: '...',
-    timeout: 30,
-    connectTimeout: 10
-);
-```
-
-## Security
-
-### 1. Webhook Signature Verification
-
-```php
-$verifier = $client->webhookVerifier();
-if (!$verifier->verify($payload, $signature)) {
-    exit('Invalid signature');
-}
-```
-
-### 2. HTTPS Only
-
-Default base URL uses HTTPS.
-
-### 3. No Credential Logging
-
-Sensitive data never logged.
-
-## Future Enhancements
-
-### 1. Async Support
-
-```php
-$promise = $client->documents()->uploadAsync(...);
-```
-
-### 2. Retry Middleware
-
-```php
-$client->withRetry(maxAttempts: 3, backoff: 'exponential');
-```
-
-### 3. Caching Layer
-
-```php
-$client->withCache($cachePool, ttl: 3600);
-```
-
-### 4. Batch Operations
-
-```php
-$client->batch()
-    ->uploadDocument(...)
-    ->createSigner(...)
-    ->execute();
-```
-
-## Conclusion
-
-The SDK architecture is:
-- **Modular**: Clear separation of concerns
-- **Extensible**: Easy to add new features
-- **Testable**: All dependencies injectable
-- **Maintainable**: Follows industry standards
-- **Type-Safe**: Full PHP 8.1+ type coverage
-- **Framework-Agnostic**: Works anywhere
-
+The public package targets PHP `^8.2`, uses PSR-4 autoloading and PSR-3 logging, and supports Guzzle 7 and 8 through its own transport abstraction. Endpoint behavior must stay aligned with the official v1 contract and the documented runtime divergences. New public methods should include request and return PHPDoc, unit request-shape tests, API-reference mapping, and sandbox coverage when the operation can be exercised safely.

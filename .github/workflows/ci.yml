@@ -2,9 +2,11 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: ['**']
+    tags: ['v*']
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -17,12 +19,14 @@ jobs:
   tests:
     name: Tests / PHP ${{ matrix.php }} / ${{ matrix.dependencies }} deps
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     strategy:
       fail-fast: false
       matrix:
-        # Only branches still receiving upstream support. 8.2 is security-only
-        # until 2026-12-31; 8.3/8.4/8.5 are supported. Mirrors composer.json "php": "^8.2".
+        # PHP has no LTS designation. Cover every upstream-supported branch:
+        # 8.2/8.3 are security-only and 8.4/8.5 are actively supported.
+        # This mirrors composer.json "php": "^8.2".
         php: ['8.2', '8.3', '8.4', '8.5']
         dependencies: [highest]
         include:
@@ -43,7 +47,7 @@ jobs:
           php-version: ${{ matrix.php }}
           extensions: json, mbstring
           coverage: none
-          tools: composer:v2
+          tools: composer:2.10.2
 
       - name: Install dependencies
         uses: ramsey/composer-install@65e4f84970763564f46a70b8a54b90d033b3bdda # 4.0.0
@@ -51,11 +55,12 @@ jobs:
           dependency-versions: ${{ matrix.dependencies }}
 
       - name: Run unit tests
-        run: vendor/bin/phpunit --testsuite=unit
+        run: composer test
 
   static-analysis:
     name: Static analysis (PHPStan)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout
@@ -66,20 +71,22 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
         with:
-          php-version: '8.4'
+          php-version: '8.5'
+          extensions: json, mbstring
           coverage: none
-          tools: composer:v2
+          tools: composer:2.10.2
 
       - name: Install dependencies
         uses: ramsey/composer-install@65e4f84970763564f46a70b8a54b90d033b3bdda # 4.0.0
 
       # --memory-limit: PHPStan's parallel workers exceed PHP's default 128M on this codebase.
       - name: Run PHPStan
-        run: vendor/bin/phpstan analyse --no-progress --memory-limit=512M --error-format=github
+        run: composer run phpstan -- --error-format=github
 
   coding-standards:
     name: Coding standards (PSR-12)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout
@@ -90,19 +97,22 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
         with:
-          php-version: '8.4'
+          php-version: '8.5'
+          extensions: json, mbstring
           coverage: none
-          tools: composer:v2, cs2pr
+          tools: composer:2.10.2, cs2pr
 
       - name: Install dependencies
         uses: ramsey/composer-install@65e4f84970763564f46a70b8a54b90d033b3bdda # 4.0.0
 
       - name: Run PHPCS
-        run: vendor/bin/phpcs --report=checkstyle -q | cs2pr
+        shell: bash
+        run: composer --quiet run phpcs -- --report=checkstyle -q | cs2pr
 
   composer-validate:
     name: Validate composer.json
     runs-on: ubuntu-latest
+    timeout-minutes: 5
 
     steps:
       - name: Checkout
@@ -113,9 +123,98 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
         with:
-          php-version: '8.4'
+          php-version: '8.5'
+          extensions: json, mbstring
           coverage: none
-          tools: composer:v2
+          tools: composer:2.10.2
 
       - name: Validate composer.json
-        run: composer validate --strict
+        run: composer validate --strict --no-check-lock
+
+  security-audit:
+    name: Dependency security audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: '8.5'
+          extensions: json, mbstring
+          coverage: none
+          tools: composer:2.10.2
+
+      - name: Install highest allowed dependencies
+        uses: ramsey/composer-install@65e4f84970763564f46a70b8a54b90d033b3bdda # 4.0.0
+        with:
+          dependency-versions: highest
+
+      - name: Audit dependencies
+        run: composer run audit:dependencies
+
+  coverage:
+    name: Unit test coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Setup PHP with PCOV
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: '8.5'
+          extensions: json, mbstring
+          coverage: pcov
+          tools: composer:2.10.2
+
+      - name: Install dependencies
+        uses: ramsey/composer-install@65e4f84970763564f46a70b8a54b90d033b3bdda # 4.0.0
+        with:
+          dependency-versions: highest
+
+      - name: Run unit tests with coverage
+        run: composer run test -- --coverage-text
+
+  runtime-smoke:
+    name: Production dependency smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: '8.5'
+          extensions: json, mbstring
+          coverage: none
+          tools: composer:2.10.2
+
+      - name: Install runtime dependencies only
+        uses: ramsey/composer-install@65e4f84970763564f46a70b8a54b90d033b3bdda # 4.0.0
+        with:
+          dependency-versions: highest
+          composer-options: --no-dev --classmap-authoritative
+
+      - name: Check runtime platform requirements
+        run: composer check-platform-reqs --no-dev
+
+      - name: Construct the default client without making a request
+        run: |
+          # PHP variables must not be expanded by the shell.
+          # shellcheck disable=SC2016
+          php -r 'require "vendor/autoload.php"; $client = \Assinafy\SDK\AssinafyClient::create("runtime-smoke-key", "runtime-smoke-account", \Assinafy\SDK\Configuration::SANDBOX_BASE_URL); if (!($client->getHttpClient() instanceof \Assinafy\SDK\Http\GuzzleHttpClient)) { exit(1); }'

@@ -32,10 +32,10 @@ class WebhookEventParser
      *   'id'         => 8629,
      *   'event'      => 'signature_requested',
      *   'message'    => 'Signature requested',
-     *   'subject'    => 'Document',
-     *   'origin'     => 'api',
-     *   'account_id' => '102d25a489f34a275d31a16045fd',
-     *   'created_at' => '2026-06-09T17:08:49Z',
+     *   'subject'    => ['id' => 'user-id', 'type' => 'User', 'email' => 'sender@example.com'],
+     *   'origin'     => ['ip' => '203.0.113.10', 'user-agent' => 'Example/1.0'],
+     *   'account_id' => '64f000000000000000000001',
+     *   'created_at' => 1781044129,
      *   'object'     => ['id' => '1032c…', 'type' => 'Document', 'status' => 'pending_signature', …],
      *   'payload'    => [ … event-specific parameters … ],
      * ]
@@ -44,15 +44,15 @@ class WebhookEventParser
      * @param string $payload raw request body, exactly as received
      * @return array<string, mixed>|null
      */
-    public function extractEvent(string $payload): ?array
+    public function extractEvent(#[\SensitiveParameter] string $payload): ?array
     {
-        $data = json_decode($payload, true);
-
-        if (json_last_error() !== JSON_ERROR_NONE || !is_array($data)) {
+        try {
+            $data = json_decode($payload, true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException $e) {
             return null;
         }
 
-        return $data;
+        return is_array($data) ? $data : null;
     }
 
     /**

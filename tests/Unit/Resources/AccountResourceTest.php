@@ -34,18 +34,26 @@ final class AccountResourceTest extends TestCase
         $this->assertSame('MT', $result['data'][0]['name']);
     }
 
-    /**
-     * `GET /accounts` is how a caller discovers the account ID in the first place, so it has
-     * to work on a client that does not have one yet.
-     */
-    public function testListWorksOnAPublicClient(): void
+    public function testListWorksOnAPublicClientWithBearerToken(): void
     {
         $accounts = new AccountResource($this->http, Configuration::forPublic());
         $this->http->queueJson(200, [['id' => 'acc']]);
 
-        $accounts->list();
+        $accounts->list('access-token');
 
         $this->assertSame('accounts', $this->http->lastCall()['uri']);
+        $this->assertSame(
+            ['Authorization' => 'Bearer access-token'],
+            $this->http->lastCall()['headers']
+        );
+    }
+
+    public function testListRejectsUnauthenticatedPublicClient(): void
+    {
+        $accounts = new AccountResource($this->http, Configuration::forPublic());
+
+        $this->expectException(ValidationException::class);
+        $accounts->list();
     }
 
     public function testAccountScopedCallsRejectAPublicClient(): void
@@ -66,6 +74,17 @@ final class AccountResourceTest extends TestCase
         $this->assertSame('GET', $call['method']);
         $this->assertSame('accounts/acc', $call['uri']);
         $this->assertSame('MT', $result['name']);
+    }
+
+    public function testStatsUsesConfiguredAccountAndGranularity(): void
+    {
+        $this->http->queueJson(200, [['period' => '2026-08', 'documents_uploaded' => 2]]);
+
+        $result = $this->accounts->stats();
+
+        $this->assertSame('accounts/acc/stats', $this->http->lastCall()['uri']);
+        $this->assertSame(['granularity' => 'monthly'], $this->http->lastCall()['query']);
+        $this->assertSame(2, $result[0]['documents_uploaded']);
     }
 
     public function testCreateSendsNameOnlyByDefault(): void
@@ -170,7 +189,10 @@ final class AccountResourceTest extends TestCase
 
     public function testUploadLogoSendsMultipart(): void
     {
-        $png = tempnam(sys_get_temp_dir(), 'logo') . '.png';
+        $temporaryPath = tempnam(sys_get_temp_dir(), 'logo');
+        $this->assertIsString($temporaryPath);
+        $png = $temporaryPath . '.png';
+        rename($temporaryPath, $png);
         file_put_contents($png, 'fake-png');
 
         $this->http->queueJson(200, ['logo' => 'https://example.com/logo.png']);

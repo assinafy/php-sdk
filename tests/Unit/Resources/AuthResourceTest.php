@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Assinafy\SDK\Tests\Unit\Resources;
 
 use Assinafy\SDK\Configuration;
+use Assinafy\SDK\Exceptions\ValidationException;
 use Assinafy\SDK\Resources\AuthResource;
 use Assinafy\SDK\Tests\Unit\Support\FakeHttpClient;
 use PHPUnit\Framework\TestCase;
@@ -44,6 +45,46 @@ final class AuthResourceTest extends TestCase
         ], $this->http->lastCall()['body']);
     }
 
+    public function testLinkSocialLoginUsesConfiguredApiKeyOrExplicitBearer(): void
+    {
+        $this->http->queueJson(200, []);
+        $this->auth->linkSocialLogin('google', 'provider-token');
+        $this->assertSame('auth/link-social-login', $this->http->lastCall()['uri']);
+        $this->assertSame([], $this->http->lastCall()['headers']);
+
+        $this->http->queueJson(200, []);
+        $this->auth->linkSocialLogin('google', 'provider-token', 'bearer-token');
+        $this->assertSame(
+            ['Authorization' => 'Bearer bearer-token'],
+            $this->http->lastCall()['headers']
+        );
+    }
+
+    public function testOAuthBrowserUrlsAreBuiltWithoutMakingRequests(): void
+    {
+        $this->assertSame(
+            Configuration::DEFAULT_BASE_URL . '/auth/authenticate?authclient=google',
+            $this->auth->socialLoginUrl()
+        );
+        $this->assertSame(
+            Configuration::DEFAULT_BASE_URL . '/login-callback',
+            $this->auth->socialLoginCallbackUrl()
+        );
+        $this->assertSame([], $this->http->calls);
+    }
+
+    public function testRejectsUnsupportedSocialProviderBeforeRequest(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->auth->socialLogin('unsupported', 'token');
+    }
+
+    public function testRejectsInvalidLoginEmailBeforeRequest(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->auth->login('not-an-email', 'password');
+    }
+
     public function testApiKeyLifecycleUsesBearerHeader(): void
     {
         $this->http->queueJson(201, ['api_key' => 'k']);
@@ -75,6 +116,25 @@ final class AuthResourceTest extends TestCase
             'new_password' => 'new',
         ], $call['body']);
         $this->assertSame(['Authorization' => 'Bearer TOKEN'], $call['headers']);
+    }
+
+    public function testApiKeyLifecycleCanUseConfiguredApiKeyWithoutBearerArgument(): void
+    {
+        $this->http->queueJson(200, ['api_key' => 'new-key']);
+        $this->auth->generateApiKey(null, 'password');
+        $this->assertSame([], $this->http->lastCall()['headers']);
+
+        $this->http->queueJson(200, ['api_key' => 'masked']);
+        $this->auth->getApiKey();
+        $this->assertSame([], $this->http->lastCall()['headers']);
+
+        $this->http->queueJson(200, []);
+        $this->auth->deleteApiKey();
+        $this->assertSame([], $this->http->lastCall()['headers']);
+
+        $this->http->queueJson(200, ['email' => 'a@b.com']);
+        $this->auth->changePassword(null, 'a@b.com', 'old', 'new');
+        $this->assertSame([], $this->http->lastCall()['headers']);
     }
 
     public function testRequestAndResetPassword(): void

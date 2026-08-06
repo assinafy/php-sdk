@@ -31,6 +31,13 @@ final class ResponseTest extends TestCase
         $this->assertNull($response->getData());
     }
 
+    public function testTopLevelJsonScalarsDoNotCauseATypeError(): void
+    {
+        $this->assertNull((new Response(200, [], '"ok"'))->getData());
+        $this->assertNull((new Response(200, [], '42'))->getData());
+        $this->assertNull((new Response(200, [], 'true'))->getData());
+    }
+
     public function testClassifiesErrors(): void
     {
         $this->assertTrue((new Response(404, [], ''))->isClientError());

@@ -9,6 +9,7 @@ use Assinafy\SDK\Exceptions\ApiException;
 use Assinafy\SDK\Exceptions\NetworkException;
 use Assinafy\SDK\Http\GuzzleHttpClient;
 use GuzzleHttp\Client;
+use GuzzleHttp\Exception\RequestException;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Middleware;
@@ -39,7 +40,6 @@ final class GuzzleHttpClientTest extends TestCase
         $guzzle = new Client([
             'base_uri' => 'https://api.example.com/v1/',
             'handler' => $stack,
-            'headers' => ['X-Api-Key' => 'key'],
         ]);
 
         return new GuzzleHttpClient(new Configuration('key', 'acc'), $logger, $guzzle);
@@ -60,6 +60,18 @@ final class GuzzleHttpClientTest extends TestCase
         $this->assertSame('/v1/accounts/acc/documents', $this->lastRequest()->getUri()->getPath());
         $this->assertSame('per-page=2&page=1', $this->lastRequest()->getUri()->getQuery());
         $this->assertSame([['id' => 'd1']], $response->getData()['data']);
+        $this->assertSame('key', $this->lastRequest()->getHeaderLine('X-Api-Key'));
+    }
+
+    public function testExplicitBearerReplacesConfiguredApiKey(): void
+    {
+        $client = $this->client([new GuzzleResponse(200, [], '{"status":200,"data":{"id":"u1"}}')]);
+
+        $client->get('users/self', [], ['Authorization' => 'Bearer access-token']);
+
+        $request = $this->lastRequest();
+        $this->assertSame('Bearer access-token', $request->getHeaderLine('Authorization'));
+        $this->assertFalse($request->hasHeader('X-Api-Key'));
     }
 
     public function testPatchSendsJsonBodyWithContentType(): void
@@ -81,6 +93,34 @@ final class GuzzleHttpClientTest extends TestCase
         $client->delete('documents/d1');
 
         $this->assertSame('', (string) $this->lastRequest()->getBody());
+    }
+
+    public function testPostAndPutSendNoBodyWhenDataIsOmitted(): void
+    {
+        $client = $this->client([
+            new GuzzleResponse(200, [], '{"status":200,"data":null}'),
+            new GuzzleResponse(200, [], '{"status":200,"data":null}'),
+        ]);
+
+        $client->post('webhooks/history/retry');
+        $post = $this->lastRequest();
+        $this->assertSame('', (string) $post->getBody());
+        $this->assertSame('', $post->getHeaderLine('Content-Type'));
+
+        $client->put('webhooks/inactivate');
+        $put = $this->lastRequest();
+        $this->assertSame('', (string) $put->getBody());
+        $this->assertSame('', $put->getHeaderLine('Content-Type'));
+    }
+
+    public function testExplicitEmptyJsonArrayIsPreserved(): void
+    {
+        $client = $this->client([new GuzzleResponse(200, [], '{"status":200,"data":null}')]);
+
+        $client->post('documents/d1/assignments/a1', []);
+
+        $this->assertSame('[]', (string) $this->lastRequest()->getBody());
+        $this->assertSame('application/json', $this->lastRequest()->getHeaderLine('Content-Type'));
     }
 
     public function testDeleteCanSendAJsonBody(): void
@@ -106,6 +146,25 @@ final class GuzzleHttpClientTest extends TestCase
         $this->assertSame('/v1/documents/statuses', $this->lastRequest()->getUri()->getPath());
     }
 
+    public function testInjectedGuzzleClientCannotFollowRedirectsWithApiKey(): void
+    {
+        $client = $this->client([
+            new GuzzleResponse(302, ['Location' => 'https://untrusted.example/collect']),
+            new GuzzleResponse(200, [], '{"status":200,"data":[]}'),
+        ]);
+
+        try {
+            $client->get('documents/statuses');
+            $this->fail('A redirect response must not be followed or treated as success');
+        } catch (ApiException $e) {
+            $this->assertSame(302, $e->getStatusCode());
+        }
+
+        $this->assertCount(1, $this->transactions, 'The redirect target must never receive a request');
+        $this->assertSame('key', $this->lastRequest()->getHeaderLine('X-Api-Key'));
+        $this->assertSame('api.example.com', $this->lastRequest()->getUri()->getHost());
+    }
+
     public function testPaginationHeadersSurviveOntoTheResponse(): void
     {
         $client = $this->client([
@@ -120,11 +179,22 @@ final class GuzzleHttpClientTest extends TestCase
     public function testHttpErrorBecomesApiException(): void
     {
         $client = $this->client([
-            new GuzzleResponse(404, [], '{"status":404,"data":null,"message":"Documento não encontrado."}'),
+            new GuzzleResponse(
+                404,
+                ['X-Request-Id' => 'request-123', 'Retry-After' => '5'],
+                '{"status":404,"data":null,"message":"Documento não encontrado."}'
+            ),
         ]);
 
-        $this->expectException(ApiException::class);
-        $client->get('documents/nope');
+        try {
+            $client->get('documents/nope');
+            $this->fail('Expected an API exception');
+        } catch (ApiException $e) {
+            $this->assertSame(404, $e->getStatusCode());
+            $this->assertSame('request-123', $e->getResponseHeaderLine('x-request-id'));
+            $this->assertSame('5', $e->getResponseHeaderLine('Retry-After'));
+            $this->assertNotNull($e->getPrevious());
+        }
     }
 
     public function testConnectionFailureBecomesNetworkException(): void
@@ -133,6 +203,59 @@ final class GuzzleHttpClientTest extends TestCase
 
         $this->expectException(NetworkException::class);
         $client->get('documents');
+    }
+
+    public function testResponseBearingTransferFailureRemainsNetworkException(): void
+    {
+        $failure = RequestException::create(
+            new Request('GET', 'documents'),
+            new GuzzleResponse(200, [], '{"status":200,"data":[]}')
+        );
+        $client = $this->client([$failure]);
+
+        $this->expectException(NetworkException::class);
+        $client->get('documents');
+    }
+
+    public function testRequestFailureWithoutResponseBecomesNetworkException(): void
+    {
+        $client = $this->client([
+            new RequestException('request body failed', new Request('GET', 'documents')),
+        ]);
+
+        $this->expectException(NetworkException::class);
+        $client->get('documents');
+    }
+
+    public function testSuccessfulMalformedJsonResponseBecomesNetworkException(): void
+    {
+        $client = $this->client([
+            new GuzzleResponse(200, ['Content-Type' => 'application/json'], '{"truncated":'),
+        ]);
+
+        $this->expectException(NetworkException::class);
+        $this->expectExceptionMessage('invalid JSON response');
+
+        $client->get('documents/d1');
+    }
+
+    public function testSuccessfulHtmlResponseBecomesNetworkException(): void
+    {
+        $client = $this->client([
+            new GuzzleResponse(200, ['Content-Type' => 'text/html'], '<h1>proxy error</h1>'),
+        ]);
+
+        $this->expectException(NetworkException::class);
+        $client->get('documents/d1');
+    }
+
+    public function testDocumentedBinaryResponseContentTypeIsAccepted(): void
+    {
+        $client = $this->client([
+            new GuzzleResponse(200, ['Content-Type' => 'application/pdf'], '%PDF-binary'),
+        ]);
+
+        $this->assertSame('%PDF-binary', $client->get('documents/d1/download/original')->getBody());
     }
 
     public function testUploadFileRejectsAMissingFile(): void
@@ -145,7 +268,10 @@ final class GuzzleHttpClientTest extends TestCase
 
     public function testUploadFileSendsMultipartWithABoundary(): void
     {
-        $pdf = tempnam(sys_get_temp_dir(), 'up') . '.pdf';
+        $temporaryPath = tempnam(sys_get_temp_dir(), 'up');
+        $this->assertIsString($temporaryPath);
+        $pdf = $temporaryPath . '.pdf';
+        rename($temporaryPath, $pdf);
         file_put_contents($pdf, '%PDF-1.4 fixture');
 
         $client = $this->client([new GuzzleResponse(200, [], '{"status":200,"data":{"id":"d1"}}')]);
@@ -179,7 +305,7 @@ final class GuzzleHttpClientTest extends TestCase
      * request options array, so `auth()->login()` wrote the plaintext password and every
      * bearer-authenticated call wrote its token straight into the host application's logs.
      */
-    public function testDebugLogsNeverContainCredentials(): void
+    public function testDebugLogsNeverContainCredentialsOrPii(): void
     {
         $logger = new class () extends AbstractLogger {
             /** @var array<int, string> */
@@ -192,11 +318,17 @@ final class GuzzleHttpClientTest extends TestCase
         };
 
         $client = $this->client(
-            [new GuzzleResponse(200, [], '{"status":200,"data":{"access_token":"jwt-secret-value"}}')],
+            [new GuzzleResponse(
+                200,
+                [],
+                '{"status":200,"data":{"access_token":"jwt-secret-value",'
+                . '"email":"response-pii@example.com",'
+                . '"signing_urls":[{"url":"https://app.example/sign?signer-access-code=url-secret-value"}]}}'
+            )],
             $logger
         );
 
-        $client->post('login', ['email' => 'a@b.com', 'password' => 'hunter2'], [
+        $client->post('login', ['email' => 'request-pii@example.com', 'password' => 'hunter2'], [
             'Authorization' => 'Bearer bearer-secret-value',
         ]);
 
@@ -206,6 +338,39 @@ final class GuzzleHttpClientTest extends TestCase
         $this->assertStringNotContainsString('hunter2', $log, 'Password leaked into logs');
         $this->assertStringNotContainsString('bearer-secret-value', $log, 'Bearer token leaked into logs');
         $this->assertStringNotContainsString('jwt-secret-value', $log, 'Response access_token leaked into logs');
-        $this->assertStringContainsString('a@b.com', $log, 'Non-secret context should remain useful');
+        $this->assertStringNotContainsString('url-secret-value', $log, 'Signing URL access code leaked into logs');
+        $this->assertStringNotContainsString('request-pii@example.com', $log, 'Request PII leaked into logs');
+        $this->assertStringNotContainsString('response-pii@example.com', $log, 'Response PII leaked into logs');
+        $this->assertStringContainsString('json_keys', $log, 'Structural request context should remain useful');
+    }
+
+    public function testRequestExceptionLogsNeverContainSignerAccessCodes(): void
+    {
+        $logger = new class () extends AbstractLogger {
+            /** @var list<string> */
+            public array $lines = [];
+
+            public function log($level, $message, array $context = []): void
+            {
+                $this->lines[] = (string) $message . ' ' . json_encode($context);
+            }
+        };
+        $secret = 'signer-secret-that-must-never-be-logged';
+        $client = $this->client([
+            new GuzzleResponse(401, [], '{"status":401,"message":"Invalid credentials"}'),
+        ], $logger);
+
+        try {
+            $client->get('signers/self', ['signer-access-code' => $secret]);
+            $this->fail('Expected the 401 response to throw');
+        } catch (ApiException $e) {
+            $this->assertSame(401, $e->getStatusCode());
+            $this->assertStringNotContainsString($secret, $e->getMessage());
+            $this->assertNotNull($e->getPrevious());
+            $this->assertStringNotContainsString($secret, $e->getPrevious()->getMessage());
+            $this->assertNotInstanceOf(\GuzzleHttp\Exception\RequestException::class, $e->getPrevious());
+        }
+
+        $this->assertStringNotContainsString($secret, implode("\n", $logger->lines));
     }
 }

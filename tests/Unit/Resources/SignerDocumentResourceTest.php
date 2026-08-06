@@ -41,9 +41,55 @@ final class SignerDocumentResourceTest extends TestCase
         $this->docs->list('s1', 'CODE', ['status' => 'pending_signature']);
 
         $this->assertSame(
-            ['signer-access-code' => 'CODE', 'status' => 'pending_signature'],
+            [
+                'page' => 1,
+                'per-page' => 20,
+                'status' => 'pending_signature',
+                'signer-access-code' => 'CODE',
+            ],
             $this->http->lastCall()['query']
         );
+    }
+
+    public function testListValidatesPaginationAndCannotOverrideAccessCode(): void
+    {
+        $this->http->queueJson(200, []);
+
+        $this->docs->list('s1', 'CODE', [
+            'page' => 2,
+            'per-page' => 100,
+            'signer-access-code' => 'ATTACKER-CODE',
+        ]);
+
+        $this->assertSame([
+            'page' => 2,
+            'per-page' => 100,
+            'signer-access-code' => 'CODE',
+        ], $this->http->lastCall()['query']);
+
+        $this->expectException(ValidationException::class);
+        $this->docs->list('s1', 'CODE', ['page' => 0]);
+    }
+
+    public function testListRejectsNonIntegerPagination(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->docs->list('s1', 'CODE', ['per-page' => '100']);
+    }
+
+    public function testSearchUsesOfficialPathAndAccessCodeQuery(): void
+    {
+        $this->http->queueJson(200, [['id' => 'd1']]);
+
+        $result = $this->docs->search('s1', 'CODE', 'contract');
+
+        $call = $this->http->lastCall();
+        $this->assertSame('signers/s1/documents/search', $call['uri']);
+        $this->assertSame(
+            ['search' => 'contract', 'signer-access-code' => 'CODE'],
+            $call['query']
+        );
+        $this->assertSame('d1', $result[0]['id']);
     }
 
     public function testSignMultipleBodyAndQuery(): void

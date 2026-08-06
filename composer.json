@@ -1,6 +1,6 @@
 {
     "name": "assinafy/php-sdk",
-    "description": "Modern PHP SDK for Assinafy digital signature API - PSR compliant and framework agnostic",
+    "description": "Modern, framework-agnostic PHP SDK for the Assinafy digital signature API",
     "type": "library",
     "license": "MIT",
     "keywords": ["assinafy", "digital-signature", "e-signature", "sdk", "api-client"],
@@ -12,19 +12,16 @@
     "require": {
         "php": "^8.2",
         "ext-json": "*",
-        "psr/http-client": "^1.0",
-        "psr/http-factory": "^1.0",
-        "psr/http-message": "^1.1|^2.0",
-        "psr/log": "^1.1|^2.0|^3.0"
+        "ext-mbstring": "*",
+        "guzzlehttp/guzzle": "^7.15.2 || ^8.0.2",
+        "psr/log": "^1.1 || ^2.0 || ^3.0"
     },
     "require-dev": {
-        "guzzlehttp/guzzle": "^7.12.1",
-        "phpstan/phpstan": "^2.1",
-        "phpunit/phpunit": "^10.5|^11.0",
-        "squizlabs/php_codesniffer": "^3.7"
+        "phpstan/phpstan": "^2.2.8",
+        "phpunit/phpunit": "^11.5.56 || ^12.5 || ^13.2",
+        "squizlabs/php_codesniffer": "^3.13.6 || ^4.0.2"
     },
     "suggest": {
-        "guzzlehttp/guzzle": "^7.12.1 — required by the default HTTP client (GuzzleHttpClient). Earlier 7.x releases carry CVE-2026-55568 (silent HTTPS proxy downgrade to cleartext) and CVE-2026-55767.",
         "monolog/monolog": "For advanced logging capabilities"
     },
     "autoload": {
@@ -36,6 +33,20 @@
         "psr-4": {
             "Assinafy\\SDK\\Tests\\": "tests/"
         }
+    },
+    "scripts": {
+        "test": "phpunit --testsuite=unit",
+        "test:integration": "phpunit --testsuite=integration",
+        "phpstan": "phpstan analyse --no-progress --memory-limit=512M",
+        "phpcs": "phpcs",
+        "audit:dependencies": "@composer audit --format=plain --abandoned=fail",
+        "check": [
+            "@composer validate --strict --no-check-lock",
+            "@test",
+            "@phpstan",
+            "@phpcs",
+            "@audit:dependencies"
+        ]
     },
     "minimum-stability": "stable",
     "prefer-stable": true,

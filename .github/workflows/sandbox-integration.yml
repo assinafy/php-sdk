@@ -1,0 +1,81 @@
+name: Sandbox integration
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_notification_tests:
+        description: Send test emails to the configured sandbox recipients
+        required: false
+        default: false
+        type: boolean
+      run_destructive_tests:
+        description: Create and delete a disposable sandbox account
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: assinafy-sandbox-integration
+  cancel-in-progress: false
+
+jobs:
+  integration:
+    name: Live sandbox API
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: sandbox
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: '8.5'
+          extensions: json, mbstring
+          coverage: none
+          tools: composer:2.10.2
+
+      - name: Install dependencies
+        uses: ramsey/composer-install@65e4f84970763564f46a70b8a54b90d033b3bdda # 4.0.0
+        with:
+          dependency-versions: highest
+
+      - name: Verify sandbox safeguards
+        shell: bash
+        env:
+          ASSINAFY_API_KEY: ${{ secrets.ASSINAFY_SANDBOX_API_KEY }}
+          ASSINAFY_ACCOUNT_ID: ${{ secrets.ASSINAFY_SANDBOX_ACCOUNT_ID }}
+          ASSINAFY_BASE_URL: https://sandbox.assinafy.com.br/v1
+          ASSINAFY_NOTIFICATION_TESTS: ${{ inputs.run_notification_tests && '1' || '0' }}
+          ASSINAFY_TEST_EMAIL: ${{ secrets.ASSINAFY_SANDBOX_TEST_EMAIL }}
+          ASSINAFY_TEST_EMAIL_ALT: ${{ secrets.ASSINAFY_SANDBOX_TEST_EMAIL_ALT }}
+        run: |
+          test -n "${ASSINAFY_API_KEY}"
+          test -n "${ASSINAFY_ACCOUNT_ID}"
+          if [[ "${ASSINAFY_NOTIFICATION_TESTS}" == "1" ]]; then
+            test -n "${ASSINAFY_TEST_EMAIL}"
+            test -n "${ASSINAFY_TEST_EMAIL_ALT}"
+          fi
+          # PHP variables must not be expanded by the shell.
+          # shellcheck disable=SC2016
+          php -r '$url = (string) getenv("ASSINAFY_BASE_URL"); if (parse_url($url, PHP_URL_HOST) !== "sandbox.assinafy.com.br") { fwrite(STDERR, "Refusing to run integration tests outside the sandbox.\n"); exit(1); }'
+
+      - name: Run live integration tests
+        env:
+          ASSINAFY_INTEGRATION: '1'
+          ASSINAFY_API_KEY: ${{ secrets.ASSINAFY_SANDBOX_API_KEY }}
+          ASSINAFY_ACCOUNT_ID: ${{ secrets.ASSINAFY_SANDBOX_ACCOUNT_ID }}
+          ASSINAFY_BASE_URL: https://sandbox.assinafy.com.br/v1
+          ASSINAFY_NOTIFICATION_TESTS: ${{ inputs.run_notification_tests && '1' || '0' }}
+          ASSINAFY_DESTRUCTIVE_TESTS: ${{ inputs.run_destructive_tests && '1' || '0' }}
+          ASSINAFY_TEST_EMAIL: ${{ secrets.ASSINAFY_SANDBOX_TEST_EMAIL }}
+          ASSINAFY_TEST_EMAIL_ALT: ${{ secrets.ASSINAFY_SANDBOX_TEST_EMAIL_ALT }}
+          ASSINAFY_SIGNER_ID: ${{ secrets.ASSINAFY_SANDBOX_SIGNER_ID }}
+          ASSINAFY_SIGNER_ACCESS_CODE: ${{ secrets.ASSINAFY_SANDBOX_SIGNER_ACCESS_CODE }}
+        run: composer run test:integration

@@ -13,27 +13,27 @@ interface HttpClientInterface
     public function get(string $uri, array $params = [], array $headers = []): Response;
 
     /**
-     * @param array<array-key, mixed> $data    JSON body — a string-keyed object or, for
-     *                                          endpoints that expect a JSON array, a list
+     * @param array<array-key, mixed>|null $data JSON body; `null` sends no body, while
+     *     an explicit `[]` sends a JSON array for endpoints whose contract requires it
      * @param array<string, string>   $headers
      * @param array<string, scalar>   $query   optional query-string parameters (e.g. `signer-access-code`)
      */
-    public function post(string $uri, array $data = [], array $headers = [], array $query = []): Response;
+    public function post(string $uri, ?array $data = null, array $headers = [], array $query = []): Response;
 
     /**
-     * @param array<array-key, mixed> $data    JSON body — a string-keyed object or, for
-     *                                          endpoints that expect a JSON array, a list
+     * @param array<array-key, mixed>|null $data JSON body; `null` sends no body, while
+     *     an explicit `[]` sends a JSON array for endpoints whose contract requires it
      * @param array<string, string>   $headers
      * @param array<string, scalar>   $query   optional query-string parameters (e.g. `signer-access-code`)
      */
-    public function put(string $uri, array $data = [], array $headers = [], array $query = []): Response;
+    public function put(string $uri, ?array $data = null, array $headers = [], array $query = []): Response;
 
     /**
-     * @param array<array-key, mixed> $data    JSON body
+     * @param array<array-key, mixed>|null $data JSON body; `null` sends no body
      * @param array<string, string>   $headers
      * @param array<string, scalar>   $query
      */
-    public function patch(string $uri, array $data = [], array $headers = [], array $query = []): Response;
+    public function patch(string $uri, ?array $data = null, array $headers = [], array $query = []): Response;
 
     /**
      * @param array<string, string>   $headers

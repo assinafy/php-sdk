@@ -31,16 +31,29 @@ class AssignmentResource extends AbstractResource
      *     objects. String IDs are normalized to `{ id }` objects before being sent.
      * @param array<string, mixed> $options
      *     Optional keys: `entries` (required for collect), `message`, `expires_at`, `copy_receivers`.
+     * @return array<string, mixed> the created assignment
      */
     public function create(
         string $documentId,
-        array $signers,
+        #[\SensitiveParameter] array $signers,
         string $method = self::METHOD_VIRTUAL,
-        array $options = []
+        #[\SensitiveParameter] array $options = []
     ): array {
         $this->assertMethod($method);
         $this->assertSigners($signers);
+        $options = $this->normalizeListOptions($options);
 
+        if ($method === self::METHOD_COLLECT && ($options['entries'] ?? []) === []) {
+            throw new ValidationException('Collect assignments require field entries');
+        }
+        if (isset($options['expires_at'])) {
+            if (!is_string($options['expires_at'])) {
+                throw new ValidationException('Expiration must be an ISO 8601 date-time');
+            }
+            $this->assertDateTime($options['expires_at']);
+        }
+
+        unset($options['method'], $options['signers']);
         $payload = array_merge(
             [
                 'method' => $method,
@@ -49,6 +62,7 @@ class AssignmentResource extends AbstractResource
             $options
         );
 
+        $documentId = $this->pathSegment($documentId, 'document ID');
         $response = $this->httpClient->post("documents/{$documentId}/assignments", $payload);
 
         return $this->extractData($response->getData() ?? []);
@@ -102,11 +116,10 @@ class AssignmentResource extends AbstractResource
      */
     public function list(int $page = 1, int $perPage = 20, array $filters = []): array
     {
-        $params = array_merge([
+        $params = $this->paginationQuery($page, $perPage, $filters);
+        $params = array_merge($params, [
             'accountId' => $this->requireAccountId(),
-            'page' => $page,
-            'per-page' => $perPage,
-        ], $filters);
+        ]);
 
         return $this->withPagination($this->httpClient->get('assignments', $params));
     }
@@ -151,12 +164,19 @@ class AssignmentResource extends AbstractResource
      */
     public function estimateCost(
         string $documentId,
-        array $signers,
+        #[\SensitiveParameter] array $signers,
         string $method = self::METHOD_VIRTUAL,
-        array $options = []
+        #[\SensitiveParameter] array $options = []
     ): array {
         $this->assertMethod($method);
+        $options = $this->normalizeListOptions($options);
+        if ($method === self::METHOD_VIRTUAL) {
+            $this->assertSigners($signers);
+        } elseif (($options['entries'] ?? []) === []) {
+            throw new ValidationException('Collect estimates require field entries');
+        }
 
+        unset($options['method'], $options['signers']);
         $payload = array_merge(
             [
                 'method' => $method,
@@ -165,6 +185,7 @@ class AssignmentResource extends AbstractResource
             $options
         );
 
+        $documentId = $this->pathSegment($documentId, 'document ID');
         $response = $this->httpClient->post(
             "documents/{$documentId}/assignments/estimate-cost",
             $payload
@@ -176,9 +197,14 @@ class AssignmentResource extends AbstractResource
     /**
      * Resend the signing-notification to a single signer.
      * `PUT /documents/{document_id}/assignments/{assignment_id}/signers/{signer_id}/resend`
+     *
+     * @return array<string, mixed>
      */
     public function resend(string $documentId, string $assignmentId, string $signerId): array
     {
+        $documentId = $this->pathSegment($documentId, 'document ID');
+        $assignmentId = $this->pathSegment($assignmentId, 'assignment ID');
+        $signerId = $this->pathSegment($signerId, 'signer ID');
         $response = $this->httpClient->put(
             "documents/{$documentId}/assignments/{$assignmentId}/signers/{$signerId}/resend"
         );
@@ -189,9 +215,14 @@ class AssignmentResource extends AbstractResource
     /**
      * Estimate the credit cost of resending a notification to one signer.
      * `POST /documents/{document_id}/assignments/{assignment_id}/signers/{signer_id}/estimate-resend-cost`
+     *
+     * @return array<string, mixed>
      */
     public function estimateResendCost(string $documentId, string $assignmentId, string $signerId): array
     {
+        $documentId = $this->pathSegment($documentId, 'document ID');
+        $assignmentId = $this->pathSegment($assignmentId, 'assignment ID');
+        $signerId = $this->pathSegment($signerId, 'signer ID');
         $response = $this->httpClient->post(
             "documents/{$documentId}/assignments/{$assignmentId}/signers/{$signerId}/estimate-resend-cost"
         );
@@ -202,9 +233,14 @@ class AssignmentResource extends AbstractResource
     /**
      * Reset the expiration date of an assignment.
      * `PUT /documents/{document_id}/assignments/{assignment_id}/reset-expiration`
+     *
+     * @return array<string, mixed>
      */
     public function resetExpiration(string $documentId, string $assignmentId, string $expiresAt): array
     {
+        $this->assertDateTime($expiresAt);
+        $documentId = $this->pathSegment($documentId, 'document ID');
+        $assignmentId = $this->pathSegment($assignmentId, 'assignment ID');
         $response = $this->httpClient->put(
             "documents/{$documentId}/assignments/{$assignmentId}/reset-expiration",
             ['expires_at' => $expiresAt]
@@ -222,6 +258,8 @@ class AssignmentResource extends AbstractResource
      */
     public function whatsappNotifications(string $documentId, string $assignmentId): array
     {
+        $documentId = $this->pathSegment($documentId, 'document ID');
+        $assignmentId = $this->pathSegment($assignmentId, 'assignment ID');
         $response = $this->httpClient->get(
             "documents/{$documentId}/assignments/{$assignmentId}/whatsapp-notifications"
         );
@@ -261,12 +299,17 @@ class AssignmentResource extends AbstractResource
      *     see {@see self::estimateCost()}.
      * @return array<int, array<string, mixed>>
      */
-    private function normalizeSigners(array $signers, bool $requireId = true): array
-    {
+    private function normalizeSigners(
+        #[\SensitiveParameter] array $signers,
+        bool $requireId = true
+    ): array {
         $normalized = [];
 
         foreach ($signers as $signer) {
             if (is_string($signer)) {
+                if ($signer === '') {
+                    throw new ValidationException('Signer ID cannot be empty');
+                }
                 $normalized[] = ['id' => $signer];
                 continue;
             }
@@ -278,17 +321,54 @@ class AssignmentResource extends AbstractResource
                     throw new ValidationException('Signer entry missing id', ['signer' => $signer]);
                 }
 
-                $entry = $id === null ? [] : ['id' => (string) $id];
+                if ($id !== null && (!is_string($id) || $id === '')) {
+                    throw new ValidationException('Signer ID must be a non-empty string', [
+                        'signer' => $signer,
+                    ]);
+                }
+
+                $entry = $id === null ? [] : ['id' => $id];
 
                 if (isset($signer['verification_method'])) {
+                    if (
+                        !in_array(
+                            $signer['verification_method'],
+                            [self::VERIFICATION_EMAIL, self::VERIFICATION_WHATSAPP],
+                            true
+                        )
+                    ) {
+                        throw new ValidationException('Unknown signer verification method', [
+                            'verification_method' => $signer['verification_method'],
+                        ]);
+                    }
                     $entry['verification_method'] = $signer['verification_method'];
                 }
 
                 if (isset($signer['notification_methods'])) {
-                    $entry['notification_methods'] = $signer['notification_methods'];
+                    $methods = $signer['notification_methods'];
+                    if (!is_array($methods)) {
+                        throw new ValidationException('Signer notification methods must be an array');
+                    }
+                    foreach ($methods as $notificationMethod) {
+                        if (
+                            !in_array(
+                                $notificationMethod,
+                                [self::NOTIFICATION_EMAIL, self::NOTIFICATION_WHATSAPP],
+                                true
+                            )
+                        ) {
+                            throw new ValidationException('Unknown signer notification method', [
+                                'notification_method' => $notificationMethod,
+                            ]);
+                        }
+                    }
+                    $entry['notification_methods'] = array_values($methods);
                 }
 
                 if (isset($signer['step'])) {
+                    if (!is_int($signer['step']) || $signer['step'] < 1) {
+                        throw new ValidationException('Signer step must be a positive integer');
+                    }
                     $entry['step'] = $signer['step'];
                 }
 
@@ -307,6 +387,109 @@ class AssignmentResource extends AbstractResource
             throw new ValidationException('Invalid signer entry', ['signer' => $signer]);
         }
 
+        $this->assertSequentialSteps($normalized);
+
         return $normalized;
+    }
+
+    /**
+     * Keep schema-defined list properties encoded as JSON arrays even when callers
+     * supply non-contiguous PHP array keys.
+     *
+     * @param array<string, mixed> $options
+     * @return array<string, mixed>
+     */
+    private function normalizeListOptions(#[\SensitiveParameter] array $options): array
+    {
+        if (array_key_exists('copy_receivers', $options)) {
+            if (!is_array($options['copy_receivers'])) {
+                throw new ValidationException('Copy receivers must be an array of signer IDs');
+            }
+            foreach ($options['copy_receivers'] as $signerId) {
+                if (!is_string($signerId) || $signerId === '') {
+                    throw new ValidationException('Copy receiver IDs must be non-empty strings');
+                }
+            }
+            $options['copy_receivers'] = array_values($options['copy_receivers']);
+        }
+
+        if (array_key_exists('entries', $options)) {
+            if (!is_array($options['entries'])) {
+                throw new ValidationException('Assignment entries must be an array');
+            }
+
+            $entries = [];
+            foreach ($options['entries'] as $entry) {
+                if (!is_array($entry)) {
+                    throw new ValidationException('Each assignment entry must be an object');
+                }
+                if (array_key_exists('fields', $entry)) {
+                    if (!is_array($entry['fields'])) {
+                        throw new ValidationException('Assignment entry fields must be an array');
+                    }
+                    $entry['fields'] = array_values($entry['fields']);
+                }
+                $entries[] = $entry;
+            }
+            $options['entries'] = $entries;
+        }
+
+        return $options;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $signers
+     */
+    private function assertSequentialSteps(array $signers): void
+    {
+        $steps = array_column($signers, 'step');
+        if ($steps === []) {
+            return;
+        }
+
+        if (count($steps) !== count($signers)) {
+            throw new ValidationException('Either every signer must define a step or none may');
+        }
+
+        $unique = array_values(array_unique($steps));
+        sort($unique);
+        foreach ($unique as $index => $step) {
+            if ($step !== $index + 1) {
+                throw new ValidationException('Signer steps must be contiguous and start at 1');
+            }
+        }
+    }
+
+    private function assertDateTime(string $value): void
+    {
+        $pattern = '/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-](\d{2}):(\d{2}))$/';
+        if (preg_match($pattern, $value, $matches) !== 1) {
+            throw new ValidationException('Expiration must be an ISO 8601 date-time', [
+                'expires_at' => $value,
+            ]);
+        }
+        if (isset($matches[1]) && ((int) $matches[1] > 23 || (int) $matches[2] > 59)) {
+            throw new ValidationException('Expiration must use a valid UTC offset', [
+                'expires_at' => $value,
+            ]);
+        }
+
+        try {
+            new \DateTimeImmutable($value);
+        } catch (\Exception $e) {
+            throw new ValidationException('Expiration must be a valid ISO 8601 date-time', [
+                'expires_at' => $value,
+            ]);
+        }
+
+        $parseErrors = \DateTimeImmutable::getLastErrors();
+        if (
+            is_array($parseErrors)
+            && ($parseErrors['warning_count'] > 0 || $parseErrors['error_count'] > 0)
+        ) {
+            throw new ValidationException('Expiration must be a valid ISO 8601 date-time', [
+                'expires_at' => $value,
+            ]);
+        }
     }
 }

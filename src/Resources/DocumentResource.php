@@ -29,6 +29,7 @@ class DocumentResource extends AbstractResource
     public const STATUS_METADATA_PROCESSING = 'metadata_processing';
     public const STATUS_METADATA_READY = 'metadata_ready';
     public const STATUS_PENDING_SIGNATURE = 'pending_signature';
+    public const STATUS_READY = 'ready';
     public const STATUS_EXPIRED = 'expired';
     public const STATUS_CERTIFICATING = 'certificating';
     public const STATUS_CERTIFICATED = 'certificated';
@@ -40,6 +41,8 @@ class DocumentResource extends AbstractResource
     public const READY_STATUSES = [
         self::STATUS_METADATA_READY,
         self::STATUS_PENDING_SIGNATURE,
+        self::STATUS_READY,
+        self::STATUS_CERTIFICATING,
         self::STATUS_CERTIFICATED,
     ];
 
@@ -60,13 +63,14 @@ class DocumentResource extends AbstractResource
     /**
      * Upload a PDF and create a new document.
      * `POST /accounts/{account_id}/documents`
+     *
+     * @return array<string, mixed> the created document
      */
-    public function upload(string $filePath): array
+    public function upload(#[\SensitiveParameter] string $filePath): array
     {
         self::assertUploadable($filePath);
 
         $this->logger->info('Uploading document', [
-            'file' => $filePath,
             'size' => filesize($filePath),
         ]);
 
@@ -81,9 +85,12 @@ class DocumentResource extends AbstractResource
     /**
      * Retrieve a document.
      * `GET /documents/{document_id}`
+     *
+     * @return array<string, mixed>
      */
     public function get(string $documentId): array
     {
+        $documentId = $this->pathSegment($documentId, 'document ID');
         $response = $this->httpClient->get("documents/{$documentId}");
 
         return $this->extractData($response->getData() ?? []);
@@ -102,7 +109,7 @@ class DocumentResource extends AbstractResource
      *   'data'    => [
      *     [
      *       'id'         => '1032c5537d351349a9a94ad01cbe',
-     *       'account_id' => '102d25a489f34a275d31a16045fd',
+     *       'account_id' => '64f000000000000000000001',
      *       'name'       => 'contract.pdf',
      *       'status'     => 'pending_signature',   // see the STATUS_* constants
      *       'artifacts'  => ['original' => 'https://…', 'thumbnail' => 'https://…'],
@@ -114,17 +121,14 @@ class DocumentResource extends AbstractResource
      * ]
      * ```
      *
-     * @param array<string, scalar> $filters optional `status`, `method`, `search`, `sort`
-     *     (`sort` is documented on this endpoint only, e.g. `-created_at`)
+     * @param array<string, scalar> $filters optional `status`, `method`, `search`, `tags`,
+     *     and `sort` (`sort` accepts `name` or `updated_at`)
      * @return array{status?: int, message?: string, data?: array<int, array<string, mixed>>,
      *     pagination?: array{current_page: int, page_count: int, per_page: int, total_count: int}}
      */
     public function list(int $page = 1, int $perPage = 20, array $filters = []): array
     {
-        $params = array_merge([
-            'page' => $page,
-            'per-page' => $perPage,
-        ], $filters);
+        $params = $this->paginationQuery($page, $perPage, $filters);
 
         return $this->withPagination($this->httpClient->get($this->accountPath('documents'), $params));
     }
@@ -139,11 +143,8 @@ class DocumentResource extends AbstractResource
      */
     public function search(string $term, int $page = 1, int $perPage = 20, array $filters = []): array
     {
-        $params = array_merge([
-            'search' => $term,
-            'page' => $page,
-            'per-page' => $perPage,
-        ], $filters);
+        $params = $this->paginationQuery($page, $perPage, $filters);
+        $params['search'] = $term;
 
         return $this->withPagination($this->httpClient->get($this->accountPath('documents/search'), $params));
     }
@@ -166,9 +167,9 @@ class DocumentResource extends AbstractResource
      * @return array<string, mixed> the updated document
      * @throws ValidationException when `$name` is empty or exceeds 255 characters
      */
-    public function rename(string $documentId, string $name): array
+    public function rename(string $documentId, #[\SensitiveParameter] string $name): array
     {
-        if ($name === '') {
+        if (trim($name) === '') {
             throw new ValidationException('Document name cannot be empty');
         }
 
@@ -180,8 +181,9 @@ class DocumentResource extends AbstractResource
             ));
         }
 
-        $this->logger->info('Renaming document', ['document_id' => $documentId, 'name' => $name]);
+        $this->logger->info('Renaming document', ['document_id' => $documentId]);
 
+        $documentId = $this->pathSegment($documentId, 'document ID');
         $response = $this->httpClient->patch("documents/{$documentId}", ['name' => $name]);
 
         return $this->extractData($response->getData() ?? []);
@@ -190,11 +192,14 @@ class DocumentResource extends AbstractResource
     /**
      * Delete a document.
      * `DELETE /documents/{document_id}`
+     *
+     * @return array<array-key, mixed>
      */
     public function delete(string $documentId): array
     {
         $this->logger->info('Deleting document', ['document_id' => $documentId]);
 
+        $documentId = $this->pathSegment($documentId, 'document ID');
         $response = $this->httpClient->delete("documents/{$documentId}");
 
         return $response->getData() ?? [];
@@ -209,6 +214,8 @@ class DocumentResource extends AbstractResource
     public function download(string $documentId, string $artifact = self::ARTIFACT_CERTIFICATED): string
     {
         self::assertArtifact($artifact);
+        $documentId = $this->pathSegment($documentId, 'document ID');
+        $artifact = $this->pathSegment($artifact, 'artifact');
 
         $response = $this->httpClient->get("documents/{$documentId}/download/{$artifact}");
 
@@ -221,6 +228,7 @@ class DocumentResource extends AbstractResource
      */
     public function downloadThumbnail(string $documentId): string
     {
+        $documentId = $this->pathSegment($documentId, 'document ID');
         $response = $this->httpClient->get("documents/{$documentId}/thumbnail");
 
         return $response->getBody();
@@ -232,6 +240,8 @@ class DocumentResource extends AbstractResource
      */
     public function downloadPage(string $documentId, string $pageId): string
     {
+        $documentId = $this->pathSegment($documentId, 'document ID');
+        $pageId = $this->pathSegment($pageId, 'page ID');
         $response = $this->httpClient->get("documents/{$documentId}/pages/{$pageId}/download");
 
         return $response->getBody();
@@ -240,9 +250,12 @@ class DocumentResource extends AbstractResource
     /**
      * List activity events for a document.
      * `GET /documents/{document_id}/activities`
+     *
+     * @return array<int, array<string, mixed>>
      */
     public function activities(string $documentId): array
     {
+        $documentId = $this->pathSegment($documentId, 'document ID');
         $response = $this->httpClient->get("documents/{$documentId}/activities");
 
         return $this->extractData($response->getData() ?? []);
@@ -251,6 +264,8 @@ class DocumentResource extends AbstractResource
     /**
      * List all possible document statuses, with their `deletable` flag.
      * `GET /documents/statuses`
+     *
+     * @return array<int, array{code: string, deletable: bool}>
      */
     public function statuses(): array
     {
@@ -262,9 +277,12 @@ class DocumentResource extends AbstractResource
     /**
      * Verify a certificated document by its signature hash. Public endpoint, no auth.
      * `GET /documents/{signature_hash}/verify`
+     *
+     * @return array<string, mixed>
      */
     public function verify(string $signatureHash): array
     {
+        $signatureHash = $this->pathSegment($signatureHash, 'signature hash');
         $response = $this->httpClient->get("documents/{$signatureHash}/verify");
 
         return $this->extractData($response->getData() ?? []);
@@ -273,9 +291,12 @@ class DocumentResource extends AbstractResource
     /**
      * Public document info (no auth).
      * `GET /public/documents/{document_id}`
+     *
+     * @return array<string, mixed>
      */
     public function publicInfo(string $documentId): array
     {
+        $documentId = $this->pathSegment($documentId, 'document ID');
         $response = $this->httpClient->get("public/documents/{$documentId}");
 
         return $this->extractData($response->getData() ?? []);
@@ -288,10 +309,12 @@ class DocumentResource extends AbstractResource
      * Only the `email` channel is documented today. Pass {@see SEND_TOKEN_CHANNEL_EMAIL}
      * or one of the constants exposed here — arbitrary strings are rejected up front
      * so a typo doesn't get silently forwarded to the API.
+     *
+     * @return array<array-key, mixed>
      */
     public function sendToken(
         string $documentId,
-        string $recipient,
+        #[\SensitiveParameter] string $recipient,
         string $channel = self::SEND_TOKEN_CHANNEL_EMAIL
     ): array {
         if (!in_array($channel, self::SEND_TOKEN_CHANNELS, true)) {
@@ -300,6 +323,12 @@ class DocumentResource extends AbstractResource
                 ['allowed' => self::SEND_TOKEN_CHANNELS]
             );
         }
+
+        if (filter_var($recipient, FILTER_VALIDATE_EMAIL) === false) {
+            throw new ValidationException('Send-token recipient must be a valid email address');
+        }
+
+        $documentId = $this->pathSegment($documentId, 'document ID');
 
         $response = $this->httpClient->put(
             "public/documents/{$documentId}/send-token",
@@ -317,6 +346,7 @@ class DocumentResource extends AbstractResource
      */
     public function listTags(string $documentId): array
     {
+        $documentId = $this->pathSegment($documentId, 'document ID');
         $response = $this->httpClient->get($this->accountPath("documents/{$documentId}/tags"));
 
         return $this->extractData($response->getData() ?? []);
@@ -334,6 +364,8 @@ class DocumentResource extends AbstractResource
      */
     public function replaceTags(string $documentId, array $tagNames): array
     {
+        $this->assertTagNames($tagNames, true);
+        $documentId = $this->pathSegment($documentId, 'document ID');
         $response = $this->httpClient->put(
             $this->accountPath("documents/{$documentId}/tags"),
             ['tags' => array_values($tagNames)]
@@ -355,9 +387,8 @@ class DocumentResource extends AbstractResource
      */
     public function appendTags(string $documentId, array $tagNames): array
     {
-        if ($tagNames === []) {
-            throw new ValidationException('At least one tag name is required');
-        }
+        $this->assertTagNames($tagNames, false);
+        $documentId = $this->pathSegment($documentId, 'document ID');
 
         $response = $this->httpClient->post(
             $this->accountPath("documents/{$documentId}/tags"),
@@ -370,9 +401,13 @@ class DocumentResource extends AbstractResource
     /**
      * Detach a single tag from a document (the tag itself is not deleted).
      * `DELETE /accounts/{account_id}/documents/{document_id}/tags/{tag_id}`
+     *
+     * @return array<string, mixed>
      */
     public function detachTag(string $documentId, string $tagId): array
     {
+        $documentId = $this->pathSegment($documentId, 'document ID');
+        $tagId = $this->pathSegment($tagId, 'tag ID');
         $response = $this->httpClient->delete(
             $this->accountPath("documents/{$documentId}/tags/{$tagId}")
         );
@@ -385,11 +420,26 @@ class DocumentResource extends AbstractResource
      * `POST /accounts/{account_id}/templates/{template_id}/documents`
      *
      * @param array<int, array<string, mixed>> $signers each entry: { role_id, id, verification_method?, notification_methods? }
-     * @param array<string, mixed>             $options optional `name`, `message`, `editor_fields`, `expires_at`
+     * @param array<string, mixed>             $options optional `name`, `message`, `editor_fields`,
+     *     `expires_at`, and `tags`
+     * @return array<string, mixed> the created document
      */
-    public function createFromTemplate(string $templateId, array $signers, array $options = []): array
-    {
-        $payload = array_merge(['signers' => $signers], $options);
+    public function createFromTemplate(
+        string $templateId,
+        #[\SensitiveParameter] array $signers,
+        #[\SensitiveParameter] array $options = []
+    ): array {
+        if ($signers === []) {
+            throw new ValidationException('At least one template signer is required');
+        }
+
+        unset($options['signers']);
+        $options = $this->normalizeTemplateOptions($options);
+        $payload = array_merge(
+            ['signers' => $this->normalizeTemplateSigners($signers, true)],
+            $options
+        );
+        $templateId = $this->pathSegment($templateId, 'template ID');
 
         $response = $this->httpClient->post(
             $this->accountPath("templates/{$templateId}/documents"),
@@ -402,12 +452,22 @@ class DocumentResource extends AbstractResource
     /**
      * Estimate cost of creating a document from a template.
      * `POST /accounts/{account_id}/templates/{template_id}/documents/estimate-cost`
+     *
+     * @param array<int, array<string, mixed>> $signers
+     * @return array<string, mixed>
      */
-    public function estimateCostFromTemplate(string $templateId, array $signers): array
-    {
+    public function estimateCostFromTemplate(
+        string $templateId,
+        #[\SensitiveParameter] array $signers
+    ): array {
+        if ($signers === []) {
+            throw new ValidationException('At least one template signer is required');
+        }
+
+        $templateId = $this->pathSegment($templateId, 'template ID');
         $response = $this->httpClient->post(
             $this->accountPath("templates/{$templateId}/documents/estimate-cost"),
-            ['signers' => $signers]
+            ['signers' => $this->normalizeTemplateSigners($signers, false)]
         );
 
         return $this->extractData($response->getData() ?? []);
@@ -415,15 +475,25 @@ class DocumentResource extends AbstractResource
 
     /**
      * Poll `GET /documents/{id}` until the document reaches a usable status.
+     * The deadline is checked between calls; an in-flight request is bounded by the
+     * transport timeout configured on {@see \Assinafy\SDK\Configuration}.
      *
+     * @return array<string, mixed> the ready document
      * @throws \RuntimeException on terminal failure or timeout
      */
     public function waitUntilReady(string $documentId, int $maxWaitSeconds = 60, int $pollIntervalSeconds = 2): array
     {
-        $start = time();
+        if ($maxWaitSeconds < 1 || $pollIntervalSeconds < 1) {
+            throw new ValidationException('Wait and poll intervals must be positive integers');
+        }
 
-        while ((time() - $start) < $maxWaitSeconds) {
+        $deadline = hrtime(true) + ($maxWaitSeconds * 1_000_000_000);
+
+        while (hrtime(true) < $deadline) {
             $document = $this->get($documentId);
+            if (hrtime(true) >= $deadline) {
+                break;
+            }
             $status = $document['status'] ?? 'unknown';
 
             if (in_array($status, self::READY_STATUSES, true)) {
@@ -434,7 +504,13 @@ class DocumentResource extends AbstractResource
                 throw new \RuntimeException("Document processing failed with status: {$status}");
             }
 
-            sleep($pollIntervalSeconds);
+            $remainingNanoseconds = $deadline - hrtime(true);
+            if ($remainingNanoseconds > 0) {
+                usleep(min(
+                    $pollIntervalSeconds * 1_000_000,
+                    (int) ceil($remainingNanoseconds / 1_000)
+                ));
+            }
         }
 
         throw new \RuntimeException("Timed out after {$maxWaitSeconds}s waiting for document to become ready");
@@ -445,7 +521,11 @@ class DocumentResource extends AbstractResource
      */
     public function isFullySigned(string $documentId): bool
     {
-        return ($this->get($documentId)['status'] ?? '') === self::STATUS_CERTIFICATED;
+        return in_array(
+            $this->get($documentId)['status'] ?? '',
+            [self::STATUS_READY, self::STATUS_CERTIFICATING, self::STATUS_CERTIFICATED],
+            true
+        );
     }
 
     /**
@@ -458,9 +538,9 @@ class DocumentResource extends AbstractResource
         $document = $this->get($documentId);
         $assignment = $document['assignment'] ?? null;
 
-        if ($document['status'] === self::STATUS_CERTIFICATED) {
+        if (($document['status'] ?? null) === self::STATUS_CERTIFICATED) {
             $signers = is_array($assignment['signers'] ?? null) ? $assignment['signers'] : [];
-            $total = count($signers) ?: 1;
+            $total = count($signers);
 
             return [
                 'signed' => $total,
@@ -474,21 +554,25 @@ class DocumentResource extends AbstractResource
         $signers = is_array($assignment['signers'] ?? null) ? $assignment['signers'] : [];
         $total = count($signers);
 
-        $completedBySigner = [];
+        $itemsBySigner = [];
         foreach ($items as $item) {
             $signerId = $item['signer']['id'] ?? null;
             if ($signerId === null) {
                 continue;
             }
-            if (($item['completed'] ?? false) === true) {
-                $completedBySigner[$signerId] = ($completedBySigner[$signerId] ?? 0) + 1;
-            }
+            $itemsBySigner[$signerId]['total'] = ($itemsBySigner[$signerId]['total'] ?? 0) + 1;
+            $itemsBySigner[$signerId]['completed'] = ($itemsBySigner[$signerId]['completed'] ?? 0)
+                + ((bool) ($item['completed'] ?? false) ? 1 : 0);
         }
 
         $signed = 0;
         foreach ($signers as $signer) {
             $id = $signer['id'] ?? null;
-            if ($id !== null && ($completedBySigner[$id] ?? 0) > 0) {
+            $summary = $id !== null ? ($itemsBySigner[$id] ?? null) : null;
+            if (
+                ($signer['completed'] ?? false) === true
+                || (is_array($summary) && $summary['total'] === $summary['completed'])
+            ) {
                 $signed++;
             }
         }
@@ -510,7 +594,7 @@ class DocumentResource extends AbstractResource
      *
      * @throws ValidationException when the file is missing, not a PDF, or too large
      */
-    public static function assertUploadable(string $filePath): void
+    public static function assertUploadable(#[\SensitiveParameter] string $filePath): void
     {
         if (!is_file($filePath)) {
             throw new ValidationException('File not found', ['file_path' => $filePath]);
@@ -546,6 +630,81 @@ class DocumentResource extends AbstractResource
 
         if (!in_array($artifact, $allowed, true)) {
             throw new ValidationException("Unknown artifact '{$artifact}'", ['allowed' => $allowed]);
+        }
+    }
+
+    /**
+     * @param array<int, mixed> $signers
+     * @return array<int, array<string, mixed>>
+     */
+    private function normalizeTemplateSigners(
+        #[\SensitiveParameter] array $signers,
+        bool $requireSignerId
+    ): array {
+        $normalized = [];
+        foreach ($signers as $signer) {
+            if (!is_array($signer)) {
+                throw new ValidationException('Each template signer must be an object');
+            }
+
+            $roleId = $signer['role_id'] ?? null;
+            if (!is_string($roleId) || $roleId === '') {
+                throw new ValidationException('Each template signer requires a role_id');
+            }
+
+            $signerId = $signer['id'] ?? null;
+            if ($requireSignerId && (!is_string($signerId) || $signerId === '')) {
+                throw new ValidationException('Each template signer requires an id');
+            }
+            if ($signerId !== null && (!is_string($signerId) || $signerId === '')) {
+                throw new ValidationException('Template signer id must be a non-empty string');
+            }
+
+            if (array_key_exists('notification_methods', $signer)) {
+                if (!is_array($signer['notification_methods'])) {
+                    throw new ValidationException('Template signer notification methods must be an array');
+                }
+                $signer['notification_methods'] = array_values($signer['notification_methods']);
+            }
+
+            $normalized[] = $signer;
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * @param array<string, mixed> $options
+     * @return array<string, mixed>
+     */
+    private function normalizeTemplateOptions(#[\SensitiveParameter] array $options): array
+    {
+        foreach (['editor_fields', 'tags'] as $listKey) {
+            if (!array_key_exists($listKey, $options)) {
+                continue;
+            }
+            if (!is_array($options[$listKey])) {
+                throw new ValidationException("Template document {$listKey} must be an array");
+            }
+            $options[$listKey] = array_values($options[$listKey]);
+        }
+
+        return $options;
+    }
+
+    /**
+     * @param array<int, mixed> $tagNames
+     */
+    private function assertTagNames(array $tagNames, bool $allowEmpty): void
+    {
+        if (!$allowEmpty && $tagNames === []) {
+            throw new ValidationException('At least one tag name is required');
+        }
+
+        foreach ($tagNames as $name) {
+            if (!is_string($name) || trim($name) === '') {
+                throw new ValidationException('Tag names must be non-empty strings');
+            }
         }
     }
 }

@@ -44,6 +44,7 @@ class TagResource extends AbstractResource
      *
      * @param string      $name  display name; trimmed, whitespace-collapsed, max 64 chars
      * @param string|null $color 6-character hex color (with or without leading `#`); null for none
+     * @return array<string, mixed> the created tag
      *
      * @throws ValidationException when the name is empty
      */
@@ -53,6 +54,7 @@ class TagResource extends AbstractResource
 
         $payload = ['name' => $name];
         if ($color !== null) {
+            $this->assertColor($color);
             $payload['color'] = $color;
         }
 
@@ -70,6 +72,7 @@ class TagResource extends AbstractResource
      * if another tag already uses the new name.
      *
      * @param array<string, mixed> $data subset of `{ name, color }`
+     * @return array<string, mixed> the updated tag
      *
      * @throws ValidationException when no updatable field is provided
      */
@@ -80,8 +83,20 @@ class TagResource extends AbstractResource
         }
 
         if (array_key_exists('name', $data)) {
-            $this->assertName((string) $data['name']);
+            if (!is_string($data['name'])) {
+                throw new ValidationException('Tag name must be a string');
+            }
+            $this->assertName($data['name']);
         }
+
+        if (array_key_exists('color', $data) && $data['color'] !== null) {
+            if (!is_string($data['color'])) {
+                throw new ValidationException('Tag color must be a string or null');
+            }
+            $this->assertColor($data['color']);
+        }
+
+        $tagId = $this->pathSegment($tagId, 'tag ID');
 
         $response = $this->httpClient->put($this->accountPath("tags/{$tagId}"), $data);
 
@@ -95,9 +110,12 @@ class TagResource extends AbstractResource
      * By default the API refuses with 409 Conflict if the tag is still attached to any
      * document or template. Pass `$force = true` to detach it from everything first; the
      * documents and templates themselves are not deleted.
+     *
+     * @return array<array-key, mixed>
      */
     public function delete(string $tagId, bool $force = false): array
     {
+        $tagId = $this->pathSegment($tagId, 'tag ID');
         $query = $force ? ['force' => 'true'] : [];
 
         $response = $this->httpClient->delete($this->accountPath("tags/{$tagId}"), [], $query);
@@ -109,6 +127,19 @@ class TagResource extends AbstractResource
     {
         if (trim($name) === '') {
             throw new ValidationException('Tag name cannot be empty', ['name' => $name]);
+        }
+
+        if (mb_strlen($name) > 64) {
+            throw new ValidationException('Tag name cannot exceed 64 characters', ['name' => $name]);
+        }
+    }
+
+    private function assertColor(string $color): void
+    {
+        if (preg_match('/^#?[0-9a-f]{6}$/i', $color) !== 1) {
+            throw new ValidationException('Tag color must be a 6-character hex value', [
+                'color' => $color,
+            ]);
         }
     }
 }

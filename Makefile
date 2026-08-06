@@ -1,57 +1,57 @@
-.PHONY: help install test docker-up docker-down docker-build docker-logs phpcs phpcbf phpstan
+.PHONY: help install test integration check quality phpcs phpcbf phpstan audit \
+	docker-up docker-down docker-build docker-logs docker-install quickstart docker-quickstart
 
 help:
-	@echo "Assinafy PHP SDK - Available commands:"
-	@echo ""
+	@echo "Assinafy PHP SDK commands"
 	@echo "  make install       Install Composer dependencies"
-	@echo "  make test          Run tests"
-	@echo "  make phpcs         Run PHP_CodeSniffer (check code style)"
-	@echo "  make phpcbf        Run PHP Code Beautifier (fix code style)"
-	@echo "  make phpstan       Run PHPStan (static analysis)"
-	@echo "  make quality       Run all quality checks (phpcs + phpstan)"
-	@echo "  make docker-up     Start Docker environment"
-	@echo "  make docker-down   Stop Docker environment"
-	@echo "  make docker-build  Build Docker images"
-	@echo "  make docker-logs   View Docker logs"
-	@echo "  make quickstart    Run quickstart example"
-	@echo ""
+	@echo "  make test          Run unit tests (no network)"
+	@echo "  make integration   Run explicitly configured sandbox integration tests"
+	@echo "  make check         Validate, test, analyze, lint, and audit dependencies"
+	@echo "  make phpcbf        Apply PSR-12 formatting fixes"
+	@echo "  make docker-up     Build and start the local Docker environment"
+	@echo "  make docker-down   Stop the local Docker environment"
 
 install:
 	composer install
 
 test:
-	vendor/bin/phpunit
+	composer test
 
-docker-up:
-	docker-compose up -d
+integration:
+	composer test:integration
 
-docker-down:
-	docker-compose down
-
-docker-build:
-	docker-compose build
-
-docker-logs:
-	docker-compose logs -f
-
-quickstart:
-	php docs/quickstart.php
-
-docker-install:
-	docker-compose exec php composer install
-
-docker-quickstart:
-	docker-compose exec php php docs/quickstart.php
+check quality:
+	composer check
 
 phpcs:
-	vendor/bin/phpcs
+	composer phpcs
 
 phpcbf:
 	vendor/bin/phpcbf
 
 phpstan:
-	vendor/bin/phpstan analyse --memory-limit=512M
+	composer phpstan
 
-quality: phpcs phpstan
-	@echo "All quality checks passed!"
+audit:
+	composer audit:dependencies
 
+quickstart:
+	php docs/quickstart.php
+
+docker-up:
+	docker compose up -d --build
+
+docker-down:
+	docker compose down
+
+docker-build:
+	docker compose build
+
+docker-logs:
+	docker compose logs -f
+
+docker-install:
+	docker compose exec php composer install
+
+docker-quickstart:
+	docker compose exec php php docs/quickstart.php

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Assinafy\SDK\Resources;
 
 use Assinafy\SDK\Configuration;
+use Assinafy\SDK\Exceptions\ValidationException;
 use Assinafy\SDK\Http\HttpClientInterface;
 use Assinafy\SDK\Http\Response;
 use Psr\Log\LoggerInterface;
@@ -26,7 +27,7 @@ abstract class AbstractResource
 
     public function __construct(
         HttpClientInterface $httpClient,
-        Configuration $config,
+        #[\SensitiveParameter] Configuration $config,
         ?LoggerInterface $logger = null
     ) {
         $this->httpClient = $httpClient;
@@ -47,11 +48,12 @@ abstract class AbstractResource
      * `@return` docblock.
      *
      * @param array<string, mixed> $response
+     * @return array<array-key, mixed>
      */
     protected function extractData(array $response): array
     {
-        if (isset($response['data']) && is_array($response['data'])) {
-            return $response['data'];
+        if (array_key_exists('data', $response)) {
+            return is_array($response['data']) ? $response['data'] : [];
         }
 
         return $response;
@@ -112,7 +114,7 @@ abstract class AbstractResource
 
     protected function accountPath(string $suffix = ''): string
     {
-        $path = 'accounts/' . $this->requireAccountId();
+        $path = 'accounts/' . $this->pathSegment($this->requireAccountId(), 'account ID');
 
         return $suffix === '' ? $path : $path . '/' . ltrim($suffix, '/');
     }
@@ -129,12 +131,127 @@ abstract class AbstractResource
     {
         if ($this->config->isPublic()) {
             throw new \RuntimeException(
-                'Account-scoped endpoints require an API key and account ID. '
+                'Account-scoped endpoints require an API key or Bearer token plus an account ID. '
                 . 'This client was built with Configuration::forPublic() — use a full '
                 . 'Configuration once you have credentials.'
             );
         }
 
         return $this->config->getAccountId();
+    }
+
+    /**
+     * Encode an opaque API identifier for safe use as one URI path segment.
+     *
+     * @throws ValidationException when the identifier is empty
+     */
+    protected function pathSegment(string $value, string $name = 'identifier'): string
+    {
+        if ($value === '') {
+            throw new ValidationException(ucfirst($name) . ' cannot be empty', [$name => $value]);
+        }
+
+        return rawurlencode($value);
+    }
+
+    /**
+     * @return array{signer-access-code: string}|array{}
+     */
+    protected function accessCodeQuery(#[\SensitiveParameter] ?string $accessCode): array
+    {
+        if ($accessCode === null) {
+            return [];
+        }
+
+        if ($accessCode === '') {
+            throw new ValidationException('Signer access code cannot be empty');
+        }
+
+        return ['signer-access-code' => $accessCode];
+    }
+
+    /**
+     * @return array{Authorization: string}|array{}
+     */
+    protected function bearerHeaders(#[\SensitiveParameter] ?string $accessToken): array
+    {
+        if ($accessToken === null) {
+            if ($this->config->isPublic()) {
+                throw new ValidationException(
+                    'This endpoint requires an API key or Bearer access token'
+                );
+            }
+
+            return [];
+        }
+
+        if ($accessToken === '') {
+            throw new ValidationException('Access token cannot be empty');
+        }
+
+        return ['Authorization' => 'Bearer ' . $accessToken];
+    }
+
+    /**
+     * Merge list filters while keeping the explicit page arguments authoritative.
+     *
+     * @param array<string, scalar> $filters
+     * @return array<string, scalar>
+     */
+    protected function paginationQuery(int $page, int $perPage, array $filters = []): array
+    {
+        if ($page < 1) {
+            throw new ValidationException('Page must be at least 1', ['page' => $page]);
+        }
+
+        if ($perPage < 1 || $perPage > 100) {
+            throw new ValidationException('Per-page must be between 1 and 100', [
+                'per-page' => $perPage,
+            ]);
+        }
+
+        unset($filters['page'], $filters['per-page']);
+
+        return array_merge([
+            'page' => $page,
+            'per-page' => $perPage,
+        ], $filters);
+    }
+
+    /**
+     * Build the query shared by the account and cross-account KPI endpoints.
+     *
+     * @return array{granularity: 'monthly'|'daily', month?: string}
+     */
+    protected function statsQuery(string $granularity, ?string $month): array
+    {
+        if (!in_array($granularity, ['monthly', 'daily'], true)) {
+            throw new ValidationException('Granularity must be monthly or daily', [
+                'granularity' => $granularity,
+            ]);
+        }
+
+        if ($granularity === 'daily' && $month === null) {
+            throw new ValidationException('Daily statistics require month in YYYY-MM format', [
+                'month' => $month,
+            ]);
+        }
+
+        if ($month !== null) {
+            if (preg_match('/^\d{4}-\d{2}$/', $month) !== 1) {
+                throw new ValidationException('Month must be in YYYY-MM format', ['month' => $month]);
+            }
+            $monthNumber = (int) substr($month, 5, 2);
+            if ($monthNumber < 1 || $monthNumber > 12) {
+                throw new ValidationException('Month must be in YYYY-MM format', ['month' => $month]);
+            }
+        }
+
+        $query = ['granularity' => $granularity];
+        if ($month !== null) {
+            $query['month'] = $month;
+        }
+
+        return $query;
     }
 }

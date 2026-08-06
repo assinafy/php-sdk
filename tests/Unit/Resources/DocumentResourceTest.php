@@ -28,19 +28,26 @@ final class DocumentResourceTest extends TestCase
 
         $this->http->queueJson(201, ['id' => 'doc1', 'status' => 'uploaded']);
 
-        $result = $this->documents->upload($pdf);
+        try {
+            $result = $this->documents->upload($pdf);
 
-        $call = $this->http->lastCall();
-        $this->assertSame('UPLOAD', $call['method']);
-        $this->assertSame('accounts/acc/documents', $call['uri']);
-        $this->assertSame($pdf, $call['file_path']);
-        $this->assertSame([], $call['body'], 'No extra multipart fields beyond `file` are sent');
-        $this->assertSame('doc1', $result['id']);
+            $call = $this->http->lastCall();
+            $this->assertSame('UPLOAD', $call['method']);
+            $this->assertSame('accounts/acc/documents', $call['uri']);
+            $this->assertSame($pdf, $call['file_path']);
+            $this->assertSame([], $call['body'], 'No extra multipart fields beyond `file` are sent');
+            $this->assertSame('doc1', $result['id']);
+        } finally {
+            @unlink($pdf);
+        }
     }
 
     public function testUploadRejectsNonPdf(): void
     {
-        $tmp = tempnam(sys_get_temp_dir(), 'asn') . '.txt';
+        $temporaryPath = tempnam(sys_get_temp_dir(), 'asn');
+        $this->assertIsString($temporaryPath);
+        $tmp = $temporaryPath . '.txt';
+        rename($temporaryPath, $tmp);
         file_put_contents($tmp, 'hello');
 
         $this->expectException(ValidationException::class);
@@ -248,6 +255,19 @@ final class DocumentResourceTest extends TestCase
         $this->assertSame('accounts/acc/documents/doc1/tags/t1', $detach['uri']);
     }
 
+    public function testTemplateSignerListsAreReindexedForJson(): void
+    {
+        $signers = [4 => ['role_id' => 'r1', 'id' => 's1']];
+
+        $this->http->queueJson(200, ['id' => 'doc1']);
+        $this->documents->createFromTemplate('template1', $signers);
+        $this->assertSame([['role_id' => 'r1', 'id' => 's1']], $this->http->lastCall()['body']['signers']);
+
+        $this->http->queueJson(200, ['total' => 1]);
+        $this->documents->estimateCostFromTemplate('template1', $signers);
+        $this->assertSame([['role_id' => 'r1', 'id' => 's1']], $this->http->lastCall()['body']['signers']);
+    }
+
     public function testAppendTagsRejectsEmpty(): void
     {
         $this->expectException(ValidationException::class);
@@ -363,7 +383,10 @@ final class DocumentResourceTest extends TestCase
 
     private function writeFixturePdf(): string
     {
-        $path = tempnam(sys_get_temp_dir(), 'asn') . '.pdf';
+        $temporaryPath = tempnam(sys_get_temp_dir(), 'asn');
+        $this->assertIsString($temporaryPath);
+        $path = $temporaryPath . '.pdf';
+        rename($temporaryPath, $path);
         file_put_contents($path, "%PDF-1.4\n%%EOF\n");
 
         return $path;

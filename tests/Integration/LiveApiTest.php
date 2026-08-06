@@ -13,16 +13,16 @@ use Assinafy\SDK\Resources\WebhookResource;
 use PHPUnit\Framework\TestCase;
 
 /**
- * End-to-end integration tests against the live Assinafy API.
+ * End-to-end integration tests against the Assinafy sandbox API.
  *
  * Enabled when ASSINAFY_INTEGRATION=1 in the environment. Requires:
  *   ASSINAFY_API_KEY    – API key for the target environment
  *   ASSINAFY_ACCOUNT_ID – workspace account id
- *   ASSINAFY_BASE_URL   – optional, defaults to the production URL. Set to
- *                         Configuration::SANDBOX_BASE_URL (https://sandbox.assinafy.com.br/v1)
- *                         to exercise the sandbox instead.
+ *   ASSINAFY_BASE_URL   – optional, defaults to Configuration::SANDBOX_BASE_URL
+ *   ASSINAFY_TEST_EMAIL – optional, enables explicitly guarded notification flows
  *
- * These tests perform real network calls and may incur credit costs.
+ * These tests perform real network calls and may incur sandbox credit costs. They
+ * refuse to target production unless ASSINAFY_ALLOW_PRODUCTION=1 is also set.
  */
 final class LiveApiTest extends TestCase
 {
@@ -31,6 +31,8 @@ final class LiveApiTest extends TestCase
     private array $createdDocuments = [];
     /** @var array<int, string> signer ids we created and need to clean up */
     private array $createdSigners = [];
+    /** @var array<int, string> temporary fixture paths we created */
+    private array $temporaryFiles = [];
 
     protected function setUp(): void
     {
@@ -47,28 +49,119 @@ final class LiveApiTest extends TestCase
 
         $baseUrl = (string) getenv('ASSINAFY_BASE_URL');
         if ($baseUrl === '') {
-            $baseUrl = Configuration::DEFAULT_BASE_URL;
+            $baseUrl = Configuration::SANDBOX_BASE_URL;
+        }
+
+        $host = parse_url($baseUrl, PHP_URL_HOST);
+        $scheme = strtolower((string) parse_url($baseUrl, PHP_URL_SCHEME));
+        if ($scheme !== 'https') {
+            self::fail('Refusing live API tests over anything except HTTPS.');
+        }
+        if ($host !== 'sandbox.assinafy.com.br' && getenv('ASSINAFY_ALLOW_PRODUCTION') !== '1') {
+            self::fail(
+                'Refusing to run mutating integration tests outside sandbox.assinafy.com.br. '
+                . 'Set ASSINAFY_ALLOW_PRODUCTION=1 only for an intentional production run.'
+            );
         }
 
         $this->client = AssinafyClient::create($apiKey, $accountId, $baseUrl);
+
+        // The shared sandbox enforces a short rolling request limit. Pacing tests
+        // avoids turning a correct endpoint assertion into a rate-limit failure.
+        sleep(1);
     }
 
     protected function tearDown(): void
     {
+        $cleanupErrors = [];
+
         foreach ($this->createdDocuments as $id) {
             try {
-                $this->client->documents()->delete($id);
+                $this->deleteDocumentForCleanup($id);
             } catch (\Throwable $e) {
-                // best-effort cleanup
+                $cleanupErrors[] = "document {$id}: {$e->getMessage()}";
             }
         }
         foreach ($this->createdSigners as $id) {
             try {
-                $this->client->signers()->delete($id);
+                $this->retryRateLimited(fn () => $this->client->signers()->delete($id));
             } catch (\Throwable $e) {
-                // best-effort cleanup
+                $cleanupErrors[] = "signer {$id}: {$e->getMessage()}";
             }
         }
+        foreach ($this->temporaryFiles as $path) {
+            if (is_file($path) && !unlink($path)) {
+                $cleanupErrors[] = "temporary file {$path}";
+            }
+        }
+
+        $this->createdDocuments = [];
+        $this->createdSigners = [];
+        $this->temporaryFiles = [];
+
+        if ($cleanupErrors !== []) {
+            self::fail('Sandbox cleanup failed: ' . implode('; ', $cleanupErrors));
+        }
+    }
+
+    private function deleteDocumentForCleanup(string $documentId): void
+    {
+        $deadline = time() + 45;
+        do {
+            try {
+                $this->client->documents()->delete($documentId);
+                return;
+            } catch (ApiException $e) {
+                if ($e->getStatusCode() === 404) {
+                    return;
+                }
+                if ($e->getStatusCode() === 429) {
+                    $this->waitForRateLimit($e);
+                    continue;
+                }
+                if ($e->getStatusCode() === 400 && time() < $deadline) {
+                    sleep(2);
+                    continue;
+                }
+
+                throw $e;
+            }
+        } while (time() < $deadline);
+
+        throw new \RuntimeException('Document did not become deletable before cleanup timeout');
+    }
+
+    /**
+     * @template T
+     * @param callable(): T $operation
+     * @return T
+     */
+    private function retryRateLimited(callable $operation): mixed
+    {
+        for ($attempt = 0; $attempt < 3; $attempt++) {
+            try {
+                return $operation();
+            } catch (ApiException $e) {
+                if ($e->getStatusCode() !== 429 || $attempt === 2) {
+                    throw $e;
+                }
+                $this->waitForRateLimit($e);
+            }
+        }
+
+        throw new \LogicException('Unreachable rate-limit retry state');
+    }
+
+    private function waitForRateLimit(ApiException $exception): void
+    {
+        $retryAfter = (int) $exception->getResponseHeaderLine('Retry-After');
+        if ($retryAfter <= 0 && preg_match('/(?:retry|wait).*?(\d+)\s*seconds?/i', $exception->getMessage(), $match)) {
+            $retryAfter = (int) $match[1];
+        }
+
+        // The sandbox currently omits Retry-After on some 429 responses while
+        // enforcing a roughly ten-second rolling window.
+        sleep(max(1, min(15, $retryAfter > 0 ? $retryAfter : 10)));
     }
 
     public function testStatusesEndpointReturnsKnownCodes(): void
@@ -91,6 +184,7 @@ final class LiveApiTest extends TestCase
         );
 
         $this->assertNotEmpty($created['id']);
+        $this->createdSigners[] = (string) $created['id'];
 
         $fetched = $signers->get($created['id']);
         $this->assertSame($created['id'], $fetched['id']);
@@ -103,6 +197,10 @@ final class LiveApiTest extends TestCase
         $this->assertSame($created['id'], $found['id']);
 
         $signers->delete($created['id']);
+        $this->createdSigners = array_values(array_filter(
+            $this->createdSigners,
+            static fn (string $id): bool => $id !== $created['id']
+        ));
     }
 
     public function testDocumentUploadGetActivitiesAndDelete(): void
@@ -153,9 +251,10 @@ final class LiveApiTest extends TestCase
         $created = $templates->create($pdf);
         $templateId = (string) ($created['id'] ?? '');
         $this->assertNotSame('', $templateId, 'template create must return an id');
-        $this->assertSame('template', $created['resource'] ?? null);
 
         try {
+            $this->assertSame('template', $created['resource'] ?? null);
+
             // The page render is asynchronous — poll get() until the template is Ready.
             $template = $created;
             for ($i = 0; $i < 30; $i++) {
@@ -165,7 +264,11 @@ final class LiveApiTest extends TestCase
                 }
                 sleep(2);
             }
-            $this->assertSame('ready', strtolower((string) ($template['status'] ?? '')), 'template never reached Ready');
+            $this->assertSame(
+                'ready',
+                strtolower((string) ($template['status'] ?? '')),
+                'template never reached Ready'
+            );
             $this->assertSame($templateId, $template['id'] ?? null);
 
             // update editable metadata
@@ -345,6 +448,114 @@ final class LiveApiTest extends TestCase
         $this->assertIsArray($reset);
     }
 
+    /** Sends real assignment and access-token emails to both controlled recipients. */
+    public function testNotificationFlowForAssignedSigners(): void
+    {
+        if (getenv('ASSINAFY_NOTIFICATION_TESTS') !== '1') {
+            $this->markTestSkipped('Set ASSINAFY_NOTIFICATION_TESTS=1 to send sandbox test emails');
+        }
+
+        $email = (string) getenv('ASSINAFY_TEST_EMAIL');
+        $alternateEmail = (string) getenv('ASSINAFY_TEST_EMAIL_ALT');
+        if (filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            self::fail('ASSINAFY_TEST_EMAIL must be a valid email address');
+        }
+        if ($alternateEmail === '') {
+            $alternateEmail = $email;
+        }
+        if (filter_var($alternateEmail, FILTER_VALIDATE_EMAIL) === false) {
+            self::fail('ASSINAFY_TEST_EMAIL_ALT must be a valid email address when set');
+        }
+
+        $document = $this->client->documents()->upload($this->makePdfFixture());
+        $documentId = (string) $document['id'];
+        $this->createdDocuments[] = $documentId;
+        $this->client->documents()->waitUntilReady($documentId, 60, 2);
+
+        $signer = $this->client->signers()->findByEmail($email);
+        if ($signer === null) {
+            $signer = $this->client->signers()->create('SDK notification test', $email);
+            $this->createdSigners[] = (string) $signer['id'];
+        }
+        $signerId = (string) $signer['id'];
+
+        $assignmentSigners = [[
+            'id' => $signerId,
+            'verification_method' => AssignmentResource::VERIFICATION_EMAIL,
+            'notification_methods' => [AssignmentResource::NOTIFICATION_EMAIL],
+        ]];
+
+        if (strcasecmp($alternateEmail, $email) !== 0) {
+            $alternateSigner = $this->client->signers()->findByEmail($alternateEmail);
+            if ($alternateSigner === null) {
+                $alternateSigner = $this->client->signers()->create('SDK alternate notification test', $alternateEmail);
+                $this->createdSigners[] = (string) $alternateSigner['id'];
+            }
+            $assignmentSigners[] = [
+                'id' => (string) $alternateSigner['id'],
+                'verification_method' => AssignmentResource::VERIFICATION_EMAIL,
+                'notification_methods' => [AssignmentResource::NOTIFICATION_EMAIL],
+            ];
+        }
+
+        $assignment = $this->client->assignments()->create(
+            $documentId,
+            $assignmentSigners,
+            AssignmentResource::METHOD_VIRTUAL,
+            ['message' => 'Assinafy PHP SDK sandbox integration test']
+        );
+        $this->assertNotEmpty($assignment['signing_urls'] ?? []);
+
+        $publicClient = AssinafyClient::forAuth($this->client->getConfig()->getBaseUrl());
+        $tokenResult = $publicClient->documents()->sendToken($documentId, $alternateEmail);
+        $this->assertIsArray($tokenResult);
+    }
+
+    /**
+     * Exercises signer-authenticated reads with a one-time code retrieved from the
+     * notification inbox. Assignment signing URLs do not expose this credential.
+     */
+    public function testSignerFacingReadFlowWithProvidedAccessCode(): void
+    {
+        $signerId = (string) getenv('ASSINAFY_SIGNER_ID');
+        $accessCode = (string) getenv('ASSINAFY_SIGNER_ACCESS_CODE');
+        if ($signerId === '' || $accessCode === '') {
+            $this->markTestSkipped(
+                'Set ASSINAFY_SIGNER_ID and ASSINAFY_SIGNER_ACCESS_CODE from a current sandbox email'
+            );
+        }
+
+        $publicClient = AssinafyClient::forAuth($this->client->getConfig()->getBaseUrl());
+
+        $current = $publicClient->signerDocuments()->current($signerId, $accessCode);
+        $documentId = $current['id'] ?? null;
+        $this->assertIsString($documentId);
+        $this->assertNotSame('', $documentId);
+
+        $documents = $publicClient->signerDocuments()->list($signerId, $accessCode, [
+            'page' => 1,
+            'per-page' => 10,
+        ]);
+        $this->assertArrayHasKey('data', $documents);
+
+        $matches = $publicClient->signerDocuments()->search($signerId, $accessCode, 'SDK');
+        $this->assertIsArray($matches);
+
+        $profile = $publicClient->signerSession()->self($accessCode);
+        $this->assertSame($signerId, $profile['id'] ?? null);
+
+        $sessionDocument = $publicClient->signerSession()->currentDocument($accessCode);
+        $this->assertSame($documentId, $sessionDocument['id'] ?? null);
+
+        $download = $publicClient->signerDocuments()->download(
+            $signerId,
+            $documentId,
+            $accessCode,
+            DocumentResource::ARTIFACT_ORIGINAL
+        );
+        $this->assertStringStartsWith('%PDF', $download);
+    }
+
     /** Tier 2 — createFromTemplate. Skipped unless the sandbox has a ready template. */
     public function testCreateFromTemplateWhenAvailable(): void
     {
@@ -381,6 +592,8 @@ final class LiveApiTest extends TestCase
         );
         $this->assertArrayHasKey('id', $newDoc);
         $this->createdDocuments[] = $newDoc['id'];
+        $ready = $this->client->documents()->waitUntilReady((string) $newDoc['id'], 60, 2);
+        $this->assertContains($ready['status'] ?? null, DocumentResource::READY_STATUSES);
     }
 
     /** Tier 2 — webhook register / get / deactivate / activate round-trip. */
@@ -392,7 +605,9 @@ final class LiveApiTest extends TestCase
         $hadConfig = is_array($existing) && !empty($existing['url']);
         $existingUrl = $hadConfig ? (string) $existing['url'] : '';
         $existingEmail = $hadConfig ? (string) ($existing['email'] ?? '') : '';
-        $existingEvents = $hadConfig && !empty($existing['events']) ? $existing['events'] : WebhookResource::DEFAULT_EVENTS;
+        $existingEvents = $hadConfig && !empty($existing['events'])
+            ? $existing['events']
+            : WebhookResource::DEFAULT_EVENTS;
         $existingActive = $hadConfig ? (bool) ($existing['is_active'] ?? true) : true;
 
         $testUrl = 'https://example.com/webhooks/sdk-integration-' . uniqid();
@@ -428,17 +643,12 @@ final class LiveApiTest extends TestCase
             $reactivated = $webhooks->activate();
             $this->assertTrue($reactivated['is_active'] ?? null);
         } finally {
-            // Restore the prior subscription if there was one; otherwise leave delivery
-            // disabled so we don't strand the account with an active bogus endpoint.
-            // Best-effort either way.
-            try {
-                if ($hadConfig) {
-                    $webhooks->register($existingUrl, $existingEmail, $existingEvents, $existingActive);
-                } else {
-                    $webhooks->deactivate();
-                }
-            } catch (\Throwable $e) {
-                // best-effort — the test still reports the underlying failure
+            // Restoration is part of the test contract. Let a failure fail the test so
+            // a shared sandbox is never silently left on the bogus test endpoint.
+            if ($hadConfig) {
+                $webhooks->register($existingUrl, $existingEmail, $existingEvents, $existingActive);
+            } else {
+                $webhooks->deactivate();
             }
         }
     }
@@ -448,42 +658,71 @@ final class LiveApiTest extends TestCase
     {
         $tags = $this->client->tags();
         $name = 'SDK Tag ' . uniqid();
+        $tagId = null;
+        $deleted = false;
 
-        $created = $tags->create($name, 'ff8800');
-        $this->assertNotEmpty($created['id']);
-        $this->assertSame($name, $created['name']);
+        try {
+            $created = $tags->create($name, 'ff8800');
+            $this->assertNotEmpty($created['id']);
+            $tagId = (string) $created['id'];
+            $this->assertSame($name, $created['name']);
 
-        $listed = $tags->list($name);
-        $this->assertContains($created['id'], array_column($listed, 'id'));
+            $listed = $tags->list($name);
+            $this->assertContains($created['id'], array_column($listed, 'id'));
 
-        $renamed = $tags->update($created['id'], ['name' => $name . ' renamed']);
-        $this->assertSame($name . ' renamed', $renamed['name']);
+            $renamed = $tags->update($created['id'], ['name' => $name . ' renamed']);
+            $this->assertSame($name . ' renamed', $renamed['name']);
 
-        $deleted = $tags->delete($created['id']);
-        $this->assertTrue($deleted['deleted'] ?? false);
+            $result = $tags->delete($created['id']);
+            $this->assertTrue($result['deleted'] ?? false);
+            $deleted = true;
+        } finally {
+            if ($tagId !== null && !$deleted) {
+                $tags->delete($tagId, true);
+            }
+        }
     }
 
     /** Tier 1 — field-definition CRUD plus the global type catalog (no credit cost). */
     public function testFieldLifecycleAndTypes(): void
     {
         $fields = $this->client->fields();
+        $fieldId = null;
+        $deleted = false;
 
         $types = $fields->types();
         $this->assertNotEmpty($types);
         $this->assertContains('text', array_column($types, 'type'));
 
-        $created = $fields->create('text', 'SDK Field ' . uniqid());
-        $this->assertNotEmpty($created['id']);
+        try {
+            $created = $fields->create('text', 'SDK Field ' . uniqid());
+            $this->assertNotEmpty($created['id']);
+            $fieldId = (string) $created['id'];
 
-        $fetched = $fields->get($created['id']);
-        $this->assertSame($created['id'], $fetched['id']);
+            $fetched = $fields->get($created['id']);
+            $this->assertSame($created['id'], $fetched['id']);
 
-        $updated = $fields->update($created['id'], ['name' => 'SDK Field renamed']);
-        $this->assertSame('SDK Field renamed', $updated['name']);
+            $updated = $fields->update($created['id'], ['name' => 'SDK Field renamed']);
+            $this->assertSame('SDK Field renamed', $updated['name']);
 
-        $this->assertContains($created['id'], array_column($fields->list(), 'id'));
+            $this->assertContains($created['id'], array_column($fields->list(), 'id'));
 
-        $fields->delete($created['id']);
+            $singleValidation = $fields->validate($created['id'], 'a valid text value');
+            $this->assertIsArray($singleValidation);
+
+            $multipleValidation = $fields->validateMultiple([[
+                'field_id' => $created['id'],
+                'value' => 'another valid text value',
+            ]]);
+            $this->assertCount(1, $multipleValidation);
+
+            $fields->delete($created['id']);
+            $deleted = true;
+        } finally {
+            if ($fieldId !== null && !$deleted) {
+                $fields->delete($fieldId);
+            }
+        }
     }
 
     /** Tier 1 — webhook discovery endpoints (read-only). */
@@ -506,30 +745,28 @@ final class LiveApiTest extends TestCase
 
         $documents = $this->client->documents();
         $tagName = 'SDK DocTag ' . uniqid();
-
-        $afterAppend = $documents->appendTags($doc['id'], [$tagName]);
-        $this->assertContains($tagName, array_column($afterAppend, 'name'));
-
-        $listed = $documents->listTags($doc['id']);
-        $this->assertContains($tagName, array_column($listed, 'name'));
-
         $replaceName = 'SDK DocTag2 ' . uniqid();
-        $documents->replaceTags($doc['id'], [$replaceName]);
-        $afterReplace = $documents->listTags($doc['id']);
-        $this->assertSame([$replaceName], array_column($afterReplace, 'name'));
 
-        $tagId = $afterReplace[0]['id'];
-        $detached = $documents->detachTag($doc['id'], $tagId);
-        $this->assertTrue($detached['detached'] ?? false);
+        try {
+            $afterAppend = $documents->appendTags($doc['id'], [$tagName]);
+            $this->assertContains($tagName, array_column($afterAppend, 'name'));
 
-        // Clean up the workspace tags the document operations auto-created.
-        foreach ([$tagName, $replaceName] as $name) {
-            foreach ($this->client->tags()->list($name) as $tag) {
-                if ($tag['name'] === $name) {
-                    try {
-                        $this->client->tags()->delete($tag['id'], true);
-                    } catch (\Throwable $e) {
-                        // best-effort
+            $listed = $documents->listTags($doc['id']);
+            $this->assertContains($tagName, array_column($listed, 'name'));
+
+            $documents->replaceTags($doc['id'], [$replaceName]);
+            $afterReplace = $documents->listTags($doc['id']);
+            $this->assertSame([$replaceName], array_column($afterReplace, 'name'));
+
+            $tagId = $afterReplace[0]['id'];
+            $detached = $documents->detachTag($doc['id'], $tagId);
+            $this->assertTrue($detached['detached'] ?? false);
+        } finally {
+            // Cleanup is mandatory: document tag operations auto-create workspace tags.
+            foreach ([$tagName, $replaceName] as $name) {
+                foreach ($this->client->tags()->list($name) as $tag) {
+                    if (($tag['name'] ?? null) === $name) {
+                        $this->client->tags()->delete((string) $tag['id'], true);
                     }
                 }
             }
@@ -571,6 +808,45 @@ final class LiveApiTest extends TestCase
         $this->assertArrayHasKey('primary_color', $theme);
     }
 
+    public function testAccountStatisticsWhenDeployedToSandbox(): void
+    {
+        try {
+            $accountMonthly = $this->client->accounts()->stats();
+            $this->assertIsArray($accountMonthly);
+
+            $accountDaily = $this->client->accounts()->stats('daily', gmdate('Y-m'));
+            $this->assertIsArray($accountDaily);
+        } catch (ApiException $e) {
+            if ($e->getStatusCode() === 404) {
+                $this->markTestSkipped('Documented account stats route is not deployed to sandbox');
+            }
+            throw $e;
+        }
+    }
+
+    public function testUserProfile(): void
+    {
+        $user = $this->client->users()->get();
+        $this->assertArrayHasKey('id', $user);
+        $this->assertArrayHasKey('email', $user);
+    }
+
+    public function testUserStatisticsWhenDeployedToSandbox(): void
+    {
+        try {
+            $userMonthly = $this->client->users()->stats();
+            $this->assertIsArray($userMonthly);
+
+            $userDaily = $this->client->users()->stats('daily', gmdate('Y-m'));
+            $this->assertIsArray($userDaily);
+        } catch (ApiException $e) {
+            if ($e->getStatusCode() === 404) {
+                $this->markTestSkipped('Documented user stats route is not deployed to sandbox');
+            }
+            throw $e;
+        }
+    }
+
     /**
      * The route exists even with no logo uploaded — it answers with an app-level 404
      * ("Arquivo de armazenamento não encontrado"), not a routing miss.
@@ -582,6 +858,60 @@ final class LiveApiTest extends TestCase
             $this->assertNotSame('', $bytes);
         } catch (ApiException $e) {
             $this->assertSame(404, $e->getCode());
+        }
+    }
+
+    /**
+     * Proves create/update/logo/delete on a disposable sandbox workspace. It never
+     * deletes the configured workspace and requires an explicit destructive opt-in.
+     */
+    public function testDisposableAccountLifecycle(): void
+    {
+        if (getenv('ASSINAFY_DESTRUCTIVE_TESTS') !== '1') {
+            $this->markTestSkipped('Set ASSINAFY_DESTRUCTIVE_TESTS=1 for disposable account deletion');
+        }
+
+        $created = $this->client->accounts()->create('SDK disposable ' . uniqid());
+        $accountId = (string) ($created['id'] ?? '');
+        $this->assertNotSame('', $accountId, 'Account creation must return an ID');
+
+        $apiKey = (string) getenv('ASSINAFY_API_KEY');
+        $baseUrl = (string) getenv('ASSINAFY_BASE_URL');
+        if ($baseUrl === '') {
+            $baseUrl = Configuration::SANDBOX_BASE_URL;
+        }
+        $disposable = null;
+        $deleted = false;
+
+        try {
+            $disposable = AssinafyClient::create($apiKey, $accountId, $baseUrl);
+            $fetched = $disposable->accounts()->get();
+            $this->assertSame($accountId, $fetched['id'] ?? null);
+
+            $newName = 'SDK disposable updated ' . uniqid();
+            $updated = $disposable->accounts()->update($newName);
+            $this->assertSame($newName, $updated['name'] ?? null);
+
+            $theme = $disposable->accounts()->theme();
+            $this->assertSame($newName, $theme['account_name'] ?? null);
+
+            $logo = $disposable->accounts()->uploadLogo($this->makePngFixture());
+            $this->assertIsArray($logo);
+
+            $downloadedLogo = $disposable->accounts()->downloadLogo();
+            $this->assertNotSame('', $downloadedLogo);
+
+            $logoDeletion = $disposable->accounts()->deleteLogo();
+            $this->assertIsArray($logoDeletion);
+
+            $deletion = $disposable->accounts()->delete();
+            $this->assertIsArray($deletion);
+            $deleted = true;
+        } finally {
+            if (!$deleted) {
+                $disposable ??= AssinafyClient::create($apiKey, $accountId, $baseUrl);
+                $disposable->accounts()->delete(true);
+            }
         }
     }
 
@@ -679,17 +1009,14 @@ final class LiveApiTest extends TestCase
     }
 
     // ---------------------------------------------------------------------------------
-    // Signer session — guards the body-vs-query question the spec gets wrong.
+    // Signer session — guards the published signer-access-code query contract.
     // ---------------------------------------------------------------------------------
 
     /**
-     * The spec declares `signer-access-code` as a query parameter, but the server also reads
-     * it from the request body, which is what the SDK sends. Proof: a bogus code produces
-     * 401 "invalid credentials" (the server found and rejected it) rather than 400 "missing
-     * parameter". If this ever flips to 400, the server stopped reading the body and
-     * SignerSessionResource must move the code into the query string.
+     * A bogus query code must produce 401 "invalid credentials" (the server found and
+     * rejected it), rather than a route miss or missing-parameter response.
      */
-    public function testSignerAccessCodeIsStillReadFromTheRequestBody(): void
+    public function testSignerAccessCodeQueryParameterIsRecognized(): void
     {
         try {
             $this->client->signerSession()->self('BOGUS-ACCESS-CODE');
@@ -698,8 +1025,7 @@ final class LiveApiTest extends TestCase
             $this->assertSame(
                 401,
                 $e->getCode(),
-                'Expected 401 (code seen, rejected). A 400 would mean the server no longer '
-                . 'reads signer-access-code from where the SDK sends it.'
+                'Expected 401: signer-access-code was present but invalid.'
             );
         }
     }
@@ -714,8 +1040,40 @@ final class LiveApiTest extends TestCase
             . "xref\n0 4\n0000000000 65535 f \n0000000010 00000 n \n0000000061 00000 n \n0000000111 00000 n \n"
             . "trailer <</Size 4 /Root 1 0 R>>\nstartxref\n190\n%%EOF\n";
 
-        $path = tempnam(sys_get_temp_dir(), 'asn-sdk-') . '.pdf';
-        file_put_contents($path, $pdf);
+        $temporaryPath = tempnam(sys_get_temp_dir(), 'asn-sdk-');
+        if ($temporaryPath === false) {
+            self::fail('Could not create a temporary PDF fixture');
+        }
+
+        $path = $temporaryPath . '.pdf';
+        if (!rename($temporaryPath, $path) || file_put_contents($path, $pdf) === false) {
+            self::fail('Could not write a temporary PDF fixture');
+        }
+        $this->temporaryFiles[] = $path;
+
+        return $path;
+    }
+
+    private function makePngFixture(): string
+    {
+        $bytes = base64_decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+            true
+        );
+        if ($bytes === false) {
+            self::fail('Could not decode the PNG fixture');
+        }
+
+        $temporaryPath = tempnam(sys_get_temp_dir(), 'asn-sdk-');
+        if ($temporaryPath === false) {
+            self::fail('Could not create a temporary PNG fixture');
+        }
+
+        $path = $temporaryPath . '.png';
+        if (!rename($temporaryPath, $path) || file_put_contents($path, $bytes) === false) {
+            self::fail('Could not write a temporary PNG fixture');
+        }
+        $this->temporaryFiles[] = $path;
 
         return $path;
     }

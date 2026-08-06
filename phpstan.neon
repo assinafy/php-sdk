@@ -4,11 +4,4 @@ parameters:
         - src
     excludePaths:
         - vendor
-    reportUnmatchedIgnoredErrors: false
-    ignoreErrors:
-        - '#Call to an undefined method Psr\\Http\\Message\\StreamInterface::__toString\(\)#'
-        -
-            identifier: missingType.iterableValue
-        -
-            identifier: missingType.generics
-
+    reportUnmatchedIgnoredErrors: true

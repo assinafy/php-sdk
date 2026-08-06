@@ -41,19 +41,24 @@ final class TemplateResourceTest extends TestCase
         $http = new FakeHttpClient();
         $templates = $this->resource($http);
 
-        $pdf = tempnam(sys_get_temp_dir(), 'tpl-') . '.pdf';
+        $temporaryPath = tempnam(sys_get_temp_dir(), 'tpl-');
+        $this->assertIsString($temporaryPath);
+        $pdf = $temporaryPath . '.pdf';
+        rename($temporaryPath, $pdf);
         file_put_contents($pdf, '%PDF-1.4');
 
         $http->queueJson(200, ['id' => 'tpl-1', 'status' => 'Uploaded']);
-        $created = $templates->create($pdf);
+        try {
+            $created = $templates->create($pdf);
 
-        $call = $http->lastCall();
-        $this->assertSame('UPLOAD', $call['method']);
-        $this->assertSame('accounts/a/templates', $call['uri']);
-        $this->assertSame($pdf, $call['file_path']);
-        $this->assertSame('tpl-1', $created['id']);
-
-        unlink($pdf);
+            $call = $http->lastCall();
+            $this->assertSame('UPLOAD', $call['method']);
+            $this->assertSame('accounts/a/templates', $call['uri']);
+            $this->assertSame($pdf, $call['file_path']);
+            $this->assertSame('tpl-1', $created['id']);
+        } finally {
+            @unlink($pdf);
+        }
     }
 
     public function testCreateRejectsNonPdf(): void
@@ -61,7 +66,10 @@ final class TemplateResourceTest extends TestCase
         $http = new FakeHttpClient();
         $templates = $this->resource($http);
 
-        $txt = tempnam(sys_get_temp_dir(), 'tpl-') . '.txt';
+        $temporaryPath = tempnam(sys_get_temp_dir(), 'tpl-');
+        $this->assertIsString($temporaryPath);
+        $txt = $temporaryPath . '.txt';
+        rename($temporaryPath, $txt);
         file_put_contents($txt, 'not a pdf');
 
         $this->expectException(ValidationException::class);
@@ -112,5 +120,26 @@ final class TemplateResourceTest extends TestCase
         $this->assertSame('GET', $call['method']);
         $this->assertSame('accounts/a/templates/t1/pages/p1/download', $call['uri']);
         $this->assertSame('JPEGBYTES', $body);
+    }
+
+    public function testWaitUntilReadyReturnsImmediatelyForReadyTemplate(): void
+    {
+        $http = new FakeHttpClient();
+        $templates = $this->resource($http);
+        $http->queueJson(200, ['id' => 't1', 'status' => 'ready']);
+
+        $template = $templates->waitUntilReady('t1', 1, 1);
+
+        $this->assertSame('t1', $template['id']);
+    }
+
+    public function testWaitUntilReadyFailsImmediatelyForFailedTemplate(): void
+    {
+        $http = new FakeHttpClient();
+        $templates = $this->resource($http);
+        $http->queueJson(200, ['id' => 't1', 'status' => 'failed']);
+
+        $this->expectException(\RuntimeException::class);
+        $templates->waitUntilReady('t1', 1, 1);
     }
 }

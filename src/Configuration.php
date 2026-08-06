@@ -19,21 +19,27 @@ class Configuration
 
     private string $baseUrl;
     private string $apiKey;
+    private ?string $accessToken;
     private string $accountId;
     private int $timeout;
     private int $connectTimeout;
 
     public function __construct(
-        string $apiKey,
+        #[\SensitiveParameter] string $apiKey,
         string $accountId,
         string $baseUrl = self::DEFAULT_BASE_URL,
         int $timeout = 30,
-        int $connectTimeout = 10
+        int $connectTimeout = 10,
+        #[\SensitiveParameter] ?string $accessToken = null
     ) {
-        $this->validateApiKey($apiKey);
+        $this->validateCredentials($apiKey, $accountId, $accessToken);
         $this->validateAccountId($accountId);
+        $this->validateBaseUrl($baseUrl);
+        $this->validateTimeout('timeout', $timeout);
+        $this->validateTimeout('connect timeout', $connectTimeout);
 
         $this->apiKey = $apiKey;
+        $this->accessToken = $accessToken;
         $this->accountId = $accountId;
         $this->baseUrl = rtrim($baseUrl, '/');
         $this->timeout = $timeout;
@@ -42,17 +48,21 @@ class Configuration
 
     /**
      * @param array<string, mixed> $config keys: `api_key`/`apiKey`, `account_id`/`accountId`,
-     *     `base_url`/`baseUrl`, `timeout`, `connect_timeout`/`connectTimeout`.
+     *     `access_token`/`accessToken`, `base_url`/`baseUrl`, `timeout`,
+     *     `connect_timeout`/`connectTimeout`.
      *     A `webhook_secret` key is accepted and ignored — see {@see \Assinafy\SDK\Support\WebhookEventParser}.
      */
-    public static function fromArray(array $config): self
+    public static function fromArray(#[\SensitiveParameter] array $config): self
     {
         return new self(
             (string) ($config['api_key'] ?? $config['apiKey'] ?? ''),
             (string) ($config['account_id'] ?? $config['accountId'] ?? ''),
             (string) ($config['base_url'] ?? $config['baseUrl'] ?? self::DEFAULT_BASE_URL),
             (int) ($config['timeout'] ?? 30),
-            (int) ($config['connect_timeout'] ?? $config['connectTimeout'] ?? 10)
+            (int) ($config['connect_timeout'] ?? $config['connectTimeout'] ?? 10),
+            isset($config['access_token']) || isset($config['accessToken'])
+                ? (string) ($config['access_token'] ?? $config['accessToken'])
+                : null
         );
     }
 
@@ -66,19 +76,38 @@ class Configuration
      * $session = $client->auth()->login('user@example.com', 'secret');
      * ```
      *
-     * The sentinel API key / account ID are sent on the `X-Api-Key` header for
-     * completeness, but unauthenticated endpoints ignore them. Account-scoped
-     * resources will fail with a clear runtime error if called on a public config.
+     * The sentinel values are never sent over the network. Account-scoped resources
+     * fail with a clear runtime error if called on a public configuration.
      */
     public static function forPublic(string $baseUrl = self::DEFAULT_BASE_URL): self
     {
         return new self(self::PUBLIC_PLACEHOLDER, self::PUBLIC_PLACEHOLDER, $baseUrl);
     }
 
+    /**
+     * Configure all workspace resources with OAuth/Bearer authentication instead
+     * of an API key.
+     */
+    public static function forBearer(
+        #[\SensitiveParameter] string $accessToken,
+        string $accountId,
+        string $baseUrl = self::DEFAULT_BASE_URL,
+        int $timeout = 30,
+        int $connectTimeout = 10
+    ): self {
+        return new self('', $accountId, $baseUrl, $timeout, $connectTimeout, $accessToken);
+    }
+
     public function isPublic(): bool
     {
         return $this->apiKey === self::PUBLIC_PLACEHOLDER
-            && $this->accountId === self::PUBLIC_PLACEHOLDER;
+            && $this->accountId === self::PUBLIC_PLACEHOLDER
+            && $this->accessToken === null;
+    }
+
+    public function isBearerAuthenticated(): bool
+    {
+        return $this->accessToken !== null;
     }
 
     public function getBaseUrl(): string
@@ -89,6 +118,11 @@ class Configuration
     public function getApiKey(): string
     {
         return $this->apiKey;
+    }
+
+    public function getAccessToken(): ?string
+    {
+        return $this->accessToken;
     }
 
     public function getAccountId(): string
@@ -106,26 +140,99 @@ class Configuration
         return $this->connectTimeout;
     }
 
+    /**
+     * Default transport headers.
+     *
+     * @return array<string, string>
+     */
     public function getHeaders(): array
     {
-        return [
-            'X-Api-Key' => $this->apiKey,
+        $headers = [
             'Accept' => 'application/json',
             'User-Agent' => 'assinafy-php-sdk/' . self::SDK_VERSION,
         ];
+
+        if ($this->accessToken !== null) {
+            $headers['Authorization'] = 'Bearer ' . $this->accessToken;
+        } elseif (!$this->isPublic()) {
+            $headers['X-Api-Key'] = $this->apiKey;
+        }
+
+        return $headers;
     }
 
-    private function validateApiKey(string $apiKey): void
-    {
-        if (empty($apiKey)) {
+    private function validateCredentials(
+        #[\SensitiveParameter] string $apiKey,
+        string $accountId,
+        #[\SensitiveParameter] ?string $accessToken
+    ): void {
+        if ($apiKey === self::PUBLIC_PLACEHOLDER && $accountId === self::PUBLIC_PLACEHOLDER) {
+            if ($accessToken !== null) {
+                throw new \InvalidArgumentException('Public configuration cannot contain an access token');
+            }
+
+            return;
+        }
+
+        $hasApiKey = trim($apiKey) !== '';
+        $hasAccessToken = $accessToken !== null && trim($accessToken) !== '';
+
+        if ($apiKey !== '' && !$hasApiKey) {
             throw new \InvalidArgumentException('API key cannot be empty');
+        }
+        if ($accessToken !== null && !$hasAccessToken) {
+            throw new \InvalidArgumentException('Access token cannot be empty');
+        }
+        if ($hasApiKey === $hasAccessToken) {
+            throw new \InvalidArgumentException('Configure exactly one of API key or access token');
         }
     }
 
     private function validateAccountId(string $accountId): void
     {
-        if (empty($accountId)) {
+        if (trim($accountId) === '') {
             throw new \InvalidArgumentException('Account ID cannot be empty');
+        }
+    }
+
+    private function validateBaseUrl(string $baseUrl): void
+    {
+        if ($baseUrl === '' || filter_var($baseUrl, FILTER_VALIDATE_URL) === false) {
+            throw new \InvalidArgumentException('Base URL must be a valid absolute URL');
+        }
+
+        $scheme = strtolower((string) parse_url($baseUrl, PHP_URL_SCHEME));
+        if (!in_array($scheme, ['http', 'https'], true)) {
+            throw new \InvalidArgumentException('Base URL must use HTTP or HTTPS');
+        }
+
+        $host = parse_url($baseUrl, PHP_URL_HOST);
+        if (!is_string($host) || $host === '') {
+            throw new \InvalidArgumentException('Base URL must include a host');
+        }
+
+        $loopbackHosts = ['localhost', '127.0.0.1', '::1', '[::1]'];
+        $isLoopback = in_array(strtolower($host), $loopbackHosts, true)
+            || str_ends_with(strtolower($host), '.localhost');
+        if ($scheme !== 'https' && !$isLoopback) {
+            throw new \InvalidArgumentException(
+                'Base URL must use HTTPS except for loopback development hosts'
+            );
+        }
+
+        foreach ([PHP_URL_USER, PHP_URL_PASS, PHP_URL_QUERY, PHP_URL_FRAGMENT] as $component) {
+            if (parse_url($baseUrl, $component) !== null) {
+                throw new \InvalidArgumentException(
+                    'Base URL cannot contain credentials, a query string, or a fragment'
+                );
+            }
+        }
+    }
+
+    private function validateTimeout(string $name, int $seconds): void
+    {
+        if ($seconds <= 0) {
+            throw new \InvalidArgumentException(ucfirst($name) . ' must be greater than zero');
         }
     }
 }

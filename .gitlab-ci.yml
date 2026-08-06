@@ -1,0 +1,119 @@
+stages:
+  - verify
+  - integration
+
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
+      when: never
+    - if: '$CI_COMMIT_BRANCH'
+
+default:
+  image: php:${PHP_VERSION}-cli-bookworm
+  interruptible: true
+  timeout: 20 minutes
+  retry:
+    max: 1
+    when:
+      - api_failure
+      - runner_system_failure
+      - stuck_or_timeout_failure
+  cache:
+    key: composer-${PHP_VERSION}
+    paths:
+      - .cache/composer/
+  before_script:
+    - apt-get update
+    - apt-get install -y --no-install-recommends git libonig-dev unzip
+    - docker-php-ext-install -j"$(nproc)" mbstring
+    - rm -rf /var/lib/apt/lists/*
+    - mkdir -p .cache/composer
+    - php -r 'copy("https://getcomposer.org/download/2.10.2/composer.phar", ".cache/composer-2.10.2.phar") || exit(1);'
+    - php -r 'if (hash_file("sha256", ".cache/composer-2.10.2.phar") !== "5ee7125f8a30a34d246cefdc0bc85b8a783b28f2aec968994118512350d28027") { fwrite(STDERR, "Invalid Composer checksum\n"); exit(1); }'
+    - php .cache/composer-2.10.2.phar --version
+
+variables:
+  PHP_VERSION: '8.5'
+  COMPOSER_ALLOW_SUPERUSER: '1'
+  COMPOSER_CACHE_DIR: $CI_PROJECT_DIR/.cache/composer
+  COMPOSER_NO_INTERACTION: '1'
+
+test:highest:
+  stage: verify
+  parallel:
+    matrix:
+      - PHP_VERSION: ['8.2', '8.3', '8.4', '8.5']
+  script:
+    - php .cache/composer-2.10.2.phar update --with-all-dependencies --prefer-dist --no-progress
+    - php .cache/composer-2.10.2.phar test
+
+test:lowest:
+  stage: verify
+  parallel:
+    matrix:
+      - PHP_VERSION: ['8.2', '8.5']
+  script:
+    - php .cache/composer-2.10.2.phar update --with-all-dependencies --prefer-lowest --prefer-stable --prefer-dist --no-progress
+    - php .cache/composer-2.10.2.phar test
+
+quality:
+  stage: verify
+  script:
+    - php .cache/composer-2.10.2.phar update --with-all-dependencies --prefer-dist --no-progress
+    - php .cache/composer-2.10.2.phar check
+
+runtime:smoke:
+  stage: verify
+  script:
+    - php .cache/composer-2.10.2.phar update --with-all-dependencies --prefer-dist --no-progress --no-dev --classmap-authoritative
+    - php .cache/composer-2.10.2.phar check-platform-reqs --no-dev
+    - php -r 'require "vendor/autoload.php"; $client = \Assinafy\SDK\AssinafyClient::create("runtime-smoke-key", "runtime-smoke-account", \Assinafy\SDK\Configuration::SANDBOX_BASE_URL); if (!($client->getHttpClient() instanceof \Assinafy\SDK\Http\GuzzleHttpClient)) { exit(1); }'
+
+# Configure these as protected, masked GitLab CI/CD variables on the protected
+# `sandbox` environment. Never place their values in this file:
+# ASSINAFY_SANDBOX_API_KEY, ASSINAFY_SANDBOX_ACCOUNT_ID,
+# ASSINAFY_SANDBOX_TEST_EMAIL, ASSINAFY_SANDBOX_TEST_EMAIL_ALT,
+# ASSINAFY_SANDBOX_SIGNER_ID, and ASSINAFY_SANDBOX_SIGNER_ACCESS_CODE.
+sandbox:integration:
+  stage: integration
+  resource_group: assinafy-sandbox-integration
+  environment:
+    name: sandbox
+  variables:
+    ASSINAFY_INTEGRATION: '1'
+    ASSINAFY_BASE_URL: https://sandbox.assinafy.com.br/v1
+  rules:
+    - if: '$RUN_ASSINAFY_SANDBOX_TESTS == "1"'
+      when: on_success
+      allow_failure: false
+    - when: manual
+      allow_failure: true
+  script:
+    - php .cache/composer-2.10.2.phar update --with-all-dependencies --prefer-dist --no-progress
+    - test -n "${ASSINAFY_SANDBOX_API_KEY}"
+    - test -n "${ASSINAFY_SANDBOX_ACCOUNT_ID}"
+    - php -r '$url = (string) getenv("ASSINAFY_BASE_URL"); if (parse_url($url, PHP_URL_HOST) !== "sandbox.assinafy.com.br") { fwrite(STDERR, "Refusing to run integration tests outside the sandbox.\n"); exit(1); }'
+    - export ASSINAFY_API_KEY="${ASSINAFY_SANDBOX_API_KEY}"
+    - export ASSINAFY_ACCOUNT_ID="${ASSINAFY_SANDBOX_ACCOUNT_ID}"
+    - |
+      if [ "${RUN_ASSINAFY_NOTIFICATION_TESTS:-0}" = "1" ]; then
+        test -n "${ASSINAFY_SANDBOX_TEST_EMAIL}"
+        test -n "${ASSINAFY_SANDBOX_TEST_EMAIL_ALT}"
+        export ASSINAFY_NOTIFICATION_TESTS=1
+        export ASSINAFY_TEST_EMAIL="${ASSINAFY_SANDBOX_TEST_EMAIL}"
+        export ASSINAFY_TEST_EMAIL_ALT="${ASSINAFY_SANDBOX_TEST_EMAIL_ALT}"
+      else
+        export ASSINAFY_NOTIFICATION_TESTS=0
+      fi
+      if [ "${RUN_ASSINAFY_DESTRUCTIVE_TESTS:-0}" = "1" ]; then
+        export ASSINAFY_DESTRUCTIVE_TESTS=1
+      else
+        export ASSINAFY_DESTRUCTIVE_TESTS=0
+      fi
+      if [ -n "${ASSINAFY_SANDBOX_SIGNER_ID:-}" ] && [ -n "${ASSINAFY_SANDBOX_SIGNER_ACCESS_CODE:-}" ]; then
+        export ASSINAFY_SIGNER_ID="${ASSINAFY_SANDBOX_SIGNER_ID}"
+        export ASSINAFY_SIGNER_ACCESS_CODE="${ASSINAFY_SANDBOX_SIGNER_ACCESS_CODE}"
+      fi
+    - php .cache/composer-2.10.2.phar run test:integration
