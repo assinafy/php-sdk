@@ -107,7 +107,7 @@ jobs:
 
       - name: Run PHPCS
         shell: bash
-        run: composer --quiet run phpcs -- --report=checkstyle -q | cs2pr
+        run: vendor/bin/phpcs --report=checkstyle -q | cs2pr
 
   composer-validate:
     name: Validate composer.json
