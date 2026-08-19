@@ -3,9 +3,9 @@
 These examples target the Assinafy v1 sandbox. Keep production and sandbox credentials separate, load secrets from environment variables or a secret manager, and use disposable sandbox entities for operations that create, update, sign, or delete data.
 
 The complete endpoint and response mapping is in [API_REFERENCE.md](API_REFERENCE.md).
-These examples target repository release `v2.0.0`. Packagist does not currently expose
-`assinafy/php-sdk`, so use the tagged VCS/path instructions in
-[INSTALLATION.md](INSTALLATION.md) until the package is published there.
+These examples target the `v2.1.0` release and current repository `main`. Packagist does not
+currently expose `assinafy/php-sdk`; see
+[INSTALLATION.md](INSTALLATION.md) for the released tag and repository installation choices.
 
 ## Sandbox setup
 
@@ -73,9 +73,15 @@ $signerId = $result['signer_ids'][0];
 ```
 
 The helper accepts existing signer IDs as strings and accepts `verification_method`,
-`notification_methods`, and `step` in signer arrays. Notifications may independently be empty or
-include Email, WhatsApp, or both; they need not match the verification method. The helper does
-not accept a `fileName` argument; the uploaded file supplies its name.
+`notification_methods`, and `step` in signer arrays. An ordinary assignment allows zero or one
+notification method. For Email/WhatsApp verification, a non-empty notification must match; when
+only one is supplied, the API infers the other, and omitting both defaults to Email.
+DigitalCertificate is exempt from channel equality. An explicit empty notification list is
+forwarded as-is; ordinary cost estimation with that shape was live-verified `200`.
+An exact email match is reused without applying the supplied name or phone; update and verify the
+stored signer first if WhatsApp is required. For DigitalCertificate, supply an existing signer ID
+after setting its `government_id`; the helper deliberately does not resolve certificate signers by
+email. The helper does not accept a `fileName` argument; the uploaded file supplies its name.
 
 ## Long-form document workflow
 
@@ -108,7 +114,10 @@ $assignment = $client->assignments()->create(
 );
 ```
 
-`waitUntilReady()` returns when document status reaches `metadata_ready`, `pending_signature`, `ready`, `certificating`, or `certificated`. It throws for terminal failure/rejection states or when the timeout expires.
+`waitUntilReady()` returns when document status reaches `metadata_ready`, `pending_signature`,
+`ready`, `certificating`, or `certificated`. It throws for terminal failure/rejection states or
+when the timeout expires. The published status catalog omits `ready`, but the webhook contract
+and runtime use it, so the SDK deliberately retains `STATUS_READY`.
 
 ## Estimate assignment cost
 
@@ -129,6 +138,53 @@ if (!($estimate['has_sufficient_resources'] ?? false)) {
     throw new RuntimeException('The sandbox account does not have sufficient resources.');
 }
 ```
+
+### Digital-certificate assignments
+
+The current contract accepts `DigitalCertificate` for ordinary and template assignment creation
+and estimation. Each certificate signer costs two credits in addition to notification cost,
+requires the account's Digital Certificate feature, must have a CPF/CNPJ in `government_id`, and
+must be alone in its signing step. Signer creation has no `government_id` field, so update an
+existing signer first. Formatted CPF/CNPJ input is accepted and normalized to digits by the
+server. The update response omits `government_id`, so its absence there does not indicate failure.
+On 2026-08-19, sandbox assignment creation returned `400` with
+`Invalid method`; run the following only after Assinafy confirms the feature and completion
+protocol are enabled in the target environment:
+
+```php
+$certificateSignerId = requiredEnv('ASSINAFY_CERTIFICATE_SIGNER_ID');
+
+$client->signers()->update($certificateSignerId, [
+    'government_id' => requiredEnv('ASSINAFY_TEST_GOVERNMENT_ID'),
+]);
+
+$certificateEstimate = $client->assignments()->estimateCost(
+    documentId: $document['id'],
+    signers: [[
+        'verification_method' => AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE,
+        'notification_methods' => [AssignmentResource::NOTIFICATION_EMAIL],
+    ]],
+);
+
+$certificateAssignment = $client->assignments()->create(
+    documentId: $document['id'],
+    signers: [[
+        'id' => $certificateSignerId,
+        'verification_method' => AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE,
+        'notification_methods' => [AssignmentResource::NOTIFICATION_EMAIL],
+        'step' => 1, // No other signer may share this step.
+    ]],
+);
+```
+
+The ordinary `signerSession()->sign()` path cannot complete an ICP-Brasil certificate signature,
+and the published API defines no certificate start/complete endpoints. Do not invent or call
+undocumented certificate routes.
+
+Changing a signer's already verified email or WhatsApp number is rejected while that signer has
+an in-flight document. Changing an unverified channel succeeds but rotates its access and
+verification codes, invalidating earlier links/OTPs; call `assignments()->resend()` afterward.
+Certificated documents do not block channel updates.
 
 ## List and search documents
 
@@ -198,7 +254,21 @@ $signedPdf = $client->documents()->download(
 
 file_put_contents('sandbox-original.pdf', $originalPdf);
 file_put_contents('sandbox-certificated.pdf', $signedPdf);
+
+$certificateDocumentId = getenv('ASSINAFY_CERTIFICATE_DOCUMENT_ID');
+if (is_string($certificateDocumentId) && $certificateDocumentId !== '') {
+    $padesPdf = $client->documents()->download(
+        $certificateDocumentId,
+        DocumentResource::ARTIFACT_PADES,
+    );
+    file_put_contents('sandbox-pades.pdf', $padesPdf);
+}
 ```
+
+The `pades` artifact contains the signers' ICP-Brasil signatures plus Assinafy's certification box
+and exists only when the document had digital-certificate signers. `bundle` returns a ZIP of the
+original, certificated, and certificate-page artifacts, plus `pades` when present. Do not request
+`pades` unconditionally in a general document workflow.
 
 ## Templates
 
@@ -241,21 +311,23 @@ $created = $client->documents()->createFromTemplate(
 );
 ```
 
-## Public authentication and OAuth URL helpers
+Do not apply the ordinary assignment's max-one/coupling validation to template payloads. Despite
+the template-create prose saying one method, the sandbox returned `200` for both template cost
+estimation and creation with `notification_methods: ['Email', 'Email']`; the SDK preserves that
+verified runtime behavior.
 
-Use a public client before an API key exists. OAuth helpers build browser URLs; they do not send the redirect request through the JSON transport.
+## Public authentication
+
+Use a public client before an API key exists:
 
 ```php
-use Assinafy\SDK\Resources\AuthResource;
-
 $publicClient = AssinafyClient::forAuth(Configuration::SANDBOX_BASE_URL);
-
-$oauthStartUrl = $publicClient->auth()->socialLoginUrl(AuthResource::PROVIDER_GOOGLE);
-$oauthCallbackUrl = $publicClient->auth()->socialLoginCallbackUrl();
-
-// In a web controller, redirect the user's browser to $oauthStartUrl.
-// Configure $oauthCallbackUrl with the OAuth integration as required by Assinafy.
 ```
+
+`socialLoginUrl()` and `socialLoginCallbackUrl()` remain as compatibility helpers, but both GET
+routes are outside the current OpenAPI document. Live checks on 2026-08-19 found malformed or
+non-production redirect configuration in sandbox and production. They are not an operational
+OAuth integration and are intentionally omitted from executable examples.
 
 For password login, load both values from secret input and never commit them:
 
@@ -289,6 +361,37 @@ OpenAPI declares the `/users/self` `data` member as an `AuthUser`. The sandbox c
 as `{user: AuthUser, accounts: AuthAccount[]}`; `users()->get()` normalizes `data.user`, so
 `$authenticatedUser` is the user object in either case. Continue using `accounts()->list()` for
 account discovery.
+
+## Notification preferences (published; not deployed in sandbox)
+
+The authenticated user's nine owner-facing document email preferences default to `true` and are
+always returned as a complete map. A non-empty update may contain any subset; omitted values stay
+unchanged. Account and security email such as welcome messages, password resets, invitations, and
+account deletion cannot be disabled here. These methods are in the current production OpenAPI,
+but neither route was deployed in sandbox on 2026-08-19; GET returned application-level `404`
+(`Página não encontrada`). The following is the published usage and response shape, not a
+runnable sandbox example:
+
+```php
+$preferences = $bearerClient->users()->notificationPreferences();
+// [
+//     'DocumentCompleted' => true,
+//     'SignerDeclined' => true,
+//     'DocumentCancelled' => true,
+//     'DocumentAboutToExpire' => true,
+//     'DocumentExpired' => true,
+//     'DocumentExpirationReset' => true,
+//     'DocumentProcessingFailed' => true,
+//     'TemplateProcessingFailed' => true,
+//     'SignerWhatsappFailed' => true,
+// ]
+
+$updatedPreferences = $bearerClient->users()->updateNotificationPreferences([
+    'DocumentAboutToExpire' => false,
+    'SignerWhatsappFailed' => true,
+]);
+// The response is the same complete nine-key boolean map.
+```
 
 API-key lifecycle and password-change methods accept a nullable per-call token. Pass `null` to
 fall back to the API key or global Bearer token configured on the client; pass `$accessToken`
@@ -361,8 +464,11 @@ $session->verifyCode(
 ```
 
 `acceptTerms()` sends `signer-access-code` in the query and deliberately sends no request body.
-The published `confirm-data` body fields are `full_name`, `email`, and `government_id`. Terms
-acceptance is a separate call.
+The `confirm-data` schema lists `full_name`, `email`, and `government_id`, but the `GET /sign`
+prose says a digital-certificate signer must also send `has_accepted_terms: true` in this body.
+The SDK forwards that extra field. The optional `has_accepted_terms` query on `GET /sign` is too
+late to open that gate; the endpoint documents `400` until both data confirmation and terms
+acceptance have occurred.
 
 ```php
 $confirmedSigner = $session->confirmData(
@@ -372,6 +478,7 @@ $confirmedSigner = $session->confirmData(
         'full_name' => 'Sandbox Signer',
         'email' => requiredEnv('ASSINAFY_TEST_SIGNER_EMAIL'),
         'government_id' => requiredEnv('ASSINAFY_TEST_GOVERNMENT_ID'),
+        'has_accepted_terms' => true,
     ],
 );
 
@@ -390,6 +497,9 @@ $session->sign($documentId, $assignmentId, $accessCode, [
     ],
 ]);
 ```
+
+This ordinary sign call handles virtual/collect signatures. It is not a digital-certificate
+completion operation.
 
 Signer document methods use the same query authentication, including search and download:
 

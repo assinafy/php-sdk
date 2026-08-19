@@ -83,4 +83,31 @@ final class UserResourceTest extends TestCase
         $this->expectException(ValidationException::class);
         $this->users->stats(UserResource::GRANULARITY_MONTHLY, 'abcde12junk');
     }
+
+    public function testGetsAndUpdatesNotificationPreferences(): void
+    {
+        $all = array_fill_keys(UserResource::NOTIFICATION_PREFERENCE_CODES, true);
+        $this->http->queueJson(200, $all);
+        $this->assertSame($all, $this->users->notificationPreferences());
+        $this->assertSame('users/self/notification-preferences', $this->http->lastCall()['uri']);
+
+        $this->http->queueJson(200, [...$all, 'SignerDeclined' => false]);
+        $updated = $this->users->updateNotificationPreferences(['SignerDeclined' => false]);
+        $call = $this->http->lastCall();
+        $this->assertSame('PUT', $call['method']);
+        $this->assertSame(['SignerDeclined' => false], $call['body']);
+        $this->assertFalse($updated['SignerDeclined']);
+    }
+
+    public function testNotificationPreferenceUpdateRejectsInvalidPayloads(): void
+    {
+        foreach ([[], ['Unknown' => true], ['DocumentCompleted' => 1]] as $payload) {
+            try {
+                $this->users->updateNotificationPreferences($payload);
+                $this->fail('Expected invalid notification preferences to be rejected');
+            } catch (ValidationException) {
+                $this->addToAssertionCount(1);
+            }
+        }
+    }
 }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Assinafy\SDK\Resources;
 
 use Assinafy\SDK\Configuration;
+use Assinafy\SDK\Exceptions\NetworkException;
 use Assinafy\SDK\Exceptions\ValidationException;
 use Assinafy\SDK\Http\HttpClientInterface;
 use Assinafy\SDK\Http\Response;
@@ -53,7 +54,14 @@ abstract class AbstractResource
     protected function extractData(array $response): array
     {
         if (array_key_exists('data', $response)) {
-            return is_array($response['data']) ? $response['data'] : [];
+            if ($response['data'] === null) {
+                return [];
+            }
+            if (!is_array($response['data'])) {
+                throw new NetworkException('Assinafy API returned an invalid data envelope');
+            }
+
+            return $response['data'];
         }
 
         return $response;
@@ -147,7 +155,7 @@ abstract class AbstractResource
      */
     protected function pathSegment(string $value, string $name = 'identifier'): string
     {
-        if ($value === '') {
+        if (trim($value) === '') {
             throw new ValidationException(ucfirst($name) . ' cannot be empty', [$name => $value]);
         }
 
@@ -163,7 +171,7 @@ abstract class AbstractResource
             return [];
         }
 
-        if ($accessCode === '') {
+        if (trim($accessCode) === '') {
             throw new ValidationException('Signer access code cannot be empty');
         }
 
@@ -185,7 +193,7 @@ abstract class AbstractResource
             return [];
         }
 
-        if ($accessToken === '') {
+        if (trim($accessToken) === '') {
             throw new ValidationException('Access token cannot be empty');
         }
 

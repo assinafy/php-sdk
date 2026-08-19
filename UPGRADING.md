@@ -10,9 +10,10 @@ Version 2.0.0 is available as repository tag `v2.0.0`, but Packagist does not cu
 [docs/INSTALLATION.md](docs/INSTALLATION.md), and switch to `assinafy/php-sdk:^2.0` after
 Packagist publication.
 
-The current audit covers all 89 operations on the 68 paths in the 2026-08-05 OpenAPI document.
-The two browser OAuth operations are represented by URL builders, and five additional
-template-management routes are retained because the running sandbox supports them.
+Current repository `main` covers all 89 operations on the 67 paths in the 2026-08-19 OpenAPI
+document. Five additional template-management method/path pairs remain because the running
+sandbox supports them. Two legacy OAuth URL routes are also retained for compatibility outside
+OpenAPI, but their upstream redirects are currently misconfigured and are not operational.
 
 ### PHP 8.2 is now the minimum
 
@@ -186,9 +187,12 @@ $client->assignments()->estimateCost($documentId, [
 
 `create()` still requires IDs — it has to know who signs.
 
-The same audit removed an incorrect coupling between verification and notification. A signer may
-verify by Email or WhatsApp while `notification_methods` is independently empty or contains
-Email, WhatsApp, or both. Remove workarounds that forced a single matching channel.
+Current `main` also matches the ordinary-assignment runtime rules: at most one notification
+method; for Email/WhatsApp verification a non-empty notification must match; supplying only one
+side lets the API infer the other; and omitting both defaults to Email. DigitalCertificate is
+exempt from channel equality. An explicit `notification_methods: []` remains a sandbox-verified
+`200` cost-estimate exception and is preserved. Remove payloads that send both Email and WhatsApp
+or pair different non-empty Email/WhatsApp channels.
 
 ### Signer phone numbers require an explicit country code
 
@@ -270,12 +274,13 @@ to the document, then obtain the code from that signer's controlled inbox. Live 
 require explicit `ASSINAFY_SIGNER_ID` and `ASSINAFY_SIGNER_ACCESS_CODE` values and are independent
 from notification-delivery tests.
 
-### Browser OAuth operations are URL builders
+### Legacy browser OAuth URL builders are not operational
 
-The two published browser operations are implemented as
-`auth()->socialLoginUrl()` and `auth()->socialLoginCallbackUrl()`. They return absolute URLs so
-the application can redirect a browser; they do not run a redirect/HTML response through the
-JSON transport.
+`auth()->socialLoginUrl()` and `auth()->socialLoginCallbackUrl()` remain for compatibility, but
+their two GET routes are no longer in OpenAPI. On 2026-08-19, sandbox produced a malformed
+array-style `redirect_uri`, while production produced an example Google client ID and an HTTP
+`api-dev` callback. Do not migrate an OAuth flow to these helpers until Assinafy publishes and
+deploys a corrected contract.
 
 ### Preserve documented/runtime divergences
 
@@ -294,6 +299,58 @@ JSON transport.
   `{recipient, channel}` and accepts only a recipient who is already a signer assigned to the
   target document. The SDK deliberately uses the runtime request shape; ensure the assignment
   exists before calling it.
-- Template list and create-document-from-template operations are published. Template
-  create/get/update/delete/page-download are not, but remain available because live tests prove
-  the routes work. Do not remove them based only on an OpenAPI diff.
+- Template list, create-document-from-template, and template document-cost estimation are
+  published. Template create/get/update/delete/page-download are not, but remain available
+  because live tests prove the routes work. Do not remove them based only on an OpenAPI diff.
+
+## v2.0.0 → v2.1.0
+
+These additions are released in `v2.1.0`.
+
+### Notification preferences
+
+`users()->notificationPreferences()` maps the new GET operation and returns all nine booleans.
+`users()->updateNotificationPreferences($partial)` maps PUT, rejects an empty/unknown/non-boolean
+map locally, merges omitted keys unchanged, and returns the full map. The keys are
+`DocumentCompleted`, `SignerDeclined`, `DocumentCancelled`, `DocumentAboutToExpire`,
+`DocumentExpired`, `DocumentExpirationReset`, `DocumentProcessingFailed`,
+`TemplateProcessingFailed`, and `SignerWhatsappFailed`.
+
+Both methods are part of the current production OpenAPI contract but were not deployed in the
+sandbox on 2026-08-19; GET returned application-level `404` (`Página não encontrada`). Do not
+make a sandbox rollout depend on either route until Assinafy deploys them there.
+
+### Digital-certificate assignments and artifacts
+
+Assignment and template create/estimate payloads now accept `verification_method:
+DigitalCertificate`. The contract requires the account feature, an existing signer with CPF/CNPJ
+in `government_id`, and a signing step containing only that signer. Estimation adds two credits
+per signer under `SignatureDigitalCertificate`, plus notification cost. Set the identifier first:
+
+```php
+$client->signers()->update($signerId, ['government_id' => $cpfOrCnpj]);
+```
+
+The SDK sends these published request shapes and validates the ordinary-assignment constraints;
+template signer arrays remain pass-through for the live divergence below. The sandbox returned
+`400` (`Invalid method`) for certificate assignment creation on 2026-08-19. The ordinary
+`signerSession()->sign()` method cannot finish an ICP-Brasil certificate signature, and OpenAPI
+defines no certificate start/complete routes; none were added speculatively.
+
+Document and signer-document downloads now accept the `pades` artifact. It exists only for a
+document with digital-certificate signers. A `bundle` is a ZIP of the original, certificated, and
+certificate-page artifacts plus `pades` when present.
+
+### Signer confirmation and contact updates
+
+The `confirm-data` schema still lists only `full_name`, `email`, and `government_id`, while
+`GET /sign` prose requires a DigitalCertificate signer to send `has_accepted_terms: true` in that
+body. The SDK forwards it. Passing the similarly named query to `GET /sign` is too late to open
+the gate, and the endpoint now documents `400` for missing confirmation/acceptance.
+
+Signer update now accepts `government_id`. Formatted CPF/CNPJ input is accepted and normalized to
+digits by the server, but signer responses omit that field and must not be used to verify it by
+echo. Updating an already verified email/WhatsApp channel
+on an in-flight document returns `400`; updating an unverified channel rotates its access and
+verification codes, so resend the invitation. Certificated documents do not block channel
+changes.

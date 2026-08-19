@@ -32,6 +32,12 @@ final class SignerSessionResourceTest extends TestCase
         $this->assertSame(['signer-access-code' => 'CODE'], $call['query']);
     }
 
+    public function testWhitespaceAccessCodeIsRejected(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->session->self('   ');
+    }
+
     public function testAcceptTerms(): void
     {
         $this->http->queueJson(200, ['has_accepted_terms' => true]);
@@ -61,13 +67,18 @@ final class SignerSessionResourceTest extends TestCase
         $this->session->confirmData('doc1', 'CODE WITH SPACE', [
             'email' => 'a@b.com',
             'government_id' => '12345678900',
+            'has_accepted_terms' => true,
         ]);
 
         $call = $this->http->lastCall();
         $this->assertSame('PUT', $call['method']);
         $this->assertSame('documents/doc1/signers/confirm-data', $call['uri']);
         $this->assertSame(['signer-access-code' => 'CODE WITH SPACE'], $call['query']);
-        $this->assertSame(['email' => 'a@b.com', 'government_id' => '12345678900'], $call['body']);
+        $this->assertSame([
+            'email' => 'a@b.com',
+            'government_id' => '12345678900',
+            'has_accepted_terms' => true,
+        ], $call['body']);
     }
 
     public function testUploadSignatureSendsRawBinary(): void

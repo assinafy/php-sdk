@@ -65,7 +65,7 @@ final class AssignmentResourceTest extends TestCase
         ], $call['body']);
     }
 
-    public function testCreateSupportsAllDocumentedNotificationChannelCombinations(): void
+    public function testCreateReindexesNotificationAndCopyReceiverLists(): void
     {
         $this->http->queueJson(201, ['id' => 'a1']);
 
@@ -74,7 +74,6 @@ final class AssignmentResourceTest extends TestCase
             'verification_method' => AssignmentResource::VERIFICATION_EMAIL,
             'notification_methods' => [
                 3 => AssignmentResource::NOTIFICATION_EMAIL,
-                8 => AssignmentResource::NOTIFICATION_WHATSAPP,
             ],
         ]], options: [
             'copy_receivers' => [5 => 'copy-1'],
@@ -82,10 +81,46 @@ final class AssignmentResourceTest extends TestCase
 
         $body = $this->http->lastCall()['body'];
         $this->assertSame(
-            [AssignmentResource::NOTIFICATION_EMAIL, AssignmentResource::NOTIFICATION_WHATSAPP],
+            [AssignmentResource::NOTIFICATION_EMAIL],
             $body['signers'][0]['notification_methods']
         );
         $this->assertSame(['copy-1'], $body['copy_receivers']);
+    }
+
+    public function testCreateRejectsMultipleNotificationMethods(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->assignments->create('doc1', [[
+            'id' => 's1',
+            'notification_methods' => [
+                AssignmentResource::NOTIFICATION_EMAIL,
+                AssignmentResource::NOTIFICATION_WHATSAPP,
+            ],
+        ]]);
+    }
+
+    public function testEstimateCostAcceptsDigitalCertificateVerification(): void
+    {
+        $this->http->queueJson(200, ['total_credits' => 2]);
+
+        $this->assignments->estimateCost('doc1', [[
+            'verification_method' => AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE,
+            'notification_methods' => [AssignmentResource::NOTIFICATION_EMAIL],
+        ]]);
+
+        $this->assertSame(
+            AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE,
+            $this->http->lastCall()['body']['signers'][0]['verification_method']
+        );
+    }
+
+    public function testDigitalCertificateSignerMustBeAloneInStep(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->assignments->create('doc1', [
+            ['id' => 's1', 'verification_method' => AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE],
+            ['id' => 's2'],
+        ]);
     }
 
     public function testCreateRejectsInvalidMethod(): void
@@ -104,6 +139,19 @@ final class AssignmentResourceTest extends TestCase
     {
         $this->expectException(ValidationException::class);
         $this->assignments->create('doc1', [['email' => 'x@y.com']]);
+    }
+
+    public function testCreateRejectsWhitespaceSignerAndCopyReceiverIds(): void
+    {
+        foreach ([['   '], ['s1', ['copy_receivers' => ['   ']]]] as $case) {
+            try {
+                $options = isset($case[1]) && is_array($case[1]) ? $case[1] : [];
+                $this->assignments->create('doc1', [$case[0]], options: $options);
+                $this->fail('Whitespace-only signer IDs must be rejected');
+            } catch (ValidationException) {
+                $this->addToAssertionCount(1);
+            }
+        }
     }
 
     public function testEstimateCost(): void

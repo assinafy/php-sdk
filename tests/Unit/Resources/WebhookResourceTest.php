@@ -60,6 +60,14 @@ final class WebhookResourceTest extends TestCase
         );
     }
 
+    public function testRegisterRejectsWhitespaceEvent(): void
+    {
+        [, $webhooks] = $this->build();
+
+        $this->expectException(ValidationException::class);
+        $webhooks->register('https://x', 'a@b.com', ['   ']);
+    }
+
     public function testRegisterRejectsNonHttpWebhookUrl(): void
     {
         [, $webhooks] = $this->build();

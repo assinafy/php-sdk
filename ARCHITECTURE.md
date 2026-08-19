@@ -4,7 +4,11 @@
 
 The Assinafy PHP SDK is a small, synchronous client for the Assinafy v1 API. It uses a facade over focused resource classes, a project-specific HTTP abstraction, PSR-3 logging, strict PHP types, and explicit exception mapping.
 
-The package targets PHP 8.2 through 8.5, the complete supported CI matrix. The authoritative endpoint mapping, including known differences between the published OpenAPI document and sandbox behavior, is in [docs/API_REFERENCE.md](docs/API_REFERENCE.md).
+The package targets PHP 8.2 through 8.5, the complete supported CI matrix. Current repository
+`main` maps all 89 operations on the 67 paths in the 2026-08-19 OpenAPI document (SHA-256
+`44da834c27173a3739d491fdacbb48decf9a170bd776a1c4edb4d0d4b108c22f`). The authoritative
+endpoint mapping, including known differences between the published contract and sandbox
+behavior, is in [docs/API_REFERENCE.md](docs/API_REFERENCE.md).
 
 ## Directory structure
 
@@ -81,14 +85,28 @@ $documents = $client->documents();
 $user = $client->users()->get();
 ```
 
-`AssinafyClient::forAuth()` creates a public client for login, password-reset, OAuth URL helpers,
-and public document operations. It sends neither `X-Api-Key` nor `Authorization`; protected
+`AssinafyClient::forAuth()` creates a public client for login, password-reset, and public document
+operations. It sends neither `X-Api-Key` nor `Authorization`; protected
 bootstrap methods must receive the login token explicitly. Once an account ID is known,
 `AssinafyClient::forBearer()` configures `Authorization: Bearer ...` once for every workspace
 resource. Account-scoped methods reject public configuration instead of sending placeholder
 credentials.
 
-The high-level `uploadAndRequestSignatures()` workflow validates every signer description before uploading, uploads a PDF, optionally waits for document readiness, resolves or creates signers, and creates a virtual assignment.
+Two legacy OAuth URL builders remain on `AuthResource`, but their GET routes are outside the
+current OpenAPI document and upstream sandbox/production redirects are misconfigured. They are
+compatibility methods, not an operational authentication architecture.
+
+The high-level `uploadAndRequestSignatures()` workflow validates every signer description before
+uploading, uploads a PDF, optionally waits for document readiness, resolves or creates signers,
+and creates a virtual assignment. Digital-certificate entries must reference an existing signer
+with `government_id` and occupy a signing step alone; the helper never invents certificate
+completion routes absent from the API contract.
+
+Ordinary assignment shaping centralizes the runtime max-one notification rule, Email/WhatsApp
+coupling/inference, and preservation of the explicit empty list verified by cost estimation.
+Template document methods keep their validation separate because the sandbox accepts duplicate
+notification entries there; this prevents an ordinary-route assumption from removing working
+template behavior.
 
 ### Resource layer
 
@@ -97,16 +115,16 @@ Each resource extends `AbstractResource`, which centralizes account paths, path-
 | Accessor | Responsibility |
 |---|---|
 | `accounts()` | Account discovery and management, branding, and account statistics |
-| `assignments()` | Signature requests, cost estimates, resend operations, expiration resets, and WhatsApp history |
-| `auth()` | Login, social login, OAuth URL builders, password flows, and API-key lifecycle |
-| `documents()` | Document upload, retrieval, search, downloads, tags, verification, and template-driven creation |
+| `assignments()` | Signature requests, Email/WhatsApp/DigitalCertificate estimates, resend operations, expiration resets, and WhatsApp history |
+| `auth()` | Login, social login, password flows, API-key lifecycle, and legacy non-operational OAuth URL builders |
+| `documents()` | Document upload, retrieval, search, downloads (including `pades`), tags, verification, and template-driven creation |
 | `fields()` | Field definitions, validation, and the global field-type catalog |
-| `signers()` | Workspace signer CRUD, email lookup, and explicit-country-code E.164 normalization |
+| `signers()` | Workspace signer CRUD (including `government_id` update), email lookup, and explicit-country-code E.164 normalization |
 | `signerSession()` | End-signer identity, verification, data confirmation, signature image, signing, and decline operations |
 | `signerDocuments()` | End-signer document lookup, search, bulk actions, and downloads |
 | `tags()` | Account tag CRUD |
 | `templates()` | Template upload, polling, retrieval, update, deletion, and page downloads |
-| `users()` | Authenticated user profile and cross-account statistics |
+| `users()` | Authenticated user profile plus published notification preferences and cross-account statistics; the latter routes are not currently sandbox-deployed |
 | `webhooks()` | Subscription configuration, event types, delivery history, and retry |
 
 Workspace resources use either the configured `X-Api-Key` or the global Bearer header supplied by

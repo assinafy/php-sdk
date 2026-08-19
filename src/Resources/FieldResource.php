@@ -33,10 +33,10 @@ class FieldResource extends AbstractResource
      */
     public function create(string $type, string $name, array $options = []): array
     {
-        if ($type === '') {
+        if (trim($type) === '') {
             throw new ValidationException('Field type is required', ['type' => $type]);
         }
-        if ($name === '') {
+        if (trim($name) === '') {
             throw new ValidationException('Field name is required', ['name' => $name]);
         }
 

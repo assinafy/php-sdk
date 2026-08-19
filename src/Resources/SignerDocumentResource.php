@@ -176,7 +176,7 @@ class SignerDocumentResource extends AbstractResource
         }
 
         foreach ($documentIds as $documentId) {
-            if (!is_string($documentId) || $documentId === '') {
+            if (!is_string($documentId) || trim($documentId) === '') {
                 throw new ValidationException('Document IDs must be non-empty strings');
             }
         }

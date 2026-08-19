@@ -119,6 +119,21 @@ final class SignerResourceTest extends TestCase
         $this->assertSame('DELETE', $this->http->lastCall()['method']);
     }
 
+    public function testUpdateSupportsGovernmentId(): void
+    {
+        $this->http->queueJson(200, ['id' => 's1']);
+
+        $this->signers->update('s1', ['government_id' => '39053344705']);
+
+        $this->assertSame(['government_id' => '39053344705'], $this->http->lastCall()['body']);
+    }
+
+    public function testUpdateRejectsEmptyGovernmentId(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->signers->update('s1', ['government_id' => '']);
+    }
+
     public function testFindByEmailReturnsExactMatch(): void
     {
         $this->http->queueJson(200, [

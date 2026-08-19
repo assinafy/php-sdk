@@ -207,7 +207,7 @@ class GuzzleHttpClient implements HttpClientInterface
         string $uri,
         #[\SensitiveParameter] array $options = []
     ): Response {
-        $options = $this->withDefaultHeaders($options);
+        $options = $this->withDefaultHeaders($method, $uri, $options);
         // Enforce this at request time as well as on our own Client. An injected
         // Guzzle client may have redirect middleware enabled by default, and Guzzle
         // can forward custom authentication headers such as X-Api-Key cross-origin.
@@ -239,6 +239,19 @@ class GuzzleHttpClient implements HttpClientInterface
             ) {
                 throw new NetworkException(
                     'Assinafy API returned an invalid JSON response'
+                );
+            }
+
+            $data = $apiResponse->getData();
+            if (
+                $apiResponse->isSuccess()
+                && is_array($data)
+                && array_key_exists('data', $data)
+                && $data['data'] !== null
+                && !is_array($data['data'])
+            ) {
+                throw new NetworkException(
+                    'Assinafy API returned an invalid data envelope'
                 );
             }
 
@@ -329,8 +342,11 @@ class GuzzleHttpClient implements HttpClientInterface
      * @param array<string, mixed> $options
      * @return array<string, mixed>
      */
-    private function withDefaultHeaders(#[\SensitiveParameter] array $options): array
-    {
+    private function withDefaultHeaders(
+        string $method,
+        string $uri,
+        #[\SensitiveParameter] array $options
+    ): array {
         $headers = isset($options['headers']) && is_array($options['headers'])
             ? $options['headers']
             : [];
@@ -343,7 +359,14 @@ class GuzzleHttpClient implements HttpClientInterface
             );
         }
 
+        $credentialless = self::isCredentiallessRequest($method, $uri);
         foreach ($this->defaultHeaders as $name => $value) {
+            if (
+                $credentialless
+                && in_array(strtolower($name), ['authorization', 'x-api-key'], true)
+            ) {
+                continue;
+            }
             if (
                 ($name === 'X-Api-Key' && $hasAuthorization)
                 || ($name === 'Authorization' && $hasApiKey)
@@ -358,6 +381,58 @@ class GuzzleHttpClient implements HttpClientInterface
         $options['headers'] = $headers;
 
         return $options;
+    }
+
+    /**
+     * Public bootstrap, verification, and signer-code requests must not inherit a
+     * workspace credential from a client that is also used for private resources.
+     * Explicit per-request headers remain untouched.
+     */
+    private static function isCredentiallessRequest(string $method, string $uri): bool
+    {
+        $path = parse_url($uri, PHP_URL_PATH);
+        $path = is_string($path) ? ltrim($path, '/') : '';
+        $route = strtoupper($method) . ' ' . $path;
+
+        if (
+            in_array($route, [
+                'POST login',
+                'POST authentication/social-login',
+                'PUT authentication/request-password-reset',
+                'PUT authentication/reset-password',
+                'GET sign',
+                'POST verify',
+                'POST signature',
+                'GET signers/self',
+                'PUT signers/accept-terms',
+                'PUT signers/documents/sign-multiple',
+                'PUT signers/documents/decline-multiple',
+            ], true)
+        ) {
+            return true;
+        }
+
+        return preg_match('~^GET documents/[^/]+/verify$~', $route) === 1
+            || preg_match('~^GET public/documents/[^/]+$~', $route) === 1
+            || preg_match('~^PUT public/documents/[^/]+/send-token$~', $route) === 1
+            || preg_match('~^GET signature/[^/]+$~', $route) === 1
+            || preg_match(
+                '~^PUT documents/[^/]+/signers/confirm-data$~',
+                $route
+            ) === 1
+            || preg_match(
+                '~^POST documents/[^/]+/assignments/(?!estimate-cost$)[^/]+$~',
+                $route
+            ) === 1
+            || preg_match(
+                '~^PUT documents/[^/]+/assignments/[^/]+/reject$~',
+                $route
+            ) === 1
+            || preg_match('~^GET signers/[^/]+/document$~', $route) === 1
+            || preg_match(
+                '~^GET signers/[^/]+/documents(?:/search|/[^/]+/download/[^/]+)?$~',
+                $route
+            ) === 1;
     }
 
     /**

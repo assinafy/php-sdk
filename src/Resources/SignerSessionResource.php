@@ -86,7 +86,12 @@ class SignerSessionResource extends AbstractResource
      * The `signer-access-code` is sent as a query parameter, the rest of the data
      * goes in the JSON body.
      *
-     * @param array<string, mixed> $data subset of { full_name, email, government_id }
+     * Current API prose also requires `has_accepted_terms: true` here before a
+     * digital-certificate signer can open the document, although that field is absent
+     * from this operation's request schema.
+     *
+     * @param array<string, mixed> $data subset of { full_name, email, government_id,
+     *     has_accepted_terms }
      * @return array<string, mixed> the confirmed signer data
      */
     public function confirmData(

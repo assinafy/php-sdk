@@ -157,11 +157,8 @@ final class AssinafyClientTest extends TestCase
         try {
             $client->uploadAndRequestSignatures($pdfPath, [[
                 'id' => 'signer1',
-                'verification_method' => AssignmentResource::VERIFICATION_EMAIL,
-                'notification_methods' => [
-                    AssignmentResource::NOTIFICATION_EMAIL,
-                    AssignmentResource::NOTIFICATION_WHATSAPP,
-                ],
+                'verification_method' => AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE,
+                'notification_methods' => [AssignmentResource::NOTIFICATION_EMAIL],
                 'step' => 1,
             ]]);
         } finally {
@@ -170,11 +167,8 @@ final class AssinafyClientTest extends TestCase
 
         $this->assertSame([[
             'id' => 'signer1',
-            'verification_method' => AssignmentResource::VERIFICATION_EMAIL,
-            'notification_methods' => [
-                AssignmentResource::NOTIFICATION_EMAIL,
-                AssignmentResource::NOTIFICATION_WHATSAPP,
-            ],
+            'verification_method' => AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE,
+            'notification_methods' => [AssignmentResource::NOTIFICATION_EMAIL],
             'step' => 1,
         ]], $http->lastCall()['body']['signers']);
     }
@@ -215,6 +209,7 @@ final class AssinafyClientTest extends TestCase
     public function testUploadWorkflowPrevalidatesAllAssignmentAndContactOptions(): void
     {
         $cases = [
+            ['   '],
             [['full_name' => 'Name', 'email' => 'valid@example.test', 'verification_method' => 'SMS']],
             [[
                 'full_name' => 'Name',
@@ -226,6 +221,19 @@ final class AssinafyClientTest extends TestCase
                 'email' => 'valid@example.test',
                 'verification_method' => AssignmentResource::VERIFICATION_EMAIL,
                 'notification_methods' => [AssignmentResource::NOTIFICATION_WHATSAPP],
+            ]],
+            [[
+                'full_name' => 'Name',
+                'email' => 'valid@example.test',
+                'notification_methods' => [
+                    AssignmentResource::NOTIFICATION_EMAIL,
+                    AssignmentResource::NOTIFICATION_WHATSAPP,
+                ],
+            ]],
+            [[
+                'full_name' => 'Name',
+                'email' => 'valid@example.test',
+                'verification_method' => AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE,
             ]],
             [['full_name' => 'Name', 'email' => 'valid@example.test', 'step' => 0]],
             [[

@@ -18,9 +18,21 @@ class AssignmentResource extends AbstractResource
 
     public const VERIFICATION_EMAIL = 'Email';
     public const VERIFICATION_WHATSAPP = 'Whatsapp';
+    public const VERIFICATION_DIGITAL_CERTIFICATE = 'DigitalCertificate';
+
+    public const VERIFICATION_METHODS = [
+        self::VERIFICATION_EMAIL,
+        self::VERIFICATION_WHATSAPP,
+        self::VERIFICATION_DIGITAL_CERTIFICATE,
+    ];
 
     public const NOTIFICATION_EMAIL = 'Email';
     public const NOTIFICATION_WHATSAPP = 'Whatsapp';
+
+    public const NOTIFICATION_METHODS = [
+        self::NOTIFICATION_EMAIL,
+        self::NOTIFICATION_WHATSAPP,
+    ];
 
     /**
      * Create an assignment (signature request).
@@ -307,7 +319,7 @@ class AssignmentResource extends AbstractResource
 
         foreach ($signers as $signer) {
             if (is_string($signer)) {
-                if ($signer === '') {
+                if (trim($signer) === '') {
                     throw new ValidationException('Signer ID cannot be empty');
                 }
                 $normalized[] = ['id' => $signer];
@@ -321,7 +333,7 @@ class AssignmentResource extends AbstractResource
                     throw new ValidationException('Signer entry missing id', ['signer' => $signer]);
                 }
 
-                if ($id !== null && (!is_string($id) || $id === '')) {
+                if ($id !== null && (!is_string($id) || trim($id) === '')) {
                     throw new ValidationException('Signer ID must be a non-empty string', [
                         'signer' => $signer,
                     ]);
@@ -330,13 +342,7 @@ class AssignmentResource extends AbstractResource
                 $entry = $id === null ? [] : ['id' => $id];
 
                 if (isset($signer['verification_method'])) {
-                    if (
-                        !in_array(
-                            $signer['verification_method'],
-                            [self::VERIFICATION_EMAIL, self::VERIFICATION_WHATSAPP],
-                            true
-                        )
-                    ) {
+                    if (!in_array($signer['verification_method'], self::VERIFICATION_METHODS, true)) {
                         throw new ValidationException('Unknown signer verification method', [
                             'verification_method' => $signer['verification_method'],
                         ]);
@@ -349,18 +355,27 @@ class AssignmentResource extends AbstractResource
                     if (!is_array($methods)) {
                         throw new ValidationException('Signer notification methods must be an array');
                     }
+                    if (count($methods) > 1) {
+                        throw new ValidationException('Only one signer notification method is allowed');
+                    }
                     foreach ($methods as $notificationMethod) {
-                        if (
-                            !in_array(
-                                $notificationMethod,
-                                [self::NOTIFICATION_EMAIL, self::NOTIFICATION_WHATSAPP],
-                                true
-                            )
-                        ) {
+                        if (!in_array($notificationMethod, self::NOTIFICATION_METHODS, true)) {
                             throw new ValidationException('Unknown signer notification method', [
                                 'notification_method' => $notificationMethod,
                             ]);
                         }
+                    }
+                    $verification = $entry['verification_method'] ?? null;
+                    $notification = reset($methods);
+                    if (
+                        is_string($verification)
+                        && is_string($notification)
+                        && $verification !== self::VERIFICATION_DIGITAL_CERTIFICATE
+                        && $verification !== $notification
+                    ) {
+                        throw new ValidationException(
+                            'Signer verification and notification methods must match'
+                        );
                     }
                     $entry['notification_methods'] = array_values($methods);
                 }
@@ -388,6 +403,9 @@ class AssignmentResource extends AbstractResource
         }
 
         $this->assertSequentialSteps($normalized);
+        if ($requireId) {
+            $this->assertDigitalCertificateSteps($normalized);
+        }
 
         return $normalized;
     }
@@ -406,7 +424,7 @@ class AssignmentResource extends AbstractResource
                 throw new ValidationException('Copy receivers must be an array of signer IDs');
             }
             foreach ($options['copy_receivers'] as $signerId) {
-                if (!is_string($signerId) || $signerId === '') {
+                if (!is_string($signerId) || trim($signerId) === '') {
                     throw new ValidationException('Copy receiver IDs must be non-empty strings');
                 }
             }
@@ -456,6 +474,30 @@ class AssignmentResource extends AbstractResource
         foreach ($unique as $index => $step) {
             if ($step !== $index + 1) {
                 throw new ValidationException('Signer steps must be contiguous and start at 1');
+            }
+        }
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $signers
+     */
+    private function assertDigitalCertificateSteps(array $signers): void
+    {
+        $stepCounts = [];
+        foreach ($signers as $signer) {
+            $step = (int) ($signer['step'] ?? 1);
+            $stepCounts[$step] = ($stepCounts[$step] ?? 0) + 1;
+        }
+
+        foreach ($signers as $signer) {
+            $step = (int) ($signer['step'] ?? 1);
+            if (
+                ($signer['verification_method'] ?? null) === self::VERIFICATION_DIGITAL_CERTIFICATE
+                && $stepCounts[$step] > 1
+            ) {
+                throw new ValidationException(
+                    'A digital-certificate signer must be alone in its signing step'
+                );
             }
         }
     }

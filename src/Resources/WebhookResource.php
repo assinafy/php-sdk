@@ -77,7 +77,7 @@ class WebhookResource extends AbstractResource
         }
 
         foreach ($events as $event) {
-            if (!is_string($event) || $event === '') {
+            if (!is_string($event) || trim($event) === '') {
                 throw new ValidationException('Webhook events must be non-empty strings', [
                     'event' => $event,
                 ]);

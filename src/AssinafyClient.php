@@ -238,12 +238,13 @@ class AssinafyClient
      *
      * Each entry in `$signers` may be either:
      *   - an existing signer ID (string), or
-     *   - an associative array `{ full_name (or name), email?, whatsapp_phone_number? (or phone)?,
-     *     verification_method?, notification_methods? }`
+     *   - an associative array `{ id? or full_name (or name), email?, whatsapp_phone_number?
+     *     (or phone)?, verification_method?, notification_methods?, step? }`
      *
      * Signers without an `id` are created via the API; signers found by email (when an email
-     * is supplied) are reused. Returns the created document, the assignment, and the resolved
-     * signer IDs.
+     * is supplied) are reused. DigitalCertificate entries must instead supply an existing
+     * signer ID whose government_id was set first. Returns the created document, the assignment,
+     * and the resolved signer IDs.
      *
      * @param array<int, string|array<string, mixed>> $signers
      * @return array{document: array<string, mixed>, assignment: array<string, mixed>, signer_ids: array<int, string>}
@@ -267,7 +268,7 @@ class AssinafyClient
         $document = $this->documents()->upload($filePath);
         $documentId = $document['id'] ?? null;
 
-        if (!is_string($documentId) || $documentId === '') {
+        if (!is_string($documentId) || trim($documentId) === '') {
             throw new \RuntimeException('Upload succeeded but no document id returned');
         }
 
@@ -313,7 +314,7 @@ class AssinafyClient
             return ['id' => $signer];
         }
 
-        if (isset($signer['id']) && is_string($signer['id']) && $signer['id'] !== '') {
+        if (isset($signer['id']) && is_string($signer['id']) && trim($signer['id']) !== '') {
             $signerId = $signer['id'];
         } else {
             $fullName = (string) ($signer['full_name'] ?? $signer['name'] ?? '');
@@ -323,8 +324,13 @@ class AssinafyClient
             $signerId = null;
             if ($email !== null) {
                 $existing = $this->signers()->findByEmail((string) $email);
-                if ($existing !== null && isset($existing['id'])) {
-                    $signerId = (string) $existing['id'];
+                if (
+                    $existing !== null
+                    && isset($existing['id'])
+                    && is_string($existing['id'])
+                    && trim($existing['id']) !== ''
+                ) {
+                    $signerId = $existing['id'];
                 }
             }
 
@@ -335,7 +341,7 @@ class AssinafyClient
                     $phone !== null ? (string) $phone : null
                 );
 
-                if (!isset($created['id']) || !is_string($created['id']) || $created['id'] === '') {
+                if (!isset($created['id']) || !is_string($created['id']) || trim($created['id']) === '') {
                     throw new \RuntimeException('Signer creation returned no id');
                 }
 
@@ -367,8 +373,11 @@ class AssinafyClient
 
         $references = [];
         $steps = [];
+        $stepCounts = [];
+        $digitalCertificateSteps = [];
         foreach ($signers as $signer) {
             $reference = null;
+            $step = 1;
             if (is_string($signer)) {
                 if (trim($signer) === '') {
                     throw new \InvalidArgumentException('Signer ID cannot be empty');
@@ -404,9 +413,19 @@ class AssinafyClient
                 $contactRequirements = $this->validateWorkflowSignerOptions($signer);
                 if (array_key_exists('step', $signer)) {
                     $steps[] = $signer['step'];
+                    $step = (int) $signer['step'];
+                }
+                if ($contactRequirements['digital_certificate']) {
+                    $digitalCertificateSteps[] = $step;
                 }
 
                 if (!is_string($id) || trim($id) === '') {
+                    if ($contactRequirements['digital_certificate']) {
+                        throw new \InvalidArgumentException(
+                            'Digital-certificate workflows require an existing signer ID; '
+                            . 'set government_id with signers()->update() first'
+                        );
+                    }
                     if ($contactRequirements['email'] && $email === null) {
                         throw new \InvalidArgumentException(
                             'Email verification or notification requires the signer email'
@@ -434,6 +453,7 @@ class AssinafyClient
             if ($reference !== null) {
                 $references[$reference] = true;
             }
+            $stepCounts[$step] = ($stepCounts[$step] ?? 0) + 1;
         }
 
         if ($steps !== [] && count($steps) !== count($signers)) {
@@ -450,11 +470,18 @@ class AssinafyClient
                 }
             }
         }
+        foreach ($digitalCertificateSteps as $step) {
+            if ($stepCounts[$step] > 1) {
+                throw new \InvalidArgumentException(
+                    'A digital-certificate signer must be alone in its signing step'
+                );
+            }
+        }
     }
 
     /**
      * @param array<string, mixed> $signer
-     * @return array{email: bool, phone: bool}
+     * @return array{email: bool, phone: bool, digital_certificate: bool}
      */
     private function validateWorkflowSignerOptions(#[\SensitiveParameter] array $signer): array
     {
@@ -465,7 +492,7 @@ class AssinafyClient
             $verification !== null
             && !in_array(
                 $verification,
-                [AssignmentResource::VERIFICATION_EMAIL, AssignmentResource::VERIFICATION_WHATSAPP],
+                AssignmentResource::VERIFICATION_METHODS,
                 true
             )
         ) {
@@ -476,23 +503,35 @@ class AssinafyClient
             if (!is_array($notifications)) {
                 throw new \InvalidArgumentException('Signer notification methods must be an array');
             }
+            if (count($notifications) > 1) {
+                throw new \InvalidArgumentException('Only one signer notification method is allowed');
+            }
             foreach ($notifications as $notification) {
-                if (
-                    !in_array(
-                        $notification,
-                        [AssignmentResource::NOTIFICATION_EMAIL, AssignmentResource::NOTIFICATION_WHATSAPP],
-                        true
-                    )
-                ) {
+                if (!in_array($notification, AssignmentResource::NOTIFICATION_METHODS, true)) {
                     throw new \InvalidArgumentException('Unknown signer notification method');
                 }
             }
         }
 
-        $verification ??= AssignmentResource::VERIFICATION_EMAIL;
-        $notificationChannels = $notifications === null
-            ? [AssignmentResource::NOTIFICATION_EMAIL]
-            : array_values($notifications);
+        $notificationChannels = $notifications === null ? null : array_values($notifications);
+        if (
+            $verification !== null
+            && $notificationChannels !== null
+            && $notificationChannels !== []
+            && $verification !== AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE
+            && $verification !== $notificationChannels[0]
+        ) {
+            throw new \InvalidArgumentException(
+                'Signer verification and notification methods must match'
+            );
+        }
+
+        $verification ??= $notificationChannels[0] ?? AssignmentResource::VERIFICATION_EMAIL;
+        $notificationChannels ??= [
+            $verification === AssignmentResource::VERIFICATION_WHATSAPP
+                ? AssignmentResource::NOTIFICATION_WHATSAPP
+                : AssignmentResource::NOTIFICATION_EMAIL,
+        ];
 
         if (array_key_exists('step', $signer) && (!is_int($signer['step']) || $signer['step'] < 1)) {
             throw new \InvalidArgumentException('Signer step must be a positive integer');
@@ -503,6 +542,8 @@ class AssinafyClient
                 || in_array(AssignmentResource::NOTIFICATION_EMAIL, $notificationChannels, true),
             'phone' => $verification === AssignmentResource::VERIFICATION_WHATSAPP
                 || in_array(AssignmentResource::NOTIFICATION_WHATSAPP, $notificationChannels, true),
+            'digital_certificate' => $verification
+                === AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE,
         ];
     }
 

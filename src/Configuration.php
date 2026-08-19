@@ -6,7 +6,7 @@ namespace Assinafy\SDK;
 
 class Configuration
 {
-    public const SDK_VERSION = '2.0.0';
+    public const SDK_VERSION = '2.1.0';
     public const DEFAULT_BASE_URL = 'https://api.assinafy.com.br/v1';
     public const SANDBOX_BASE_URL = 'https://sandbox.assinafy.com.br/v1';
 
@@ -54,15 +54,42 @@ class Configuration
      */
     public static function fromArray(#[\SensitiveParameter] array $config): self
     {
+        $apiKey = $config['api_key'] ?? $config['apiKey'] ?? '';
+        $accountId = $config['account_id'] ?? $config['accountId'] ?? '';
+        $baseUrl = $config['base_url'] ?? $config['baseUrl'] ?? self::DEFAULT_BASE_URL;
+        $timeout = $config['timeout'] ?? 30;
+        $connectTimeout = $config['connect_timeout'] ?? $config['connectTimeout'] ?? 10;
+        $accessToken = $config['access_token'] ?? $config['accessToken'] ?? null;
+
+        foreach (
+            [
+                'API key' => $apiKey,
+                'Account ID' => $accountId,
+                'Base URL' => $baseUrl,
+                'Access token' => $accessToken,
+            ] as $name => $value
+        ) {
+            if ($value !== null && !is_string($value)) {
+                throw new \InvalidArgumentException("{$name} must be a string");
+            }
+        }
+
+        foreach (['Timeout' => $timeout, 'Connect timeout' => $connectTimeout] as $name => $value) {
+            if (
+                (!is_int($value) && !is_string($value))
+                || filter_var($value, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) === false
+            ) {
+                throw new \InvalidArgumentException("{$name} must be a positive integer");
+            }
+        }
+
         return new self(
-            (string) ($config['api_key'] ?? $config['apiKey'] ?? ''),
-            (string) ($config['account_id'] ?? $config['accountId'] ?? ''),
-            (string) ($config['base_url'] ?? $config['baseUrl'] ?? self::DEFAULT_BASE_URL),
-            (int) ($config['timeout'] ?? 30),
-            (int) ($config['connect_timeout'] ?? $config['connectTimeout'] ?? 10),
-            isset($config['access_token']) || isset($config['accessToken'])
-                ? (string) ($config['access_token'] ?? $config['accessToken'])
-                : null
+            $apiKey,
+            $accountId,
+            $baseUrl,
+            (int) $timeout,
+            (int) $connectTimeout,
+            $accessToken
         );
     }
 

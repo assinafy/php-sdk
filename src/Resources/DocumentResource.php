@@ -17,6 +17,7 @@ class DocumentResource extends AbstractResource
     public const ARTIFACT_ORIGINAL = 'original';
     public const ARTIFACT_CERTIFICATED = 'certificated';
     public const ARTIFACT_CERTIFICATE_PAGE = 'certificate-page';
+    public const ARTIFACT_PADES = 'pades';
     public const ARTIFACT_BUNDLE = 'bundle';
 
     public const SEND_TOKEN_CHANNEL_EMAIL = 'email';
@@ -52,6 +53,13 @@ class DocumentResource extends AbstractResource
         self::STATUS_EXPIRED,
         self::STATUS_REJECTED_BY_SIGNER,
         self::STATUS_REJECTED_BY_USER,
+    ];
+
+    /** Statuses that mean every signer has completed the assignment. */
+    private const FULLY_SIGNED_STATUSES = [
+        self::STATUS_READY,
+        self::STATUS_CERTIFICATING,
+        self::STATUS_CERTIFICATED,
     ];
 
     /** Max upload size accepted by the API (25 MB). */
@@ -516,14 +524,12 @@ class DocumentResource extends AbstractResource
         throw new \RuntimeException("Timed out after {$maxWaitSeconds}s waiting for document to become ready");
     }
 
-    /**
-     * `true` if the document is fully signed and certificated.
-     */
+    /** `true` once every signer has completed, including while certification is in progress. */
     public function isFullySigned(string $documentId): bool
     {
         return in_array(
             $this->get($documentId)['status'] ?? '',
-            [self::STATUS_READY, self::STATUS_CERTIFICATING, self::STATUS_CERTIFICATED],
+            self::FULLY_SIGNED_STATUSES,
             true
         );
     }
@@ -538,7 +544,7 @@ class DocumentResource extends AbstractResource
         $document = $this->get($documentId);
         $assignment = $document['assignment'] ?? null;
 
-        if (($document['status'] ?? null) === self::STATUS_CERTIFICATED) {
+        if (in_array($document['status'] ?? null, self::FULLY_SIGNED_STATUSES, true)) {
             $signers = is_array($assignment['signers'] ?? null) ? $assignment['signers'] : [];
             $total = count($signers);
 
@@ -625,6 +631,7 @@ class DocumentResource extends AbstractResource
             self::ARTIFACT_ORIGINAL,
             self::ARTIFACT_CERTIFICATED,
             self::ARTIFACT_CERTIFICATE_PAGE,
+            self::ARTIFACT_PADES,
             self::ARTIFACT_BUNDLE,
         ];
 
@@ -648,15 +655,15 @@ class DocumentResource extends AbstractResource
             }
 
             $roleId = $signer['role_id'] ?? null;
-            if (!is_string($roleId) || $roleId === '') {
+            if (!is_string($roleId) || trim($roleId) === '') {
                 throw new ValidationException('Each template signer requires a role_id');
             }
 
             $signerId = $signer['id'] ?? null;
-            if ($requireSignerId && (!is_string($signerId) || $signerId === '')) {
+            if ($requireSignerId && (!is_string($signerId) || trim($signerId) === '')) {
                 throw new ValidationException('Each template signer requires an id');
             }
-            if ($signerId !== null && (!is_string($signerId) || $signerId === '')) {
+            if ($signerId !== null && (!is_string($signerId) || trim($signerId) === '')) {
                 throw new ValidationException('Template signer id must be a non-empty string');
             }
 

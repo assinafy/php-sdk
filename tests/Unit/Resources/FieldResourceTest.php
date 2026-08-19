@@ -39,13 +39,13 @@ final class FieldResourceTest extends TestCase
     public function testCreateRejectsEmptyType(): void
     {
         $this->expectException(ValidationException::class);
-        $this->fields->create('', 'Name');
+        $this->fields->create('   ', 'Name');
     }
 
     public function testCreateRejectsEmptyName(): void
     {
         $this->expectException(ValidationException::class);
-        $this->fields->create('text', '');
+        $this->fields->create('text', '   ');
     }
 
     public function testListSendsBooleanFlagsOnlyWhenTrue(): void

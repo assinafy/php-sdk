@@ -2,11 +2,12 @@
 
 Framework-independent PHP client for the [Assinafy v1 API](https://api.assinafy.com.br/v1/docs).
 
-The SDK exposes every operation in the current OpenAPI document (89/89). The two browser-facing
-OAuth operations are represented as URL builders; every JSON, multipart, binary, and signer
-operation has a typed resource method. Five additional template-management routes are retained
-because they are supported by the sandbox and covered by live regression tests even though they
-are not currently in OpenAPI.
+The SDK exposes every operation on all 67 paths in the current OpenAPI document (89/89). Every
+published JSON, multipart, binary, and signer operation has a typed resource method. Five
+template-management operations outside OpenAPI are retained because sandbox regression tests
+prove they work. Two legacy OAuth URL builders also target routes outside OpenAPI, but the
+upstream redirects are currently misconfigured and are not advertised as an operational login
+flow.
 
 The complete method-by-method contract—including HTTP method, path, authentication, request
 payload, response payload, errors, and documented/runtime differences—is in
@@ -25,16 +26,19 @@ SDK's own `HttpClientInterface`.
 
 ## Installation
 
-Version 2.0.0 is released as repository tag `v2.0.0`, but Packagist does not yet expose
+Version 2.1.0 is released as repository tag `v2.1.0`, but Packagist does not yet expose
 `assinafy/php-sdk`. After the package is published to Packagist:
 
 ```bash
-composer require assinafy/php-sdk:^2.0
+composer require assinafy/php-sdk:^2.1
 ```
 
-For installation of the `v2.0.0` tag before Packagist publication, use a Composer VCS/path repository as
+For installation of the `v2.1.0` tag before Packagist publication, use a Composer VCS/path repository as
 described in [docs/INSTALLATION.md](docs/INSTALLATION.md). Never commit API keys to Composer
 configuration, application source, fixtures, or CI files.
+
+This README describes the `v2.1.0` release and current repository `main`. Use the documentation
+shipped with a tag when installing that tag.
 
 ## Quick start
 
@@ -77,6 +81,11 @@ settings, waits for document processing, and creates the assignment. If a later 
 fails, earlier remote objects are not automatically rolled back; catch the exception and clean up
 the returned/known IDs according to your application's workflow.
 
+An exact email match is reused as stored; the helper does not update that signer's supplied name
+or phone. If the assignment needs WhatsApp, update and verify the stored signer before invoking
+the helper. DigitalCertificate entries cannot use email reuse: supply an existing signer ID after
+setting its `government_id` with `signers()->update()`.
+
 ## Configuration and authentication
 
 ```php
@@ -99,8 +108,8 @@ Plain HTTP is accepted only for loopback development hosts (`localhost`, `*.loca
 `127.0.0.1`, or `::1`). Base URLs cannot embed credentials, a query, or a fragment; timeouts
 must be positive.
 
-For login, public document verification, OAuth URL construction, or signer-access-code flows,
-create a client without workspace credentials:
+For login, public document verification, or signer-access-code flows, create a client without
+workspace credentials:
 
 ```php
 $bootstrap = AssinafyClient::forAuth(Configuration::SANDBOX_BASE_URL);
@@ -142,6 +151,36 @@ required values; pass `null` to use configured API-key or global-Bearer authenti
 pass the login token explicitly. API-key, Bearer-token, and signer-access-code schemes remain
 separate.
 
+The current production OpenAPI publishes methods to read all nine owner-facing email preferences
+or merge a partial update. When deployed, every read and update returns the complete map; omitted
+update keys keep their current values:
+
+```php
+$preferences = $client->users()->notificationPreferences();
+// [
+//   'DocumentCompleted' => true,
+//   'SignerDeclined' => true,
+//   'DocumentCancelled' => true,
+//   'DocumentAboutToExpire' => true,
+//   'DocumentExpired' => true,
+//   'DocumentExpirationReset' => true,
+//   'DocumentProcessingFailed' => true,
+//   'TemplateProcessingFailed' => true,
+//   'SignerWhatsappFailed' => true,
+// ]
+
+$preferences = $client->users()->updateNotificationPreferences([
+    'DocumentAboutToExpire' => false,
+]);
+```
+
+Neither notification-preference route was deployed in the sandbox on 2026-08-19; its GET returned
+an application-level `404` (`Página não encontrada`). Treat the example above as contract usage
+for an environment where Assinafy has deployed the routes, not as a runnable sandbox call.
+
+Account/security emails such as password resets and invitations are not configurable through
+these methods.
+
 ## Resources
 
 Resource accessors are lazily created and reused:
@@ -149,7 +188,7 @@ Resource accessors are lazily created and reused:
 | Accessor | Scope |
 | --- | --- |
 | `accounts()` | Workspace CRUD, theme/logo, and published document statistics (currently unavailable in sandbox) |
-| `users()` | Authenticated user and published cross-account statistics (currently unavailable in sandbox) |
+| `users()` | Authenticated user plus published notification preferences and cross-account statistics (the latter routes are currently unavailable in sandbox) |
 | `documents()` | Upload, search/list, metadata, artifacts, tags, templates, public endpoints |
 | `signers()` | Workspace signer CRUD/search |
 | `assignments()` | Signature requests, estimates, resend, expiration, notification history |
@@ -157,7 +196,7 @@ Resource accessors are lazily created and reused:
 | `tags()` | Workspace tags |
 | `fields()` | Field definitions, catalog, single/bulk validation |
 | `webhooks()` | Subscription, event types, dispatch history, retry |
-| `auth()` | Login, social auth, API-key and password lifecycle, browser OAuth URLs |
+| `auth()` | Login, social auth, API-key/password lifecycle, and legacy non-operational OAuth URL builders |
 | `signerSession()` | Terms, OTP verification, identity confirmation, signature/sign/decline |
 | `signerDocuments()` | Signer current/list/search/bulk actions/artifact download |
 | `webhookEvents()` | Defensive webhook-envelope parsing helpers |
@@ -168,6 +207,23 @@ See [docs/API_REFERENCE.md](docs/API_REFERENCE.md) for all public methods and ex
 Signer phone inputs require an explicit `+` and country code. The public static
 `SignerResource::normalizePhoneNumber()` removes common visual separators, validates 8–15
 digits, and never guesses a country for a local number.
+
+Ordinary assignment create/estimate requests allow at most one notification method. For Email or
+WhatsApp verification, a non-empty notification must match; when only one side is supplied, the
+API infers the other, and omitting both defaults to Email. DigitalCertificate is exempt from the
+channel-equality rule. The SDK preserves an explicit `notification_methods: []`; an ordinary
+assignment estimate with that body was live-verified `200`.
+
+`DigitalCertificate` is accepted by assignment and template create/estimate methods. It costs two
+credits per signer in addition to notification cost, requires the account feature and a signer
+with `government_id`, and the signer must be alone in its signing step. Set the identifier with
+`signers()->update()` before assignment creation. Formatted CPF/CNPJ input is accepted and
+normalized to digits by the server; signer responses do not expose `government_id`, so do not
+expect the update response to echo it. The ordinary `signerSession()->sign()` route
+cannot complete an ICP-Brasil certificate signature, and the published contract defines no
+certificate start/complete operations. The sandbox returned `400` (`Invalid method`) for a
+digital-certificate assignment on 2026-08-19, so this flow is contract-supported but not claimed
+as operational in that environment.
 
 ## Responses and pagination
 
@@ -189,7 +245,10 @@ Assinafy provides pagination through `X-Pagination-*` response headers, not a `m
 The SDK exposes `current_page`, `page_count`, `per_page`, and `total_count`. Pages begin at 1 and
 `perPage` is limited to 1–100.
 
-Binary download methods return raw bytes. Empty/204 responses return an empty array. The default
+Binary download methods return raw bytes. Artifact names are `original`, `certificated`,
+`certificate-page`, `pades`, and `bundle`; `pades` exists only for documents with
+digital-certificate signers, and `bundle` is a ZIP that includes it when present. Empty/204
+responses return an empty array. The default
 transport rejects every non-empty, non-binary response that is not a JSON object or array with a
 `NetworkException`; this prevents HTML proxy pages and unexpected JSON scalars from looking like
 successful API responses. A standalone `Response` value remains a tolerant parser and exposes
@@ -265,18 +324,24 @@ cross-origin redirect cannot receive the custom API-key header.
 
 ## Confirmed specification differences
 
-The SDK follows sandbox behavior where it differs from the current OpenAPI document:
+The SDK documents sandbox behavior where it differs from the current OpenAPI document:
 
 | Area | Published contract | Confirmed sandbox behavior / SDK choice |
 | --- | --- | --- |
 | Document tags | List/replace/append/detach are current operations; the body description calls values tag IDs | Sandbox and SDK use tag names and auto-create missing names; these routes remain distinct from undocumented template management |
 | Authenticated-user payload | `GET /users/self` declares `data: AuthUser` | Sandbox returns `data: {user: AuthUser, accounts: AuthAccount[]}`; the SDK normalizes `data.user` to the documented `AuthUser` return |
 | Statistics deployment | `GET /accounts/{accountId}/stats` and `GET /users/self/stats` are published operations | Both returned an application-level `404` route-not-deployed response in the sandbox on 2026-08-05; SDK methods remain for 89/89 contract coverage, but sandbox availability must not be assumed |
+| Notification-preference deployment | GET and PUT `/users/self/notification-preferences` are published operations | Neither route was deployed in sandbox on 2026-08-19; GET returned application-level `404` (`Página não encontrada`), so SDK methods are contract-complete but no sandbox round trip is claimed |
 | Public send-token | Body is shown as `{email}` | Sandbox requires `{recipient, channel}`, and `recipient` must belong to a signer already assigned to the document; the SDK preserves the runtime body shape |
 | Assignment list | Documents only pagination | Sandbox also requires camel-case `accountId`; the SDK supplies the configured account ID |
+| Ordinary assignment notification rules | Schema prose permits any Email/WhatsApp combination | Runtime allows at most one method, couples/infer Email or WhatsApp, yet accepts explicit `[]`; SDK validates the one-method/coupling rules and preserves `[]` |
+| Template notification rules | Template create prose says one method and inference; estimate is looser | Sandbox template create and estimate accepted duplicate `['Email', 'Email']`; the SDK does not apply ordinary-assignment constraints to these template payloads |
 | Pagination | Response descriptions are inconsistent | Sandbox uses `X-Pagination-*`; the SDK normalizes those headers |
-| Template management | Only template list is currently documented | Create/get/update/delete/page-download remain live and tested, so no working functionality was removed |
-| OAuth start/callback | Browser-facing 302/HTML operations | Exposed as `socialLoginUrl()` and `socialLoginCallbackUrl()`, not parsed as JSON |
+| Template management | List, document creation, and document-cost estimation are published | Create/get/update/delete/page-download remain live and tested outside OpenAPI, so no working functionality was removed |
+| OAuth start/callback | Both GET routes are absent from current OpenAPI | Compatibility URL builders remain, but sandbox and production redirect configuration is currently invalid; do not use them as an operational OAuth flow |
+| Digital-certificate assignment | `DigitalCertificate` is published and costs two credits per signer | SDK request shaping supports it; sandbox assignment creation returned `400` (`Invalid method`), and no end-to-end certificate completion route is published |
+| Certificate signer gate | `GET /sign` prose requires `confirm-data` with `has_accepted_terms: true`, but that field is absent from the `confirm-data` schema | The SDK forwards it; the optional `GET /sign` query is too late to open the digital-certificate gate, and `GET /sign` also documents `400` |
+| `ready` status | The status catalog omits `ready` | Webhook prose and runtime use `ready`; SDK helpers retain `STATUS_READY` and callers should trust the actual returned status |
 
 These differences and their regression status are also marked in the API reference.
 

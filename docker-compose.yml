@@ -9,21 +9,6 @@ services:
       - ./:/var/www
     networks:
       - assinafy-network
-    depends_on:
-      - mysql
-
-  mysql:
-    image: mysql:8.0
-    container_name: assinafy-sdk-mysql
-    environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: assinafy_test
-    ports:
-      - "127.0.0.1:3306:3306"
-    volumes:
-      - mysql-data:/var/lib/mysql
-    networks:
-      - assinafy-network
 
   nginx:
     image: nginx:1.30.4-alpine
@@ -41,6 +26,3 @@ services:
 networks:
   assinafy-network:
     driver: bridge
-
-volumes:
-  mysql-data:

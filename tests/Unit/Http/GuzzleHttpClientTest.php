@@ -74,6 +74,59 @@ final class GuzzleHttpClientTest extends TestCase
         $this->assertFalse($request->hasHeader('X-Api-Key'));
     }
 
+    public function testPublicAndSignerRequestsDoNotInheritWorkspaceCredentials(): void
+    {
+        $client = $this->client([
+            new GuzzleResponse(200, [], '{"status":200,"data":{}}'),
+            new GuzzleResponse(200, [], '{"status":200,"data":{}}'),
+            new GuzzleResponse(200, [], '{"status":200,"data":{}}'),
+        ]);
+
+        $client->get('public/documents/d1');
+        $this->assertFalse($this->lastRequest()->hasHeader('X-Api-Key'));
+
+        $client->get('signers/self', ['signer-access-code' => 'signer-code']);
+        $this->assertFalse($this->lastRequest()->hasHeader('X-Api-Key'));
+
+        $client->post('login', ['email' => 'a@example.com', 'password' => 'secret']);
+        $this->assertFalse($this->lastRequest()->hasHeader('X-Api-Key'));
+    }
+
+    public function testAccountFieldValidationRetainsWorkspaceCredentialWithSignerContext(): void
+    {
+        $client = $this->client([
+            new GuzzleResponse(200, [], '{"status":200,"data":{"success":true}}'),
+        ]);
+
+        $client->post(
+            'accounts/acc/fields/f1/validate',
+            ['value' => 'x'],
+            [],
+            ['signer-access-code' => 'signer-code']
+        );
+
+        $this->assertSame('key', $this->lastRequest()->getHeaderLine('X-Api-Key'));
+    }
+
+    public function testOwnerEstimateAndSignerSignWithSimilarPathsUseCorrectCredentials(): void
+    {
+        $client = $this->client([
+            new GuzzleResponse(200, [], '{"status":200,"data":{}}'),
+            new GuzzleResponse(200, [], '{"status":200,"data":{}}'),
+        ]);
+
+        $client->post('documents/d1/assignments/estimate-cost', ['signers' => []]);
+        $this->assertSame('key', $this->lastRequest()->getHeaderLine('X-Api-Key'));
+
+        $client->post(
+            'documents/d1/assignments/a1',
+            [],
+            [],
+            ['signer-access-code' => 'signer-code']
+        );
+        $this->assertFalse($this->lastRequest()->hasHeader('X-Api-Key'));
+    }
+
     public function testPatchSendsJsonBodyWithContentType(): void
     {
         $client = $this->client([new GuzzleResponse(200, [], '{"status":200,"data":{"name":"new.pdf"}}')]);
@@ -246,6 +299,18 @@ final class GuzzleHttpClientTest extends TestCase
         ]);
 
         $this->expectException(NetworkException::class);
+        $client->get('documents/d1');
+    }
+
+    public function testSuccessfulMalformedDataEnvelopeBecomesNetworkException(): void
+    {
+        $client = $this->client([
+            new GuzzleResponse(200, ['Content-Type' => 'application/json'], '{"status":200,"data":"wrong"}'),
+        ]);
+
+        $this->expectException(NetworkException::class);
+        $this->expectExceptionMessage('invalid data envelope');
+
         $client->get('documents/d1');
     }
 

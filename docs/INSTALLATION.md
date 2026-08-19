@@ -3,7 +3,7 @@
 ## Requirements
 
 - PHP 8.2, 8.3, 8.4, or 8.5
-- Composer 2.10 or newer
+- Composer 2
 - The PHP `json` and `mbstring` extensions
 - TLS trust roots (CA certificates) suitable for HTTPS API requests
 
@@ -15,20 +15,23 @@ install a separate HTTP client.
 
 ## Install with Composer
 
-Version 2.0.0 is available as repository tag `v2.0.0`, but Packagist does not currently expose
+Version 2.1.0 is available as repository tag `v2.1.0`, but Packagist does not currently expose
 `assinafy/php-sdk`. After the package is published there, install it with:
 
 ```bash
-composer require assinafy/php-sdk:^2.0
+composer require assinafy/php-sdk:^2.1
 ```
 
-Until that publication is complete, Composer can install the stable `v2.0.0` tag directly from
+Until that publication is complete, Composer can install the stable `v2.1.0` tag directly from
 the public GitHub mirror:
 
 ```bash
 composer config repositories.assinafy vcs https://github.com/assinafy/php-sdk.git
-composer require assinafy/php-sdk:2.0.0
+composer require assinafy/php-sdk:2.1.0
 ```
+
+The documentation on the repository's current `main` describes the `v2.1.0` release. Use the
+documentation shipped with a tag when installing that tag.
 
 Optional PSR-3 logging integrations, such as Monolog, can be installed separately:
 
@@ -148,7 +151,7 @@ echo "Assinafy SDK configured for {$client->getConfig()->getBaseUrl()}\n";
 
 ## Docker development environment
 
-The included Compose environment runs PHP 8.5 FPM, MySQL 8.0, and Nginx:
+The included Compose environment runs PHP 8.5 FPM and Nginx:
 
 ```bash
 docker compose up -d --build
@@ -157,8 +160,7 @@ docker compose exec php vendor/bin/phpunit --testsuite=unit
 docker compose down
 ```
 
-The web service listens on `http://localhost:8080`. MySQL is bound to
-`127.0.0.1:3306` for local development only.
+The web service listens on `http://localhost:8080`. The SDK has no database dependency.
 
 ## Live sandbox tests
 

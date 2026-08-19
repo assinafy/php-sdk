@@ -81,6 +81,71 @@ final class ConfigurationTest extends TestCase
         $this->assertSame('a', $config->getAccountId());
     }
 
+    public function testFromArrayRejectsNonStringValuesWithoutConversionWarnings(): void
+    {
+        $resource = fopen('php://memory', 'r');
+        $this->assertIsResource($resource);
+
+        try {
+            foreach (
+                [
+                    ['api_key' => []],
+                    ['api_key' => true],
+                    ['account_id' => new \stdClass()],
+                    ['account_id' => 42],
+                    ['base_url' => $resource],
+                    ['base_url' => false],
+                    ['access_token' => []],
+                    ['access_token' => 123],
+                ] as $invalid
+            ) {
+                try {
+                    Configuration::fromArray($invalid + ['api_key' => 'k', 'account_id' => 'a']);
+                    $this->fail('Expected a non-string configuration value to be rejected');
+                } catch (InvalidArgumentException $e) {
+                    $this->assertStringContainsString('must be a string', $e->getMessage());
+                }
+            }
+        } finally {
+            fclose($resource);
+        }
+    }
+
+    public function testFromArrayRejectsInvalidTimeoutValues(): void
+    {
+        foreach (
+            [
+                ['timeout' => []],
+                ['timeout' => true],
+                ['timeout' => 1.5],
+                ['timeout' => 'soon'],
+                ['timeout' => '0'],
+                ['connect_timeout' => new \stdClass()],
+                ['connectTimeout' => -1],
+            ] as $invalid
+        ) {
+            try {
+                Configuration::fromArray($invalid + ['api_key' => 'k', 'account_id' => 'a']);
+                $this->fail('Expected an invalid timeout to be rejected');
+            } catch (InvalidArgumentException $e) {
+                $this->assertStringContainsString('must be a positive integer', $e->getMessage());
+            }
+        }
+    }
+
+    public function testFromArrayAcceptsPositiveIntegerTimeoutStrings(): void
+    {
+        $config = Configuration::fromArray([
+            'api_key' => 'k',
+            'account_id' => 'a',
+            'timeout' => '45',
+            'connectTimeout' => '15',
+        ]);
+
+        $this->assertSame(45, $config->getTimeout());
+        $this->assertSame(15, $config->getConnectTimeout());
+    }
+
     public function testRejectsEmptyApiKey(): void
     {
         $this->expectException(InvalidArgumentException::class);

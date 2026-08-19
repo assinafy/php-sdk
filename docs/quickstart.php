@@ -9,8 +9,6 @@ use Assinafy\SDK\Configuration;
 use Assinafy\SDK\Exceptions\ApiException;
 use Assinafy\SDK\Exceptions\NetworkException;
 use Assinafy\SDK\Exceptions\ValidationException;
-use Assinafy\SDK\Resources\AccountResource;
-use Assinafy\SDK\Resources\UserResource;
 
 /**
  * Read a required secret without embedding a fallback value in this example.
@@ -66,14 +64,6 @@ try {
     $matches = $client->documents()->search($searchTerm, page: 1, perPage: 5);
     echo sprintf("Document search matches on first page: %d.\n", count($matches['data'] ?? []));
 
-    $accountStats = $client->accounts()->stats(AccountResource::GRANULARITY_MONTHLY);
-    $userStats = $client->users()->stats(UserResource::GRANULARITY_MONTHLY);
-    echo sprintf(
-        "Monthly statistic rows: account=%d, user=%d.\n",
-        count($accountStats),
-        count($userStats),
-    );
-
     $templateId = getenv('ASSINAFY_TEST_TEMPLATE_ID');
     if (is_string($templateId) && $templateId !== '') {
         $client->templates()->waitUntilReady(
@@ -104,10 +94,6 @@ try {
     } else {
         echo "Signer query-auth check skipped; signer test variables are not set.\n";
     }
-
-    $publicClient = AssinafyClient::forAuth(Configuration::SANDBOX_BASE_URL);
-    echo "OAuth start URL: " . $publicClient->auth()->socialLoginUrl() . "\n";
-    echo "OAuth callback URL: " . $publicClient->auth()->socialLoginCallbackUrl() . "\n";
 
     echo "\nRead-only sandbox quick start completed.\n";
 } catch (ValidationException $exception) {

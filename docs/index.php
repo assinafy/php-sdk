@@ -114,23 +114,26 @@
             <p>
                 The SDK is tested on PHP 8.2 through 8.5, uses strict types and PSR-4 autoloading,
                 accepts PSR-3 loggers, and supports Guzzle 7 and 8 as its runtime transport. It maps all
-                89 operations on the 68 paths in the current OpenAPI document, including browser
-                OAuth URL builders, plus five live-tested template-management routes that are not
-                currently published in OpenAPI.
+                89 operations on the 67 paths in the current OpenAPI document, plus five live-tested
+                template-management operations outside OpenAPI. Two legacy OAuth URL routes are also
+                retained for compatibility, but their upstream redirects are currently misconfigured
+                and are not an operational login flow.
             </p>
         </section>
 
         <section>
             <h2>Install</h2>
             <p>
-                Version 2.0.0 is released as repository tag <code>v2.0.0</code>, but Packagist
+                Version 2.1.0 is released as repository tag <code>v2.1.0</code>, but Packagist
                 does not currently expose <code>assinafy/php-sdk</code>. After the package is
                 published to Packagist:
             </p>
-            <pre><code>composer require assinafy/php-sdk:^2.0</code></pre>
+            <pre><code>composer require assinafy/php-sdk:^2.1</code></pre>
             <p>
                 Until then, follow the <a href="INSTALLATION.md">tagged VCS/path repository
-                installation instructions</a>.
+                installation instructions</a>. This site describes the <code>v2.1.0</code>
+                release and current repository <code>main</code>; use the documentation shipped
+                with a tag when installing that tag.
             </p>
         </section>
 
@@ -167,7 +170,7 @@ $documents = $client-&gt;documents()-&gt;list(page: 1, perPage: 20);</code></pre
                 <li>Documents and templates</li>
                 <li>Signers and assignments</li>
                 <li>Signer sessions and documents</li>
-                <li>Authenticated user profile</li>
+                <li>Authenticated user profile and published notification preferences (not currently deployed in sandbox)</li>
                 <li>Fields and tags</li>
                 <li>Authentication helpers</li>
                 <li>Webhooks and event parsing</li>

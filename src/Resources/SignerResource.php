@@ -92,7 +92,8 @@ class SignerResource extends AbstractResource
      * Update a signer.
      * `PUT /accounts/{account_id}/signers/{signer_id}`
      *
-     * @param array<string, mixed> $data subset of { full_name, email, whatsapp_phone_number }
+     * @param array<string, mixed> $data subset of { full_name, email, whatsapp_phone_number,
+     *     government_id }
      * @return array<string, mixed> the updated signer
      */
     public function update(string $signerId, #[\SensitiveParameter] array $data): array
@@ -119,6 +120,13 @@ class SignerResource extends AbstractResource
                 throw new ValidationException('email must be a string');
             }
             $this->validateEmail($data['email']);
+        }
+
+        if (
+            array_key_exists('government_id', $data)
+            && (!is_string($data['government_id']) || trim($data['government_id']) === '')
+        ) {
+            throw new ValidationException('government_id must be a non-empty string');
         }
 
         $signerId = $this->pathSegment($signerId, 'signer ID');

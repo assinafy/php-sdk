@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Assinafy\SDK\Tests\Unit\Resources;
 
 use Assinafy\SDK\Configuration;
+use Assinafy\SDK\Exceptions\NetworkException;
 use Assinafy\SDK\Exceptions\ValidationException;
 use Assinafy\SDK\Resources\DocumentResource;
 use Assinafy\SDK\Tests\Unit\Support\FakeHttpClient;
@@ -64,6 +65,12 @@ final class DocumentResourceTest extends TestCase
         $this->documents->upload('/no/such/file.pdf');
     }
 
+    public function testWhitespaceOnlyPathIdentifierIsRejected(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->documents->get('   ');
+    }
+
     public function testListUsesHyphenatedPerPage(): void
     {
         $this->http->queueJson(200, []);
@@ -97,6 +104,15 @@ final class DocumentResourceTest extends TestCase
 
         $this->assertSame('PDFDATA', $body);
         $this->assertSame('documents/doc1/download/original', $this->http->lastCall()['uri']);
+    }
+
+    public function testDownloadAcceptsPadesArtifact(): void
+    {
+        $this->http->queueRaw(200, 'PDFDATA');
+
+        $this->documents->download('doc1', DocumentResource::ARTIFACT_PADES);
+
+        $this->assertSame('documents/doc1/download/pades', $this->http->lastCall()['uri']);
     }
 
     public function testDownloadRejectsUnknownArtifact(): void
@@ -208,6 +224,27 @@ final class DocumentResourceTest extends TestCase
         $this->assertSame(2, $progress['total']);
         $this->assertSame(1, $progress['pending']);
         $this->assertSame(50.0, $progress['percentage']);
+
+        $this->http->queueJson(200, [
+            'id' => 'doc1',
+            'status' => DocumentResource::STATUS_READY,
+            'assignment' => [
+                'signers' => [['id' => 's1'], ['id' => 's2']],
+                'items' => [],
+            ],
+        ]);
+        $progress = $this->documents->getSigningProgress('doc1');
+        $this->assertSame(2, $progress['signed']);
+        $this->assertSame(0, $progress['pending']);
+        $this->assertSame(100.0, $progress['percentage']);
+    }
+
+    public function testMalformedSuccessfulDataEnvelopeIsRejected(): void
+    {
+        $this->http->queueRaw(200, '{"status":200,"data":"wrong"}');
+
+        $this->expectException(NetworkException::class);
+        $this->documents->get('doc1');
     }
 
     public function testWaitUntilReadyReturnsWhenReady(): void
@@ -257,15 +294,30 @@ final class DocumentResourceTest extends TestCase
 
     public function testTemplateSignerListsAreReindexedForJson(): void
     {
-        $signers = [4 => ['role_id' => 'r1', 'id' => 's1']];
+        $signers = [4 => [
+            'role_id' => 'r1',
+            'id' => 's1',
+            'notification_methods' => [3 => 'Email', 8 => 'Email'],
+        ]];
+        $expected = [[
+            'role_id' => 'r1',
+            'id' => 's1',
+            'notification_methods' => ['Email', 'Email'],
+        ]];
 
         $this->http->queueJson(200, ['id' => 'doc1']);
         $this->documents->createFromTemplate('template1', $signers);
-        $this->assertSame([['role_id' => 'r1', 'id' => 's1']], $this->http->lastCall()['body']['signers']);
+        $this->assertSame($expected, $this->http->lastCall()['body']['signers']);
 
         $this->http->queueJson(200, ['total' => 1]);
         $this->documents->estimateCostFromTemplate('template1', $signers);
-        $this->assertSame([['role_id' => 'r1', 'id' => 's1']], $this->http->lastCall()['body']['signers']);
+        $this->assertSame($expected, $this->http->lastCall()['body']['signers']);
+    }
+
+    public function testTemplateSignerRejectsWhitespaceRoleId(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->documents->estimateCostFromTemplate('template1', [['role_id' => '   ']]);
     }
 
     public function testAppendTagsRejectsEmpty(): void

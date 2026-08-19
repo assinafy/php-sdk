@@ -189,7 +189,11 @@ final class LiveApiTest extends TestCase
         $fetched = $signers->get($created['id']);
         $this->assertSame($created['id'], $fetched['id']);
 
-        $updated = $signers->update($created['id'], ['full_name' => 'SDK Updated']);
+        $updated = $signers->update($created['id'], [
+            'full_name' => 'SDK Updated',
+            // The sandbox accepts punctuation and stores CPF/CNPJ digits only.
+            'government_id' => '390.533.447-05',
+        ]);
         $this->assertSame('SDK Updated', $updated['full_name']);
 
         $found = $signers->findByEmail((string) $created['email']);
@@ -829,6 +833,37 @@ final class LiveApiTest extends TestCase
         $user = $this->client->users()->get();
         $this->assertArrayHasKey('id', $user);
         $this->assertArrayHasKey('email', $user);
+    }
+
+    public function testUserNotificationPreferencesRoundTrip(): void
+    {
+        $users = $this->client->users();
+        try {
+            $preferences = $users->notificationPreferences();
+        } catch (ApiException $e) {
+            if ($e->getStatusCode() === 404) {
+                $this->markTestSkipped(
+                    'Documented notification-preferences route is not deployed to sandbox'
+                );
+            }
+            throw $e;
+        }
+
+        $this->assertCount(9, $preferences);
+        foreach ($preferences as $enabled) {
+            $this->assertIsBool($enabled);
+        }
+
+        $code = 'SignerWhatsappFailed';
+        $original = $preferences[$code];
+
+        try {
+            $updated = $users->updateNotificationPreferences([$code => !$original]);
+            $this->assertSame(!$original, $updated[$code]);
+        } finally {
+            $restored = $users->updateNotificationPreferences([$code => $original]);
+            $this->assertSame($original, $restored[$code]);
+        }
     }
 
     public function testUserStatisticsWhenDeployedToSandbox(): void

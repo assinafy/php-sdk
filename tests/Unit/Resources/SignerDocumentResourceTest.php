@@ -111,6 +111,12 @@ final class SignerDocumentResourceTest extends TestCase
         $this->docs->signMultiple('CODE', []);
     }
 
+    public function testSignMultipleRejectsWhitespaceDocumentId(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->docs->signMultiple('CODE', ['   ']);
+    }
+
     public function testDeclineMultipleSendsReason(): void
     {
         $this->http->queueJson(200, []);

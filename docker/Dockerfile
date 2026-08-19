@@ -7,7 +7,7 @@ RUN set -eux; \
         libonig-dev \
         unzip \
         libzip-dev; \
-    docker-php-ext-install -j"$(nproc)" mbstring pdo_mysql zip; \
+    docker-php-ext-install -j"$(nproc)" mbstring zip; \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=composer:2.10.2 /usr/bin/composer /usr/bin/composer
