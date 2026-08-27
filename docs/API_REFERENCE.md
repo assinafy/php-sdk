@@ -5,9 +5,9 @@ This reference maps every public resource method in this SDK to the Assinafy API
 - <https://api.assinafy.com.br/v1/docs>
 - <https://api.assinafy.com.br/v1/docs/openapi.json>
 
-It describes the `v2.1.2` release and current repository `main`.
-Packagist does not currently expose `assinafy/php-sdk`. See
-[INSTALLATION.md](INSTALLATION.md) for tagged VCS/path installation.
+It describes the `v2.1.2` release and current repository `main`, installable with
+`composer require assinafy/php-sdk`. See [INSTALLATION.md](INSTALLATION.md) for version
+constraints and development setup.
 
 The contract uses OpenAPI 3.0.0, API version 1.0.0, and contains 89 operations on 67 paths. All
 89 operations have SDK mappings. Production and sandbox use the same versioned paths:

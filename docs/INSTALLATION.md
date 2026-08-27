@@ -15,18 +15,23 @@ install a separate HTTP client.
 
 ## Install with Composer
 
-Version 2.1.2 is available as repository tag `v2.1.2`, but Packagist does not currently expose
-`assinafy/php-sdk`. After the package is published there, install it with:
+The package is published on Packagist as
+[`assinafy/php-sdk`](https://packagist.org/packages/assinafy/php-sdk). No repository
+configuration is required:
+
+```bash
+composer require assinafy/php-sdk
+```
+
+That resolves to the current 2.1 line. Pin the constraint explicitly if you prefer:
 
 ```bash
 composer require assinafy/php-sdk:^2.1
 ```
 
-Until that publication is complete, Composer can install the stable `v2.1.2` tag directly from
-the public GitHub mirror:
+To install one exact release:
 
 ```bash
-composer config repositories.assinafy vcs https://github.com/assinafy/php-sdk.git
 composer require assinafy/php-sdk:2.1.2
 ```
 

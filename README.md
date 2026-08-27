@@ -41,16 +41,15 @@ The default transport uses Guzzle. Applications may inject a PSR-3 logger or the
 
 ## Installation
 
-Install the 2.1 release from Composer when the package is available in your configured repository:
-
 ```bash
-composer require assinafy/php-sdk:^2.1
+composer require assinafy/php-sdk
 ```
 
-To install directly from the repository tag, configure a Composer VCS or path repository as
-described in [docs/INSTALLATION.md](docs/INSTALLATION.md). Keep API keys and account identifiers
-in a secret manager or environment variables, never in `composer.json`, source code, fixtures, or
-CI configuration.
+The package is published on Packagist as
+[`assinafy/php-sdk`](https://packagist.org/packages/assinafy/php-sdk); no repository
+configuration is needed. See [docs/INSTALLATION.md](docs/INSTALLATION.md) for version constraints
+and development setup. Keep API keys and account identifiers in a secret manager or environment
+variables, never in `composer.json`, source code, fixtures, or CI configuration.
 
 ## Document workflow
 

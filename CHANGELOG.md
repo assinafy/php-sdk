@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Installation is now a plain `composer require assinafy/php-sdk`.** The package is published
+  on Packagist, so the VCS/path-repository workaround the documentation carried is no longer
+  needed. Projects that added a `repositories` entry to install an earlier release should remove
+  it so Composer resolves from Packagist. Documentation only; the package itself is unchanged
+  from 2.1.2.
+
 ## [2.1.2] - 2026-08-27
 
 Documentation and internal-consistency release. No public API, request shape, or response

@@ -5,10 +5,10 @@
 Most code needs no changes. The main migration points are the PHP version floor, webhook
 handling, the `Configuration` constructor, and custom transport signatures.
 
-Version 2.0.0 is available as repository tag `v2.0.0`, but Packagist does not currently expose
-`assinafy/php-sdk`. Use the tagged VCS/path-repository instructions in
-[docs/INSTALLATION.md](docs/INSTALLATION.md), and switch to `assinafy/php-sdk:^2.0` after
-Packagist publication.
+The package is on Packagist, so upgrading is `composer require assinafy/php-sdk:^2.1`. Projects
+that installed an earlier release through a VCS or path repository should drop that
+`repositories` entry from `composer.json` first, so Composer resolves from Packagist instead of
+the pinned mirror.
 
 Version 2.1.2 implements the published Assinafy v1 operation set. It also retains five
 runtime-supported template-management methods outside OpenAPI. Two legacy OAuth URL routes remain
