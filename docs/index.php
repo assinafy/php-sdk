@@ -113,9 +113,9 @@
             <h2>Requirements and scope</h2>
             <p>
                 The SDK is tested on PHP 8.2 through 8.5, uses strict types and PSR-4 autoloading,
-                accepts PSR-3 loggers, and supports Guzzle 7 and 8 as its runtime transport. It maps all
-                89 operations on the 67 paths in the current OpenAPI document, plus five live-tested
-                template-management operations outside OpenAPI. Two legacy OAuth URL routes are also
+                accepts PSR-3 loggers, and supports Guzzle 7 and 8 as its runtime transport. It implements
+                the published Assinafy v1 operations plus five runtime-supported template-management
+                operations outside OpenAPI. Two legacy OAuth URL routes are also
                 retained for compatibility, but their upstream redirects are currently misconfigured
                 and are not an operational login flow.
             </p>
@@ -124,16 +124,15 @@
         <section>
             <h2>Install</h2>
             <p>
-                Version 2.1.0 is released as repository tag <code>v2.1.0</code>, but Packagist
+                Version 2.1.1 is released as repository tag <code>v2.1.1</code>, but Packagist
                 does not currently expose <code>assinafy/php-sdk</code>. After the package is
                 published to Packagist:
             </p>
             <pre><code>composer require assinafy/php-sdk:^2.1</code></pre>
             <p>
                 Until then, follow the <a href="INSTALLATION.md">tagged VCS/path repository
-                installation instructions</a>. This site describes the <code>v2.1.0</code>
-                release and current repository <code>main</code>; use the documentation shipped
-                with a tag when installing that tag.
+                installation instructions</a>. This site describes the <code>v2.1.1</code>
+                release; use the documentation shipped with a tag when installing that tag.
             </p>
         </section>
 

@@ -214,7 +214,7 @@ class DocumentResource extends AbstractResource
     }
 
     /**
-     * Download an artifact for a document (original, certificated, certificate-page, bundle).
+     * Download an artifact for a document (original, certificated, certificate-page, pades, bundle).
      * `GET /documents/{document_id}/download/{artifact_name}`
      *
      * Returns the raw binary body.
@@ -594,11 +594,11 @@ class DocumentResource extends AbstractResource
     }
 
     /**
-     * Assert a file can be uploaded as a document or template: it must exist, be a
-     * PDF, and not exceed the 25 MB API limit. Shared with {@see TemplateResource::create()}
-     * so both upload paths enforce identical constraints.
+     * Assert a file can be uploaded as a document or template: it must be a readable
+     * PDF with a header and end marker, and not exceed the 25 MB API limit. Shared with
+     * {@see TemplateResource::create()} so both upload paths enforce identical constraints.
      *
-     * @throws ValidationException when the file is missing, not a PDF, or too large
+     * @throws ValidationException when the file is missing, unreadable, invalid, or too large
      */
     public static function assertUploadable(#[\SensitiveParameter] string $filePath): void
     {
@@ -610,12 +610,44 @@ class DocumentResource extends AbstractResource
             throw new ValidationException('Only PDF files are supported', ['file_path' => $filePath]);
         }
 
-        $size = filesize($filePath);
-        if ($size !== false && $size > self::MAX_UPLOAD_BYTES) {
-            throw new ValidationException('File size exceeds the 25 MB API limit', [
-                'file_size' => $size,
-                'max_size' => self::MAX_UPLOAD_BYTES,
-            ]);
+        if (!is_readable($filePath)) {
+            throw new ValidationException('File is not readable', ['file_path' => $filePath]);
+        }
+
+        $handle = @fopen($filePath, 'rb');
+        if ($handle === false) {
+            throw new ValidationException('File is not readable', ['file_path' => $filePath]);
+        }
+
+        try {
+            $metadata = fstat($handle);
+            if ($metadata === false || $metadata['size'] <= 0) {
+                throw new ValidationException('File is not a valid PDF', ['file_path' => $filePath]);
+            }
+
+            $size = $metadata['size'];
+            if ($size > self::MAX_UPLOAD_BYTES) {
+                throw new ValidationException('File size exceeds the 25 MB API limit', [
+                    'file_size' => $size,
+                    'max_size' => self::MAX_UPLOAD_BYTES,
+                ]);
+            }
+
+            $header = fread($handle, min(1024, $size));
+            if ($header === false || preg_match('/%PDF-\d\.\d/', $header) !== 1) {
+                throw new ValidationException('File is not a valid PDF', ['file_path' => $filePath]);
+            }
+
+            if (fseek($handle, max(0, $size - 1024)) !== 0) {
+                throw new ValidationException('File is not readable', ['file_path' => $filePath]);
+            }
+
+            $trailer = stream_get_contents($handle);
+            if ($trailer === false || !str_contains($trailer, '%%EOF')) {
+                throw new ValidationException('File is not a valid PDF', ['file_path' => $filePath]);
+            }
+        } finally {
+            fclose($handle);
         }
     }
 

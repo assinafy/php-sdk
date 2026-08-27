@@ -33,7 +33,7 @@ final class ConfigurationTest extends TestCase
 
         $this->assertSame('mykey', $headers['X-Api-Key']);
         $this->assertSame('application/json', $headers['Accept']);
-        $this->assertSame('assinafy-php-sdk/' . Configuration::SDK_VERSION, $headers['User-Agent']);
+        $this->assertSame('Assinafy-PHP-SDK/v' . Configuration::SDK_VERSION, $headers['User-Agent']);
         $this->assertArrayNotHasKey('Content-Type', $headers, 'Default headers must not pin Content-Type');
     }
 
@@ -196,6 +196,19 @@ final class ConfigurationTest extends TestCase
         $this->assertSame('oauth-token', $config->getAccessToken());
         $this->assertSame('Bearer oauth-token', $config->getHeaders()['Authorization']);
         $this->assertArrayNotHasKey('X-Api-Key', $config->getHeaders());
+    }
+
+    public function testDebugDumpDoesNotExposeCredentialsOrAccountId(): void
+    {
+        $config = Configuration::forBearer('debug-bearer-secret', 'debug-account');
+
+        ob_start();
+        var_dump($config);
+        $dump = (string) ob_get_clean();
+
+        $this->assertStringNotContainsString('debug-bearer-secret', $dump);
+        $this->assertStringNotContainsString('debug-account', $dump);
+        $this->assertStringContainsString('bearer', $dump);
     }
 
     public function testRejectsAmbiguousApiKeyAndBearerAuthentication(): void

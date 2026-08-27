@@ -42,7 +42,11 @@ final class GuzzleHttpClientTest extends TestCase
             'handler' => $stack,
         ]);
 
-        return new GuzzleHttpClient(new Configuration('key', 'acc'), $logger, $guzzle);
+        return new GuzzleHttpClient(
+            new Configuration('key', 'acc', 'https://api.example.com/v1'),
+            $logger,
+            $guzzle
+        );
     }
 
     private function lastRequest(): RequestInterface
@@ -54,13 +58,21 @@ final class GuzzleHttpClientTest extends TestCase
     {
         $client = $this->client([new GuzzleResponse(200, [], '{"status":200,"data":[{"id":"d1"}]}')]);
 
-        $response = $client->get('accounts/acc/documents', ['per-page' => 2, 'page' => 1]);
+        $response = $client->get(
+            'accounts/acc/documents',
+            ['per-page' => 2, 'page' => 1],
+            ['user-agent' => 'caller-override']
+        );
 
         $this->assertSame('GET', $this->lastRequest()->getMethod());
         $this->assertSame('/v1/accounts/acc/documents', $this->lastRequest()->getUri()->getPath());
         $this->assertSame('per-page=2&page=1', $this->lastRequest()->getUri()->getQuery());
         $this->assertSame([['id' => 'd1']], $response->getData()['data']);
         $this->assertSame('key', $this->lastRequest()->getHeaderLine('X-Api-Key'));
+        $this->assertSame(
+            'Assinafy-PHP-SDK/v' . Configuration::SDK_VERSION,
+            $this->lastRequest()->getHeaderLine('User-Agent')
+        );
     }
 
     public function testExplicitBearerReplacesConfiguredApiKey(): void
@@ -72,6 +84,10 @@ final class GuzzleHttpClientTest extends TestCase
         $request = $this->lastRequest();
         $this->assertSame('Bearer access-token', $request->getHeaderLine('Authorization'));
         $this->assertFalse($request->hasHeader('X-Api-Key'));
+        $this->assertSame(
+            'Assinafy-PHP-SDK/v' . Configuration::SDK_VERSION,
+            $request->getHeaderLine('User-Agent')
+        );
     }
 
     public function testPublicAndSignerRequestsDoNotInheritWorkspaceCredentials(): void
@@ -84,12 +100,24 @@ final class GuzzleHttpClientTest extends TestCase
 
         $client->get('public/documents/d1');
         $this->assertFalse($this->lastRequest()->hasHeader('X-Api-Key'));
+        $this->assertSame(
+            'Assinafy-PHP-SDK/v' . Configuration::SDK_VERSION,
+            $this->lastRequest()->getHeaderLine('User-Agent')
+        );
 
         $client->get('signers/self', ['signer-access-code' => 'signer-code']);
         $this->assertFalse($this->lastRequest()->hasHeader('X-Api-Key'));
+        $this->assertSame(
+            'Assinafy-PHP-SDK/v' . Configuration::SDK_VERSION,
+            $this->lastRequest()->getHeaderLine('User-Agent')
+        );
 
         $client->post('login', ['email' => 'a@example.com', 'password' => 'secret']);
         $this->assertFalse($this->lastRequest()->hasHeader('X-Api-Key'));
+        $this->assertSame(
+            'Assinafy-PHP-SDK/v' . Configuration::SDK_VERSION,
+            $this->lastRequest()->getHeaderLine('User-Agent')
+        );
     }
 
     public function testAccountFieldValidationRetainsWorkspaceCredentialWithSignerContext(): void
@@ -197,6 +225,75 @@ final class GuzzleHttpClientTest extends TestCase
         $client->get('documents/statuses');
 
         $this->assertSame('/v1/documents/statuses', $this->lastRequest()->getUri()->getPath());
+    }
+
+    public function testRequestUrisCannotEscapeTheConfiguredApiBaseUrl(): void
+    {
+        $client = $this->client([]);
+
+        foreach (
+            [
+                'https://untrusted.example/collect',
+                '//untrusted.example/collect',
+                '/documents/statuses',
+                '../documents/statuses',
+                'accounts/../users',
+                '%2e%2e/documents/statuses',
+            ] as $uri
+        ) {
+            try {
+                $client->get($uri);
+                $this->fail("Expected URI to be rejected: {$uri}");
+            } catch (\InvalidArgumentException $e) {
+                $this->assertStringContainsString('relative', $e->getMessage());
+            }
+        }
+
+        $this->assertSame([], $this->transactions, 'Rejected URIs must never reach Guzzle');
+    }
+
+    public function testInjectedGuzzleClientCannotDefineDefaultAuthenticationHeaders(): void
+    {
+        foreach (['Authorization' => 'Bearer injected-secret', 'X-Api-Key' => 'injected-secret'] as $name => $value) {
+            $guzzle = new Client([
+                'base_uri' => 'https://api.example.com/v1/',
+                'headers' => [$name => $value],
+            ]);
+
+            try {
+                new GuzzleHttpClient(new Configuration('key', 'acc'), null, $guzzle);
+                $this->fail("Expected injected {$name} header to be rejected");
+            } catch (\InvalidArgumentException $e) {
+                $this->assertStringContainsString('default authentication headers', $e->getMessage());
+            }
+        }
+    }
+
+    public function testInjectedGuzzleClientMustUseConfiguredBaseUri(): void
+    {
+        $guzzle = new Client(['base_uri' => 'https://untrusted.example/v1/']);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('base URI must match');
+
+        new GuzzleHttpClient(new Configuration('key', 'acc'), null, $guzzle);
+    }
+
+    public function testInjectedGuzzleClientAcceptsEquivalentBaseUriCasing(): void
+    {
+        $guzzle = new Client([
+            'base_uri' => 'https://api.example.com/v1/',
+            'handler' => new MockHandler([
+                new GuzzleResponse(200, [], '{"status":200,"data":[]}'),
+            ]),
+        ]);
+        $client = new GuzzleHttpClient(
+            new Configuration('key', 'acc', 'HTTPS://API.EXAMPLE.COM/v1'),
+            null,
+            $guzzle
+        );
+
+        $this->assertSame(200, $client->get('documents/statuses')->getStatusCode());
     }
 
     public function testInjectedGuzzleClientCannotFollowRedirectsWithApiKey(): void
@@ -314,6 +411,48 @@ final class GuzzleHttpClientTest extends TestCase
         $client->get('documents/d1');
     }
 
+    public function testSuccessfulHttpResponseWithErrorEnvelopeBecomesApiException(): void
+    {
+        $client = $this->client([
+            new GuzzleResponse(
+                200,
+                ['X-Request-Id' => 'envelope-request'],
+                '{"status":422,"message":"Validation failed","data":[]}'
+            ),
+        ]);
+
+        try {
+            $client->get('documents/d1');
+            $this->fail('Expected an API exception');
+        } catch (ApiException $e) {
+            $this->assertSame(422, $e->getStatusCode());
+            $this->assertSame('Validation failed', $e->getMessage());
+            $this->assertSame('envelope-request', $e->getResponseHeaderLine('X-Request-Id'));
+        }
+    }
+
+    public function testStatusOnlyErrorEnvelopeBecomesApiException(): void
+    {
+        $client = $this->client([new GuzzleResponse(200, [], '{"status":422}')]);
+
+        $this->expectException(ApiException::class);
+        $this->expectExceptionCode(422);
+
+        $client->get('documents/d1');
+    }
+
+    public function testSuccessfulHttpResponseRejectsMalformedEnvelopeStatus(): void
+    {
+        $client = $this->client([
+            new GuzzleResponse(200, [], '{"status":"ok","message":"wrong type","data":[]}'),
+        ]);
+
+        $this->expectException(NetworkException::class);
+        $this->expectExceptionMessage('invalid response envelope status');
+
+        $client->get('documents/d1');
+    }
+
     public function testDocumentedBinaryResponseContentTypeIsAccepted(): void
     {
         $client = $this->client([
@@ -348,9 +487,46 @@ final class GuzzleHttpClientTest extends TestCase
             $this->assertStringStartsWith('multipart/form-data', $contentType);
             $this->assertStringContainsString('boundary=', $contentType, 'Boundary must not be stripped');
             $this->assertStringContainsString('name="file"', (string) $this->lastRequest()->getBody());
+            $this->assertSame(
+                'Assinafy-PHP-SDK/v' . Configuration::SDK_VERSION,
+                $this->lastRequest()->getHeaderLine('User-Agent')
+            );
         } finally {
             @unlink($pdf);
         }
+    }
+
+    public function testUploadFileClosesItsHandleWhenMultipartEncodingFails(): void
+    {
+        $temporaryPath = tempnam(sys_get_temp_dir(), 'up');
+        $this->assertIsString($temporaryPath);
+        $pdf = $temporaryPath . '.pdf';
+        rename($temporaryPath, $pdf);
+        file_put_contents($pdf, "%PDF-1.4\n%%EOF\n");
+        $client = $this->client([]);
+        $streamsBefore = count(get_resources('stream'));
+
+        try {
+            $client->uploadFile('accounts/acc/documents', $pdf, ['invalid_json' => [NAN]]);
+            $this->fail('Expected JSON encoding to fail');
+        } catch (\JsonException) {
+            $this->assertCount($streamsBefore, get_resources('stream'));
+        } finally {
+            @unlink($pdf);
+        }
+    }
+
+    public function testDebugDumpDoesNotExposeConfiguredCredentials(): void
+    {
+        $secret = 'debug-dump-api-secret';
+        $client = new GuzzleHttpClient(new Configuration($secret, 'debug-account'));
+
+        ob_start();
+        var_dump($client);
+        $dump = (string) ob_get_clean();
+
+        $this->assertStringNotContainsString($secret, $dump);
+        $this->assertStringNotContainsString('debug-account', $dump);
     }
 
     public function testPostRawSendsBodyVerbatimWithCustomContentType(): void
@@ -363,6 +539,10 @@ final class GuzzleHttpClientTest extends TestCase
         $this->assertSame("\x89PNG-bytes", (string) $request->getBody());
         $this->assertSame('image/png', $request->getHeaderLine('Content-Type'));
         $this->assertSame('signer-access-code=abc', $request->getUri()->getQuery());
+        $this->assertSame(
+            'Assinafy-PHP-SDK/v' . Configuration::SDK_VERSION,
+            $request->getHeaderLine('User-Agent')
+        );
     }
 
     /**

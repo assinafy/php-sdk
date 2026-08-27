@@ -220,8 +220,8 @@ class AssinafyClient
     /**
      * Helpers for decoding incoming webhook deliveries.
      *
-     * Replaces `webhookVerifier()` from 1.x. Signature verification was removed in 2.0.0 —
-     * see {@see WebhookEventParser} for why and for how to secure your endpoint instead.
+     * The webhook contract provides no signing secret or signature header. Secure the
+     * endpoint as described by {@see WebhookEventParser}.
      */
     public function webhookEvents(): WebhookEventParser
     {

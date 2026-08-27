@@ -58,7 +58,7 @@ jobs:
         run: composer test
 
   static-analysis:
-    name: Static analysis (PHPStan)
+    name: Static analysis (PHPStan + PHPMD)
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -82,6 +82,9 @@ jobs:
       # --memory-limit: PHPStan's parallel workers exceed PHP's default 128M on this codebase.
       - name: Run PHPStan
         run: composer run phpstan -- --error-format=github
+
+      - name: Run PHPMD
+        run: composer phpmd
 
   coding-standards:
     name: Coding standards (PSR-12)
@@ -218,3 +221,20 @@ jobs:
           # PHP variables must not be expanded by the shell.
           # shellcheck disable=SC2016
           php -r 'require "vendor/autoload.php"; $client = \Assinafy\SDK\AssinafyClient::create("runtime-smoke-key", "runtime-smoke-account", \Assinafy\SDK\Configuration::SANDBOX_BASE_URL); if (!($client->getHttpClient() instanceof \Assinafy\SDK\Http\GuzzleHttpClient)) { exit(1); }'
+
+  docker-build:
+    name: Docker development image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate Compose configuration
+        run: docker compose config --quiet
+
+      - name: Build PHP image
+        run: docker compose build php

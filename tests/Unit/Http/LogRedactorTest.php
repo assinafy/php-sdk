@@ -36,9 +36,22 @@ final class LogRedactorTest extends TestCase
             'X-Api-Key' => 'b',
             'x-api-key' => 'c',
             'Signer-Access-Code' => 'd',
+            'accessToken' => 'e',
+            'newPassword' => 'f',
+            'clientSecret' => 'g',
         ]);
 
-        foreach (['PASSWORD', 'X-Api-Key', 'x-api-key', 'Signer-Access-Code'] as $key) {
+        foreach (
+            [
+                'PASSWORD',
+                'X-Api-Key',
+                'x-api-key',
+                'Signer-Access-Code',
+                'accessToken',
+                'newPassword',
+                'clientSecret',
+            ] as $key
+        ) {
             $this->assertSame(LogRedactor::PLACEHOLDER, $redacted[$key], "{$key} must be redacted");
         }
     }
@@ -96,6 +109,9 @@ final class LogRedactorTest extends TestCase
 
         $fragment = LogRedactor::redactText('https://app.example/callback#access_token=FRAGMENT_SECRET');
         $this->assertStringNotContainsString('FRAGMENT_SECRET', $fragment);
+
+        $camelCase = LogRedactor::redactText('https://app.example/callback?accessToken=CAMEL_SECRET');
+        $this->assertStringNotContainsString('CAMEL_SECRET', $camelCase);
 
         $pathCode = LogRedactor::redactText(
             'https://app-sandbox.example/sign/PATH_SECRET?email=signer%40example.test'

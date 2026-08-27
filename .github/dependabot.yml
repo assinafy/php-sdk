@@ -20,7 +20,7 @@ updates:
       dev-dependencies:
         dependency-type: development
 
-  - package-ecosystem: docker
+  - package-ecosystem: docker-compose
     directory: /
     schedule:
       interval: weekly

@@ -62,9 +62,15 @@ class UserResource extends AbstractResource
      * `GET /users/self/stats`
      *
      * @return array<int, array{period: string, documents_uploaded: int, documents_sent: int,
-     *     signature_requests: int, signature_requests_email: int,
-     *     signature_requests_whatsapp: int, signature_requests_viewed: int,
-     *     signature_requests_completed: int, documents_certified: int}>
+     *     signature_requests: int, signature_requests_notification_email: int,
+     *     signature_requests_notification_whatsapp: int,
+     *     signature_requests_notification_bypass: int,
+     *     signature_requests_verification_email: int,
+     *     signature_requests_verification_whatsapp: int,
+     *     signature_requests_verification_bypass: int,
+     *     signature_requests_verification_digital_certificate: int,
+     *     signature_requests_viewed: int, signature_requests_completed: int,
+     *     documents_certified: int}>
      */
     public function stats(
         string $granularity = self::GRANULARITY_MONTHLY,

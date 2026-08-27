@@ -94,8 +94,7 @@ class AuthResource extends AbstractResource
     /**
      * Build the legacy browser OAuth start URL without requesting it.
      *
-     * This runtime route was removed from the current OpenAPI contract and its
-     * production/sandbox redirects were misconfigured when checked on 2026-08-19.
+     * This legacy runtime route is not part of the current OpenAPI contract.
      */
     public function socialLoginUrl(string $provider = self::PROVIDER_GOOGLE): string
     {
@@ -108,8 +107,7 @@ class AuthResource extends AbstractResource
     /**
      * Return the legacy browser callback URL without requesting it.
      *
-     * `/login-callback` was removed from the current OpenAPI contract and is not
-     * an operational OAuth integration until Assinafy fixes the upstream routes.
+     * `/login-callback` is not part of the current OpenAPI contract.
      */
     public function socialLoginCallbackUrl(): string
     {

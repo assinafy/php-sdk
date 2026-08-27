@@ -19,7 +19,9 @@ use PHPUnit\Framework\TestCase;
  *   ASSINAFY_API_KEY    – API key for the target environment
  *   ASSINAFY_ACCOUNT_ID – workspace account id
  *   ASSINAFY_BASE_URL   – optional, defaults to Configuration::SANDBOX_BASE_URL
- *   ASSINAFY_TEST_EMAIL – optional, enables explicitly guarded notification flows
+ *   ASSINAFY_NOTIFICATION_TESTS – set to 1 to enable notification flows
+ *   ASSINAFY_TEST_EMAIL / ASSINAFY_TEST_EMAIL_ALT – controlled notification recipients
+ *   ASSINAFY_STATEFUL_TESTS – set to 1 to modify and restore shared account settings
  *
  * These tests perform real network calls and may incur sandbox credit costs. They
  * refuse to target production unless ASSINAFY_ALLOW_PRODUCTION=1 is also set.
@@ -164,6 +166,53 @@ final class LiveApiTest extends TestCase
         sleep(max(1, min(15, $retryAfter > 0 ? $retryAfter : 10)));
     }
 
+    /**
+     * @return array{0: string, 1: string}
+     */
+    private function notificationEmails(): array
+    {
+        if (getenv('ASSINAFY_NOTIFICATION_TESTS') !== '1') {
+            $this->markTestSkipped('Set ASSINAFY_NOTIFICATION_TESTS=1 to send sandbox test emails');
+        }
+
+        $email = (string) getenv('ASSINAFY_TEST_EMAIL');
+        $alternateEmail = (string) getenv('ASSINAFY_TEST_EMAIL_ALT');
+        if (filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            self::fail('ASSINAFY_TEST_EMAIL must be a valid email address');
+        }
+        if ($alternateEmail === '') {
+            $alternateEmail = $email;
+        }
+        if (filter_var($alternateEmail, FILTER_VALIDATE_EMAIL) === false) {
+            self::fail('ASSINAFY_TEST_EMAIL_ALT must be a valid email address when set');
+        }
+
+        return [$email, $alternateEmail];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function controlledSigner(string $email, string $label): array
+    {
+        $signer = $this->client->signers()->findByEmail($email);
+        if ($signer === null) {
+            $signer = $this->client->signers()->create($label . ' ' . uniqid(), $email);
+            $signerId = $signer['id'] ?? null;
+            if (!is_string($signerId) || trim($signerId) === '') {
+                self::fail('Controlled signer creation returned no id');
+            }
+            $this->createdSigners[] = $signerId;
+        }
+
+        $signerId = $signer['id'] ?? null;
+        if (!is_string($signerId) || trim($signerId) === '') {
+            self::fail('Controlled signer lookup returned no id');
+        }
+
+        return $signer;
+    }
+
     public function testStatusesEndpointReturnsKnownCodes(): void
     {
         $statuses = $this->client->documents()->statuses();
@@ -246,7 +295,7 @@ final class LiveApiTest extends TestCase
         $this->assertArrayHasKey('data', $page);
     }
 
-    /** Tier 1 — full template management lifecycle: create → get → update → page download → delete. */
+    /** Full template management lifecycle: create → get → update → page download → delete. */
     public function testTemplateManagementLifecycle(): void
     {
         $templates = $this->client->templates();
@@ -304,7 +353,7 @@ final class LiveApiTest extends TestCase
         $this->assertTrue(is_array($sub) || $sub === null);
     }
 
-    /** Tier 1 — read-only artifact downloads after metadata_ready. */
+    /** Read-only artifact downloads after metadata_ready. */
     public function testDocumentThumbnailAndPageDownload(): void
     {
         $pdf = $this->makePdfFixture();
@@ -324,7 +373,7 @@ final class LiveApiTest extends TestCase
         $this->assertNotEmpty($pageImage, 'Page download returned empty body');
     }
 
-    /** Tier 1 — verify() on a bogus hash should be reachable and refused with a 4xx. */
+    /** verify() on a bogus hash should be reachable and refused with a 4xx. */
     public function testVerifyEndpointRejectsBogusHash(): void
     {
         $bogusHash = str_repeat('0', 40);
@@ -341,7 +390,7 @@ final class LiveApiTest extends TestCase
         }
     }
 
-    /** Tier 1 — TemplateResource::get (the endpoint flagged as undocumented in the audit). */
+    /** Exercise TemplateResource::get when the sandbox account contains a template. */
     public function testTemplatesGetWhenAvailable(): void
     {
         $page = $this->client->templates()->list(1, 1);
@@ -361,7 +410,7 @@ final class LiveApiTest extends TestCase
         );
     }
 
-    /** Tier 1 — estimateCostFromTemplate is read-only, but needs a real template + roles. */
+    /** estimateCostFromTemplate is read-only, but needs a real template with roles. */
     public function testEstimateCostFromTemplateWhenAvailable(): void
     {
         $page = $this->client->templates()->list(1, 1, ['status' => 'ready']);
@@ -391,26 +440,23 @@ final class LiveApiTest extends TestCase
         $this->assertIsArray($estimate);
     }
 
-    /** Tier 1 + Tier 2 — full assignment lifecycle (estimateCost → create → estimateResendCost → resend → resetExpiration). */
+    /** Full assignment lifecycle (estimateCost → create → estimateResendCost → resend → resetExpiration). */
     public function testAssignmentFullLifecycle(): void
     {
+        [$email] = $this->notificationEmails();
         $pdf = $this->makePdfFixture();
         $doc = $this->client->documents()->upload($pdf);
         $this->createdDocuments[] = $doc['id'];
         $this->client->documents()->waitUntilReady($doc['id'], 60, 2);
 
-        $signer = $this->client->signers()->create(
-            'SDK assignment ' . uniqid(),
-            'sdk-integration+' . uniqid() . '@example.com'
-        );
-        $this->createdSigners[] = $signer['id'];
+        $signer = $this->controlledSigner($email, 'SDK assignment');
 
         $signerEntries = [[
             'id' => $signer['id'],
             'verification_method' => AssignmentResource::VERIFICATION_EMAIL,
         ]];
 
-        // 1. estimateCost (Tier 1, read-only)
+        // 1. Estimate cost without changing remote state.
         $estimate = $this->client->assignments()->estimateCost(
             $doc['id'],
             $signerEntries,
@@ -418,7 +464,7 @@ final class LiveApiTest extends TestCase
         );
         $this->assertIsArray($estimate);
 
-        // 2. create (Tier 2 — real assignment, virtual method, signer email at example.com (RFC 2606, undeliverable))
+        // 2. Create the assignment and notify the controlled recipient.
         $assignment = $this->client->assignments()->create(
             $doc['id'],
             $signerEntries,
@@ -431,7 +477,7 @@ final class LiveApiTest extends TestCase
         $this->assertArrayHasKey('id', $assignment);
         $assignmentId = (string) $assignment['id'];
 
-        // 3. estimateResendCost (Tier 2 — needs an existing assignment)
+        // 3. Estimate the resend cost for the existing assignment.
         $resendEstimate = $this->client->assignments()->estimateResendCost(
             $doc['id'],
             $assignmentId,
@@ -439,11 +485,11 @@ final class LiveApiTest extends TestCase
         );
         $this->assertIsArray($resendEstimate);
 
-        // 4. resend (Tier 2 — real notification, again to undeliverable example.com)
+        // 4. Resend to the controlled recipient.
         $resend = $this->client->assignments()->resend($doc['id'], $assignmentId, $signer['id']);
         $this->assertIsArray($resend);
 
-        // 5. resetExpiration (Tier 2 — extends the assignment deadline)
+        // 5. Extend the assignment deadline.
         $reset = $this->client->assignments()->resetExpiration(
             $doc['id'],
             $assignmentId,
@@ -452,63 +498,49 @@ final class LiveApiTest extends TestCase
         $this->assertIsArray($reset);
     }
 
-    /** Sends real assignment and access-token emails to both controlled recipients. */
+    /** Exercises the high-level workflow and sends assignment/access-token emails. */
     public function testNotificationFlowForAssignedSigners(): void
     {
-        if (getenv('ASSINAFY_NOTIFICATION_TESTS') !== '1') {
-            $this->markTestSkipped('Set ASSINAFY_NOTIFICATION_TESTS=1 to send sandbox test emails');
-        }
-
-        $email = (string) getenv('ASSINAFY_TEST_EMAIL');
-        $alternateEmail = (string) getenv('ASSINAFY_TEST_EMAIL_ALT');
-        if (filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
-            self::fail('ASSINAFY_TEST_EMAIL must be a valid email address');
-        }
-        if ($alternateEmail === '') {
-            $alternateEmail = $email;
-        }
-        if (filter_var($alternateEmail, FILTER_VALIDATE_EMAIL) === false) {
-            self::fail('ASSINAFY_TEST_EMAIL_ALT must be a valid email address when set');
-        }
-
-        $document = $this->client->documents()->upload($this->makePdfFixture());
-        $documentId = (string) $document['id'];
-        $this->createdDocuments[] = $documentId;
-        $this->client->documents()->waitUntilReady($documentId, 60, 2);
-
-        $signer = $this->client->signers()->findByEmail($email);
-        if ($signer === null) {
-            $signer = $this->client->signers()->create('SDK notification test', $email);
-            $this->createdSigners[] = (string) $signer['id'];
-        }
-        $signerId = (string) $signer['id'];
-
-        $assignmentSigners = [[
-            'id' => $signerId,
-            'verification_method' => AssignmentResource::VERIFICATION_EMAIL,
-            'notification_methods' => [AssignmentResource::NOTIFICATION_EMAIL],
-        ]];
-
+        [$email, $alternateEmail] = $this->notificationEmails();
+        $emails = [$email];
         if (strcasecmp($alternateEmail, $email) !== 0) {
-            $alternateSigner = $this->client->signers()->findByEmail($alternateEmail);
-            if ($alternateSigner === null) {
-                $alternateSigner = $this->client->signers()->create('SDK alternate notification test', $alternateEmail);
-                $this->createdSigners[] = (string) $alternateSigner['id'];
-            }
+            $emails[] = $alternateEmail;
+        }
+
+        $assignmentSigners = [];
+        foreach ($emails as $recipient) {
+            $signer = $this->controlledSigner($recipient, 'SDK notification test');
             $assignmentSigners[] = [
-                'id' => (string) $alternateSigner['id'],
+                'id' => (string) $signer['id'],
                 'verification_method' => AssignmentResource::VERIFICATION_EMAIL,
                 'notification_methods' => [AssignmentResource::NOTIFICATION_EMAIL],
             ];
         }
 
-        $assignment = $this->client->assignments()->create(
-            $documentId,
-            $assignmentSigners,
-            AssignmentResource::METHOD_VIRTUAL,
-            ['message' => 'Assinafy PHP SDK sandbox integration test']
-        );
-        $this->assertNotEmpty($assignment['signing_urls'] ?? []);
+        $pdf = $this->makePdfFixture();
+        try {
+            $result = $this->client->uploadAndRequestSignatures(
+                $pdf,
+                $assignmentSigners,
+                'Assinafy PHP SDK sandbox integration test'
+            );
+        } catch (\Throwable $e) {
+            try {
+                $this->trackDocumentByNameForCleanup(basename($pdf));
+            } catch (\Throwable $cleanupError) {
+                throw new \RuntimeException(
+                    'Workflow failed and its document could not be located for cleanup: '
+                    . $cleanupError->getMessage(),
+                    0,
+                    $e
+                );
+            }
+            throw $e;
+        }
+        $documentId = (string) $result['document']['id'];
+        $this->createdDocuments[] = $documentId;
+        $this->assertSame(array_column($assignmentSigners, 'id'), $result['signer_ids']);
+        $this->assertNotEmpty($result['assignment']['signing_urls'] ?? []);
 
         $publicClient = AssinafyClient::forAuth($this->client->getConfig()->getBaseUrl());
         $tokenResult = $publicClient->documents()->sendToken($documentId, $alternateEmail);
@@ -560,9 +592,10 @@ final class LiveApiTest extends TestCase
         $this->assertStringStartsWith('%PDF', $download);
     }
 
-    /** Tier 2 — createFromTemplate. Skipped unless the sandbox has a ready template. */
+    /** createFromTemplate, skipped unless the sandbox has a ready template. */
     public function testCreateFromTemplateWhenAvailable(): void
     {
+        [$email, $alternateEmail] = $this->notificationEmails();
         $page = $this->client->templates()->list(1, 1, ['status' => 'ready']);
         $items = $page['data'] ?? [];
 
@@ -576,14 +609,22 @@ final class LiveApiTest extends TestCase
             $this->markTestSkipped('Template has no roles — cannot bind signers');
         }
 
+        $emails = strcasecmp($email, $alternateEmail) === 0
+            ? [$email]
+            : [$email, $alternateEmail];
+        if (count($roleIds) > count($emails)) {
+            $this->markTestSkipped('Template needs more controlled signer emails than configured');
+        }
+
         $signerEntries = [];
-        foreach ($roleIds as $roleId) {
-            $signer = $this->client->signers()->create(
-                'SDK createFromTemplate ' . uniqid(),
-                'sdk-integration+' . uniqid() . '@example.com'
-            );
-            $this->createdSigners[] = $signer['id'];
-            $signerEntries[] = ['role_id' => $roleId, 'id' => $signer['id']];
+        foreach ($roleIds as $index => $roleId) {
+            $signer = $this->controlledSigner($emails[$index], 'SDK createFromTemplate');
+            $signerEntries[] = [
+                'role_id' => $roleId,
+                'id' => $signer['id'],
+                'verification_method' => AssignmentResource::VERIFICATION_EMAIL,
+                'notification_methods' => [AssignmentResource::NOTIFICATION_EMAIL],
+            ];
         }
 
         $newDoc = $this->client->documents()->createFromTemplate(
@@ -600,27 +641,39 @@ final class LiveApiTest extends TestCase
         $this->assertContains($ready['status'] ?? null, DocumentResource::READY_STATUSES);
     }
 
-    /** Tier 2 — webhook register / get / deactivate / activate round-trip. */
+    /** Webhook register / get / deactivate / activate round-trip. */
     public function testWebhookFullRoundTrip(): void
     {
+        if (getenv('ASSINAFY_STATEFUL_TESTS') !== '1') {
+            $this->markTestSkipped('Set ASSINAFY_STATEFUL_TESTS=1 to modify shared webhook settings');
+        }
+
         $webhooks = $this->client->webhooks();
         $existing = $webhooks->get();
+        if (
+            !is_array($existing)
+            || !is_string($existing['url'] ?? null)
+            || filter_var($existing['url'], FILTER_VALIDATE_URL) === false
+            || filter_var($existing['email'] ?? null, FILTER_VALIDATE_EMAIL) === false
+            || !is_array($existing['events'] ?? null)
+            || $existing['events'] === []
+            || !array_key_exists('is_active', $existing)
+        ) {
+            $this->markTestSkipped('No complete webhook configuration is available for exact restoration');
+        }
 
-        $hadConfig = is_array($existing) && !empty($existing['url']);
-        $existingUrl = $hadConfig ? (string) $existing['url'] : '';
-        $existingEmail = $hadConfig ? (string) ($existing['email'] ?? '') : '';
-        $existingEvents = $hadConfig && !empty($existing['events'])
-            ? $existing['events']
-            : WebhookResource::DEFAULT_EVENTS;
-        $existingActive = $hadConfig ? (bool) ($existing['is_active'] ?? true) : true;
+        $existingUrl = $existing['url'];
+        $existingEmail = (string) $existing['email'];
+        $existingEvents = $existing['events'];
+        $existingActive = (bool) $existing['is_active'];
 
-        $testUrl = 'https://example.com/webhooks/sdk-integration-' . uniqid();
+        $testUrl = 'https://sdk-integration.invalid/webhooks/' . uniqid();
 
         try {
             // 1. register a new subscription
             $registered = $webhooks->register(
                 $testUrl,
-                'sdk-integration@example.com',
+                $existingEmail,
                 WebhookResource::DEFAULT_EVENTS
             );
             $this->assertSame($testUrl, $registered['url'] ?? null);
@@ -648,16 +701,21 @@ final class LiveApiTest extends TestCase
             $this->assertTrue($reactivated['is_active'] ?? null);
         } finally {
             // Restoration is part of the test contract. Let a failure fail the test so
-            // a shared sandbox is never silently left on the bogus test endpoint.
-            if ($hadConfig) {
-                $webhooks->register($existingUrl, $existingEmail, $existingEvents, $existingActive);
-            } else {
-                $webhooks->deactivate();
-            }
+            // a shared sandbox is never silently left on the test endpoint.
+            $restored = $webhooks->register(
+                $existingUrl,
+                $existingEmail,
+                $existingEvents,
+                $existingActive
+            );
+            $this->assertSame($existingUrl, $restored['url'] ?? null);
+            $this->assertSame($existingEmail, $restored['email'] ?? null);
+            $this->assertSame($existingEvents, $restored['events'] ?? null);
+            $this->assertSame($existingActive, $restored['is_active'] ?? null);
         }
     }
 
-    /** Tier 1 — workspace tag CRUD (no credit cost). */
+    /** Workspace tag CRUD with no credit cost. */
     public function testTagLifecycle(): void
     {
         $tags = $this->client->tags();
@@ -687,7 +745,7 @@ final class LiveApiTest extends TestCase
         }
     }
 
-    /** Tier 1 — field-definition CRUD plus the global type catalog (no credit cost). */
+    /** Field-definition CRUD plus the global type catalog, with no credit cost. */
     public function testFieldLifecycleAndTypes(): void
     {
         $fields = $this->client->fields();
@@ -729,7 +787,7 @@ final class LiveApiTest extends TestCase
         }
     }
 
-    /** Tier 1 — webhook discovery endpoints (read-only). */
+    /** Read-only webhook discovery endpoints. */
     public function testWebhookEventTypesAndDispatches(): void
     {
         $eventTypes = $this->client->webhooks()->eventTypes();
@@ -739,7 +797,7 @@ final class LiveApiTest extends TestCase
         $this->assertArrayHasKey('data', $dispatches);
     }
 
-    /** Tier 1 — document tag attach/list/replace/detach round-trip (no credit cost). */
+    /** Document tag attach/list/replace/detach round-trip, with no credit cost. */
     public function testDocumentTagRoundTrip(): void
     {
         $pdf = $this->makePdfFixture();
@@ -837,6 +895,10 @@ final class LiveApiTest extends TestCase
 
     public function testUserNotificationPreferencesRoundTrip(): void
     {
+        if (getenv('ASSINAFY_STATEFUL_TESTS') !== '1') {
+            $this->markTestSkipped('Set ASSINAFY_STATEFUL_TESTS=1 to modify shared user preferences');
+        }
+
         $users = $this->client->users();
         try {
             $preferences = $users->notificationPreferences();
@@ -1087,6 +1149,29 @@ final class LiveApiTest extends TestCase
         $this->temporaryFiles[] = $path;
 
         return $path;
+    }
+
+    private function trackDocumentByNameForCleanup(string $name): void
+    {
+        $deadline = time() + 30;
+        do {
+            $matches = $this->retryRateLimited(
+                fn () => $this->client->documents()->search($name, 1, 100)
+            );
+            foreach ($matches['data'] ?? [] as $document) {
+                $id = $document['id'] ?? null;
+                if (($document['name'] ?? null) === $name && is_string($id)) {
+                    if (!in_array($id, $this->createdDocuments, true)) {
+                        $this->createdDocuments[] = $id;
+                    }
+                    return;
+                }
+            }
+
+            sleep(2);
+        } while (time() < $deadline);
+
+        throw new \RuntimeException('Uploaded document did not appear in sandbox search before cleanup timeout');
     }
 
     private function makePngFixture(): string

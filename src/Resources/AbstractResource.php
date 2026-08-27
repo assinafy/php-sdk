@@ -39,7 +39,8 @@ abstract class AbstractResource
     /**
      * Unwrap the `data` envelope returned by the Assinafy API.
      *
-     * Every endpoint responds with `{ status, message, data }`. Single-item methods
+     * JSON endpoints respond with `{ status, message, data }`; binary downloads return
+     * raw bytes. Single-item methods
      * (`get`, `create`, `update`, …) call this helper and return just the inner `data`
      * so callers can work with the resource directly. List endpoints intentionally do
      * NOT unwrap — see {@see self::withPagination()}.
@@ -109,6 +110,16 @@ abstract class AbstractResource
         foreach (self::PAGINATION_HEADERS as $header) {
             if (!isset($normalized[$header]) || $normalized[$header] === '') {
                 return null;
+            }
+            if (
+                preg_match('/^(?:0|[1-9]\d*)$/D', (string) $normalized[$header]) !== 1
+                || filter_var(
+                    $normalized[$header],
+                    FILTER_VALIDATE_INT,
+                    ['options' => ['min_range' => 0]]
+                ) === false
+            ) {
+                throw new NetworkException('Assinafy API returned invalid pagination headers');
             }
         }
 

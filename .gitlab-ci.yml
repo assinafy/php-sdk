@@ -112,6 +112,11 @@ sandbox:integration:
       else
         export ASSINAFY_DESTRUCTIVE_TESTS=0
       fi
+      if [ "${RUN_ASSINAFY_STATEFUL_TESTS:-0}" = "1" ]; then
+        export ASSINAFY_STATEFUL_TESTS=1
+      else
+        export ASSINAFY_STATEFUL_TESTS=0
+      fi
       if [ -n "${ASSINAFY_SANDBOX_SIGNER_ID:-}" ] && [ -n "${ASSINAFY_SANDBOX_SIGNER_ACCESS_CODE:-}" ]; then
         export ASSINAFY_SIGNER_ID="${ASSINAFY_SANDBOX_SIGNER_ID}"
         export ASSINAFY_SIGNER_ACCESS_CODE="${ASSINAFY_SANDBOX_SIGNER_ACCESS_CODE}"

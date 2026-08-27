@@ -15,22 +15,22 @@ install a separate HTTP client.
 
 ## Install with Composer
 
-Version 2.1.0 is available as repository tag `v2.1.0`, but Packagist does not currently expose
+Version 2.1.1 is available as repository tag `v2.1.1`, but Packagist does not currently expose
 `assinafy/php-sdk`. After the package is published there, install it with:
 
 ```bash
 composer require assinafy/php-sdk:^2.1
 ```
 
-Until that publication is complete, Composer can install the stable `v2.1.0` tag directly from
+Until that publication is complete, Composer can install the stable `v2.1.1` tag directly from
 the public GitHub mirror:
 
 ```bash
 composer config repositories.assinafy vcs https://github.com/assinafy/php-sdk.git
-composer require assinafy/php-sdk:2.1.0
+composer require assinafy/php-sdk:2.1.1
 ```
 
-The documentation on the repository's current `main` describes the `v2.1.0` release. Use the
+The documentation on the repository's current `main` describes the `v2.1.1` release. Use the
 documentation shipped with a tag when installing that tag.
 
 Optional PSR-3 logging integrations, such as Monolog, can be installed separately:
@@ -154,13 +154,17 @@ echo "Assinafy SDK configured for {$client->getConfig()->getBaseUrl()}\n";
 The included Compose environment runs PHP 8.5 FPM and Nginx:
 
 ```bash
+export ASSINAFY_DOCKER_UID="$(id -u)"
+export ASSINAFY_DOCKER_GID="$(id -g)"
 docker compose up -d --build
 docker compose exec php composer install
 docker compose exec php vendor/bin/phpunit --testsuite=unit
 docker compose down
 ```
 
-The web service listens on `http://localhost:8080`. The SDK has no database dependency.
+The UID/GID mapping keeps bind-mounted Composer files owned by the current user on native Linux;
+it defaults to `1000:1000`. The web service listens on `http://localhost:8080`. The SDK has no
+database dependency.
 
 ## Live sandbox tests
 
@@ -168,27 +172,30 @@ Live tests create and modify sandbox resources and can consume sandbox credits.
 Run them only with dedicated sandbox credentials and force the sandbox URL:
 
 ```bash
-ASSINAFY_INTEGRATION=1 \
-ASSINAFY_API_KEY='sandbox-key' \
-ASSINAFY_ACCOUNT_ID='sandbox-account-id' \
-ASSINAFY_BASE_URL='https://sandbox.assinafy.com.br/v1' \
+read -rs ASSINAFY_API_KEY
+export ASSINAFY_API_KEY
+export ASSINAFY_ACCOUNT_ID='sandbox-account-id'
+export ASSINAFY_BASE_URL='https://sandbox.assinafy.com.br/v1'
+export ASSINAFY_INTEGRATION=1
 vendor/bin/phpunit --testsuite=integration
 ```
 
-GitHub Actions provides the manual **Sandbox integration** workflow. Configure the
-protected `sandbox` environment with these secrets before dispatching it:
+GitHub Actions provides the manual **Sandbox integration** workflow. Create the `sandbox`
+environment before the first dispatch, require reviewers, prevent self-review, restrict allowed
+deployment refs, and configure these environment-scoped secrets:
 
-- `ASSINAFY_SANDBOX_API_KEY`
-- `ASSINAFY_SANDBOX_ACCOUNT_ID`
+- `ASSINAFY_API_KEY`
+- `ASSINAFY_ACCOUNT_ID`
 - `ASSINAFY_SANDBOX_TEST_EMAIL` (required only for notification tests)
 - `ASSINAFY_SANDBOX_TEST_EMAIL_ALT` (required only for notification tests)
 - `ASSINAFY_SANDBOX_SIGNER_ID` (optional; set together with the access code)
 - `ASSINAFY_SANDBOX_SIGNER_ACCESS_CODE` (optional; enables signer-read checks)
 
-The workflow hard-codes and verifies the sandbox hostname; credentials are never
-stored in the repository. Notification and disposable-account deletion tests are
-disabled by default and require explicit workflow-dispatch options. In GitLab,
-set `RUN_ASSINAFY_NOTIFICATION_TESTS=1` or
+Do not rely on the workflow to create the environment: GitHub auto-created environments have no
+protection rules or secrets. The workflow hard-codes and verifies the sandbox hostname;
+credentials are never stored in the repository. Notification, shared-state, and disposable-account
+deletion tests are disabled by default and require explicit workflow-dispatch options. In GitLab,
+set `RUN_ASSINAFY_NOTIFICATION_TESTS=1`, `RUN_ASSINAFY_STATEFUL_TESTS=1`, or
 `RUN_ASSINAFY_DESTRUCTIVE_TESTS=1` when starting the protected sandbox job.
 
 ## Troubleshooting

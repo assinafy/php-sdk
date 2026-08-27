@@ -8,6 +8,11 @@ on:
         required: false
         default: false
         type: boolean
+      run_stateful_tests:
+        description: Modify and exactly restore shared webhook and user settings
+        required: false
+        default: false
+        type: boolean
       run_destructive_tests:
         description: Create and delete a disposable sandbox account
         required: false
@@ -49,8 +54,8 @@ jobs:
       - name: Verify sandbox safeguards
         shell: bash
         env:
-          ASSINAFY_API_KEY: ${{ secrets.ASSINAFY_SANDBOX_API_KEY }}
-          ASSINAFY_ACCOUNT_ID: ${{ secrets.ASSINAFY_SANDBOX_ACCOUNT_ID }}
+          ASSINAFY_API_KEY: ${{ secrets.ASSINAFY_API_KEY }}
+          ASSINAFY_ACCOUNT_ID: ${{ secrets.ASSINAFY_ACCOUNT_ID }}
           ASSINAFY_BASE_URL: https://sandbox.assinafy.com.br/v1
           ASSINAFY_NOTIFICATION_TESTS: ${{ inputs.run_notification_tests && '1' || '0' }}
           ASSINAFY_TEST_EMAIL: ${{ secrets.ASSINAFY_SANDBOX_TEST_EMAIL }}
@@ -69,10 +74,11 @@ jobs:
       - name: Run live integration tests
         env:
           ASSINAFY_INTEGRATION: '1'
-          ASSINAFY_API_KEY: ${{ secrets.ASSINAFY_SANDBOX_API_KEY }}
-          ASSINAFY_ACCOUNT_ID: ${{ secrets.ASSINAFY_SANDBOX_ACCOUNT_ID }}
+          ASSINAFY_API_KEY: ${{ secrets.ASSINAFY_API_KEY }}
+          ASSINAFY_ACCOUNT_ID: ${{ secrets.ASSINAFY_ACCOUNT_ID }}
           ASSINAFY_BASE_URL: https://sandbox.assinafy.com.br/v1
           ASSINAFY_NOTIFICATION_TESTS: ${{ inputs.run_notification_tests && '1' || '0' }}
+          ASSINAFY_STATEFUL_TESTS: ${{ inputs.run_stateful_tests && '1' || '0' }}
           ASSINAFY_DESTRUCTIVE_TESTS: ${{ inputs.run_destructive_tests && '1' || '0' }}
           ASSINAFY_TEST_EMAIL: ${{ secrets.ASSINAFY_SANDBOX_TEST_EMAIL }}
           ASSINAFY_TEST_EMAIL_ALT: ${{ secrets.ASSINAFY_SANDBOX_TEST_EMAIL_ALT }}

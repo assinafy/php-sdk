@@ -11,6 +11,7 @@ use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\BadResponseException;
 use GuzzleHttp\Exception\GuzzleException;
+use GuzzleHttp\Psr7\Uri;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 
@@ -31,9 +32,50 @@ class GuzzleHttpClient implements HttpClientInterface
         ?LoggerInterface $logger = null,
         ?ClientInterface $client = null
     ) {
+        if ($client instanceof Client) {
+            $headers = $client->getConfig('headers');
+            if (
+                is_array($headers)
+                && (self::hasHeader($headers, 'Authorization') || self::hasHeader($headers, 'X-Api-Key'))
+            ) {
+                throw new \InvalidArgumentException(
+                    'Injected Guzzle clients cannot define default authentication headers'
+                );
+            }
+
+            $baseUri = $client->getConfig('base_uri');
+            if (
+                self::normalizeBaseUri((string) $baseUri)
+                !== self::normalizeBaseUri($config->getBaseUrl())
+            ) {
+                throw new \InvalidArgumentException(
+                    'Injected Guzzle client base URI must match the configured API base URL'
+                );
+            }
+        }
+
         $this->logger = $logger ?? new NullLogger();
         $this->defaultHeaders = $config->getHeaders();
         $this->client = $client ?? self::buildClient($config);
+    }
+
+    private static function normalizeBaseUri(string $uri): string
+    {
+        return rtrim((string) new Uri($uri), '/');
+    }
+
+    /**
+     * Keep credentials out of diagnostic object dumps.
+     *
+     * @return array{client: string, logger: string, default_headers: list<string>}
+     */
+    public function __debugInfo(): array
+    {
+        return [
+            'client' => $this->client::class,
+            'logger' => $this->logger::class,
+            'default_headers' => array_keys($this->defaultHeaders),
+        ];
     }
 
     private static function buildClient(#[\SensitiveParameter] Configuration $config): Client
@@ -120,30 +162,36 @@ class GuzzleHttpClient implements HttpClientInterface
             throw new \InvalidArgumentException("File is not readable: {$filePath}");
         }
 
-        $multipart = [
-            [
-                'name' => 'file',
-                // Ownership transfers to Guzzle's PSR-7 stream; it closes the resource
-                // when the request body is released.
-                'contents' => $handle,
-                'filename' => basename($filePath),
-            ],
-        ];
-
-        foreach ($data as $key => $value) {
-            $multipart[] = [
-                'name' => $key,
-                'contents' => is_array($value)
-                    ? json_encode($value, JSON_THROW_ON_ERROR)
-                    : (string) $value,
+        try {
+            $multipart = [
+                [
+                    'name' => 'file',
+                    'contents' => $handle,
+                    'filename' => basename($filePath),
+                ],
             ];
-        }
 
-        // Guzzle sets the multipart boundary. Overriding Content-Type would strip it.
-        return $this->request('POST', $uri, [
-            'multipart' => $multipart,
-            'headers' => $headers,
-        ]);
+            foreach ($data as $key => $value) {
+                $multipart[] = [
+                    'name' => $key,
+                    'contents' => is_array($value)
+                        ? json_encode($value, JSON_THROW_ON_ERROR)
+                        : (string) $value,
+                ];
+            }
+
+            // Guzzle sets the multipart boundary. Overriding Content-Type would strip it.
+            return $this->request('POST', $uri, [
+                'multipart' => $multipart,
+                'headers' => $headers,
+            ]);
+        } catch (\Throwable $e) {
+            if (is_resource($handle)) {
+                fclose($handle);
+            }
+
+            throw $e;
+        }
     }
 
     public function postRaw(
@@ -207,13 +255,25 @@ class GuzzleHttpClient implements HttpClientInterface
         string $uri,
         #[\SensitiveParameter] array $options = []
     ): Response {
+        $path = parse_url($uri, PHP_URL_PATH);
+        if (
+            $uri === ''
+            || str_starts_with($uri, '/')
+            || parse_url($uri, PHP_URL_SCHEME) !== null
+            || parse_url($uri, PHP_URL_HOST) !== null
+            || !is_string($path)
+            || preg_match('~(?:^|/)\.{1,2}(?:/|$)~', rawurldecode($path)) === 1
+        ) {
+            throw new \InvalidArgumentException('Request URI must be relative to the configured API base URL');
+        }
+
         $options = $this->withDefaultHeaders($method, $uri, $options);
         // Enforce this at request time as well as on our own Client. An injected
         // Guzzle client may have redirect middleware enabled by default, and Guzzle
         // can forward custom authentication headers such as X-Api-Key cross-origin.
         $options['allow_redirects'] = false;
-        $path = explode('?', explode('#', $uri, 2)[0], 2)[0];
-        $safeRequest = LogRedactor::redactText("{$method} {$path}");
+        $safePath = explode('?', explode('#', $uri, 2)[0], 2)[0];
+        $safeRequest = LogRedactor::redactText("{$method} {$safePath}");
         $this->logger->debug("Assinafy API Request: {$safeRequest}", [
             'request' => LogRedactor::summarizeRequestOptions($options),
         ]);
@@ -243,6 +303,22 @@ class GuzzleHttpClient implements HttpClientInterface
             }
 
             $data = $apiResponse->getData();
+            if (
+                $apiResponse->isSuccess()
+                && is_array($data)
+                && array_key_exists('status', $data)
+            ) {
+                $envelopeStatus = $data['status'];
+                if (!is_int($envelopeStatus) || $envelopeStatus < 100 || $envelopeStatus > 599) {
+                    throw new NetworkException(
+                        'Assinafy API returned an invalid response envelope status'
+                    );
+                }
+                if ($envelopeStatus < 200 || $envelopeStatus >= 300) {
+                    throw ApiException::fromResponse($envelopeStatus, $data, null, $headers);
+                }
+            }
+
             if (
                 $apiResponse->isSuccess()
                 && is_array($data)
@@ -350,6 +426,13 @@ class GuzzleHttpClient implements HttpClientInterface
         $headers = isset($options['headers']) && is_array($options['headers'])
             ? $options['headers']
             : [];
+
+        foreach (array_keys($headers) as $headerName) {
+            if (is_string($headerName) && strcasecmp($headerName, 'User-Agent') === 0) {
+                unset($headers[$headerName]);
+            }
+        }
+        $headers['User-Agent'] = $this->defaultHeaders['User-Agent'];
 
         $hasAuthorization = self::hasHeader($headers, 'Authorization');
         $hasApiKey = self::hasHeader($headers, 'X-Api-Key');

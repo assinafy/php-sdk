@@ -7,14 +7,9 @@ namespace Assinafy\SDK\Support;
 /**
  * Parses Assinafy webhook deliveries into their component parts.
  *
- * Signature verification is deliberately absent. Earlier versions shipped a `verify()` method
- * doing HMAC-SHA256 against a configured `webhook_secret`, but the API documents no such
- * mechanism: "secret" appears nowhere in the OpenAPI spec, the subscription endpoint
- * (`PUT /accounts/{id}/webhooks/subscriptions`) accepts only `events`, `is_active`, `url` and
- * `email` — leaving nowhere to register a signing key — and real deliveries carry no signature
- * header. The method could therefore never return true for a genuine event, yet the docs
- * recommended it as a reject-the-request guard, which would have dropped every webhook.
- * It was removed in 2.0.0 rather than left as a trap.
+ * The webhook contract provides no signing secret or signature header. The subscription
+ * endpoint (`PUT /accounts/{id}/webhooks/subscriptions`) accepts `events`, `is_active`, `url`,
+ * and `email`, so this parser decodes payloads without claiming HMAC verification.
  *
  * Authenticate deliveries by other means: keep the endpoint URL secret and unguessable, and
  * re-fetch the referenced entity through the API before acting on it.

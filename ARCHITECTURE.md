@@ -4,11 +4,9 @@
 
 The Assinafy PHP SDK is a small, synchronous client for the Assinafy v1 API. It uses a facade over focused resource classes, a project-specific HTTP abstraction, PSR-3 logging, strict PHP types, and explicit exception mapping.
 
-The package targets PHP 8.2 through 8.5, the complete supported CI matrix. Current repository
-`main` maps all 89 operations on the 67 paths in the 2026-08-19 OpenAPI document (SHA-256
-`44da834c27173a3739d491fdacbb48decf9a170bd776a1c4edb4d0d4b108c22f`). The authoritative
-endpoint mapping, including known differences between the published contract and sandbox
-behavior, is in [docs/API_REFERENCE.md](docs/API_REFERENCE.md).
+The package targets PHP 8.2 through 8.5, the complete supported CI matrix, and implements the
+published Assinafy v1 operation set. The endpoint mapping and operational notes are in
+[docs/API_REFERENCE.md](docs/API_REFERENCE.md).
 
 ## Directory structure
 
@@ -54,8 +52,10 @@ assinafy-php-sdk/
 │   ├── index.php
 │   └── quickstart.php
 ├── composer.json
-├── phpstan.neon
 ├── phpcs.xml
+├── phpmd.xml
+├── phpmd.baseline.xml
+├── phpstan.neon
 └── phpunit.xml
 ```
 
@@ -102,11 +102,10 @@ and creates a virtual assignment. Digital-certificate entries must reference an 
 with `government_id` and occupy a signing step alone; the helper never invents certificate
 completion routes absent from the API contract.
 
-Ordinary assignment shaping centralizes the runtime max-one notification rule, Email/WhatsApp
-coupling/inference, and preservation of the explicit empty list verified by cost estimation.
-Template document methods keep their validation separate because the sandbox accepts duplicate
-notification entries there; this prevents an ordinary-route assumption from removing working
-template behavior.
+Ordinary assignment shaping centralizes the max-one notification rule, Email/WhatsApp
+coupling/inference, and preservation of the explicit empty list accepted by cost estimation.
+Template document methods keep their validation separate because their payload rules allow
+duplicate notification entries.
 
 ### Resource layer
 
@@ -163,9 +162,9 @@ stores an access token and emits `Authorization` instead of `X-Api-Key` for all 
 The SDK accepts any PSR-3 `LoggerInterface`; otherwise it uses `NullLogger`. `MutableLogger` is an internal proxy shared by the default transport and lazily created resources. Calling `AssinafyClient::setLogger()` updates that proxy, so resources obtained before the logger change also use the new logger.
 
 ```php
-use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 
-/** @var LoggerInterface $logger */
+$logger = new NullLogger();
 $client->setLogger($logger);
 ```
 
@@ -235,6 +234,7 @@ Integration tests are opt-in and target the sandbox. Credentials are supplied on
 ```bash
 composer test
 composer phpstan
+composer phpmd
 composer phpcs
 
 # Explicitly opt in to sandbox tests after setting secret environment variables.
@@ -253,4 +253,4 @@ ASSINAFY_INTEGRATION=1 composer test:integration
 
 ## Compatibility and change control
 
-The public package targets PHP `^8.2`, uses PSR-4 autoloading and PSR-3 logging, and supports Guzzle 7 and 8 through its own transport abstraction. Endpoint behavior must stay aligned with the official v1 contract and the documented runtime divergences. New public methods should include request and return PHPDoc, unit request-shape tests, API-reference mapping, and sandbox coverage when the operation can be exercised safely.
+The public package targets PHP `^8.2`, uses PSR-4 autoloading and PSR-3 logging, and supports Guzzle 7 and 8 through its own transport abstraction. Endpoint behavior must stay aligned with the official v1 contract, including documented runtime-specific request shapes. New public methods should include request and return PHPDoc, unit request-shape tests, API-reference mapping, and integration coverage when the operation can be exercised safely.

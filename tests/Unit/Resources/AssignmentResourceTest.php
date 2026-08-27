@@ -255,8 +255,8 @@ final class AssignmentResourceTest extends TestCase
     }
 
     /**
-     * Cost depends only on the verification/notification methods, so the API prices
-     * id-less signers happily (live-verified: HTTP 200 with a full breakdown).
+     * Cost depends only on the verification and notification methods, so the API
+     * accepts signer data before signer records exist.
      * Requiring an id here used to throw before any request was made, making the
      * documented "price it before the signers exist" flow unreachable.
      */

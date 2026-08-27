@@ -5,3 +5,5 @@ parameters:
     excludePaths:
         - vendor
     reportUnmatchedIgnoredErrors: true
+    parallel:
+        maximumNumberOfProcesses: 1

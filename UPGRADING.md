@@ -10,10 +10,9 @@ Version 2.0.0 is available as repository tag `v2.0.0`, but Packagist does not cu
 [docs/INSTALLATION.md](docs/INSTALLATION.md), and switch to `assinafy/php-sdk:^2.0` after
 Packagist publication.
 
-Current repository `main` covers all 89 operations on the 67 paths in the 2026-08-19 OpenAPI
-document. Five additional template-management method/path pairs remain because the running
-sandbox supports them. Two legacy OAuth URL routes are also retained for compatibility outside
-OpenAPI, but their upstream redirects are currently misconfigured and are not operational.
+Version 2.1.1 implements the published Assinafy v1 operation set. It also retains five
+runtime-supported template-management methods outside OpenAPI. Two legacy OAuth URL routes remain
+for compatibility, but their upstream redirects are not operational.
 
 ### PHP 8.2 is now the minimum
 
@@ -65,15 +64,28 @@ and "webhooks never worked", this is why.
 ```php
 // 2.0.0
 $parser = $client->webhookEvents();
-$event  = $parser->extractEvent(file_get_contents('php://input'));
+$rawBody = file_get_contents('php://input');
+if ($rawBody === false) {
+    http_response_code(500);
+    exit('Could not read request body');
+}
+
+$event = $parser->extractEvent($rawBody);
 
 if ($event === null) {
     http_response_code(400);
     exit('Malformed payload');
 }
 
-// Re-fetch rather than trusting the payload — see README "Securing your webhook endpoint".
-$document = $client->documents()->get($parser->getEventData($event)['id']);
+$entity = $parser->getEventData($event);
+$documentId = $entity['id'] ?? null;
+if (!is_string($documentId) || trim($documentId) === '') {
+    http_response_code(400);
+    exit('Missing document id');
+}
+
+// Re-fetch rather than trusting the payload; see README "Receive webhooks".
+$document = $client->documents()->get($documentId);
 http_response_code(200);
 ```
 
@@ -187,12 +199,12 @@ $client->assignments()->estimateCost($documentId, [
 
 `create()` still requires IDs — it has to know who signs.
 
-Current `main` also matches the ordinary-assignment runtime rules: at most one notification
-method; for Email/WhatsApp verification a non-empty notification must match; supplying only one
-side lets the API infer the other; and omitting both defaults to Email. DigitalCertificate is
-exempt from channel equality. An explicit `notification_methods: []` remains a sandbox-verified
-`200` cost-estimate exception and is preserved. Remove payloads that send both Email and WhatsApp
-or pair different non-empty Email/WhatsApp channels.
+Version 2.1.0 also enforces the ordinary-assignment rules: at most one notification method; for
+Email/WhatsApp verification a non-empty notification must match; supplying only one side lets the
+API infer the other; and omitting both defaults to Email. DigitalCertificate is exempt from
+channel equality. The API accepts an explicit `notification_methods: []`, which the SDK preserves.
+Remove payloads that send both Email and WhatsApp or pair different non-empty Email/WhatsApp
+channels.
 
 ### Signer phone numbers require an explicit country code
 
@@ -268,40 +280,34 @@ inside JSON, update it. `signerSession()->acceptTerms($accessCode)` sends the qu
 no request body; `verifyCode()` sends only `{ "verification-code": "..." }` as JSON.
 
 Do not derive this code from an assignment's `signing_urls`. Those objects expose `signer_id` and
-`url`, but the sandbox does not expose the one-time access code in a usable URL path segment; the
-attempt returned `401` on 2026-08-05. Use `documents()->sendToken()` for a signer already assigned
-to the document, then obtain the code from that signer's controlled inbox. Live signer-read tests
-require explicit `ASSINAFY_SIGNER_ID` and `ASSINAFY_SIGNER_ACCESS_CODE` values and are independent
-from notification-delivery tests.
+`url`, not the one-time access code. Use `documents()->sendToken()` for a signer already assigned
+to the document, then obtain the code from that signer's controlled inbox. Signer-facing
+integration tests require explicit `ASSINAFY_SIGNER_ID` and `ASSINAFY_SIGNER_ACCESS_CODE` values
+and are independent from notification-delivery tests.
 
 ### Legacy browser OAuth URL builders are not operational
 
 `auth()->socialLoginUrl()` and `auth()->socialLoginCallbackUrl()` remain for compatibility, but
-their two GET routes are no longer in OpenAPI. On 2026-08-19, sandbox produced a malformed
-array-style `redirect_uri`, while production produced an example Google client ID and an HTTP
-`api-dev` callback. Do not migrate an OAuth flow to these helpers until Assinafy publishes and
-deploys a corrected contract.
+their two GET routes are no longer in OpenAPI. Their upstream sandbox and production
+configurations do not currently produce usable redirects. Do not migrate an OAuth flow to these
+helpers until Assinafy publishes and deploys a corrected contract.
 
-### Preserve documented/runtime divergences
+### Runtime-specific integration behavior
 
 - Document-tag list/replace/append/detach operations are in the current OpenAPI document and
-  map directly to `DocumentResource` methods. Although the body description calls the strings
-  tag IDs, the sandbox and SDK use tag names and auto-create missing names.
-- `GET /users/self` is published with `data: AuthUser`, but the sandbox returns
-  `data: {user: AuthUser, accounts: AuthAccount[]}`. `users()->get()` now normalizes either shape
-  to `AuthUser`; code using the SDK method keeps a stable return, while code coupled to a raw
-  transport response should account for the nested sandbox payload.
-- The published account and authenticated-user statistics routes both returned an
-  application-level `404` route-not-deployed response in the sandbox on 2026-08-05. The SDK
-  retains `accounts()->stats()` and `users()->stats()` for 89/89 OpenAPI coverage, but callers
-  must treat deployment availability separately from publication in the contract.
-- Public `send-token` is documented with `{email}`, but the sandbox requires
-  `{recipient, channel}` and accepts only a recipient who is already a signer assigned to the
-  target document. The SDK deliberately uses the runtime request shape; ensure the assignment
-  exists before calling it.
+  map directly to `DocumentResource` methods. The SDK sends tag names, and the API auto-creates
+  missing names.
+- `users()->get()` normalizes both `data: AuthUser` and
+  `data: {user: AuthUser, accounts: AuthAccount[]}` to `AuthUser`. Code coupled to a raw transport
+  response should account for the wrapped form.
+- The published account and authenticated-user statistics routes are not currently available in
+  sandbox. The SDK retains `accounts()->stats()` and `users()->stats()`; callers must handle route
+  availability in their target environment.
+- Public `send-token` uses `{recipient, channel}` and accepts only a recipient who is already a
+  signer assigned to the target document. Ensure the assignment exists before calling it.
 - Template list, create-document-from-template, and template document-cost estimation are
-  published. Template create/get/update/delete/page-download are not, but remain available
-  because live tests prove the routes work. Do not remove them based only on an OpenAPI diff.
+  published. Template create/get/update/delete/page-download remain runtime-supported
+  compatibility methods outside OpenAPI.
 
 ## v2.0.0 → v2.1.0
 
@@ -316,9 +322,9 @@ map locally, merges omitted keys unchanged, and returns the full map. The keys a
 `DocumentExpired`, `DocumentExpirationReset`, `DocumentProcessingFailed`,
 `TemplateProcessingFailed`, and `SignerWhatsappFailed`.
 
-Both methods are part of the current production OpenAPI contract but were not deployed in the
-sandbox on 2026-08-19; GET returned application-level `404` (`Página não encontrada`). Do not
-make a sandbox rollout depend on either route until Assinafy deploys them there.
+Both methods are part of the current production OpenAPI contract but are not currently available
+in sandbox. Do not make a sandbox rollout depend on either route until Assinafy deploys them
+there.
 
 ### Digital-certificate assignments and artifacts
 
@@ -332,10 +338,10 @@ $client->signers()->update($signerId, ['government_id' => $cpfOrCnpj]);
 ```
 
 The SDK sends these published request shapes and validates the ordinary-assignment constraints;
-template signer arrays remain pass-through for the live divergence below. The sandbox returned
-`400` (`Invalid method`) for certificate assignment creation on 2026-08-19. The ordinary
-`signerSession()->sign()` method cannot finish an ICP-Brasil certificate signature, and OpenAPI
-defines no certificate start/complete routes; none were added speculatively.
+template signer arrays remain pass-through. Sandbox currently rejects certificate assignment
+creation with `400` (`Invalid method`). The ordinary `signerSession()->sign()` method cannot
+finish an ICP-Brasil certificate signature, and OpenAPI defines no certificate start/complete
+routes.
 
 Document and signer-document downloads now accept the `pades` artifact. It exists only for a
 document with digital-certificate signers. A `bundle` is a ZIP of the original, certificated, and
@@ -354,3 +360,28 @@ echo. Updating an already verified email/WhatsApp channel
 on an in-flight document returns `400`; updating an unverified channel rotates its access and
 verification codes, so resend the invitation. Certificated documents do not block channel
 changes.
+
+## v2.1.0 → v2.1.1
+
+No public resource method was removed. Update integrations for these tightened transport and input
+boundaries:
+
+- The bundled transport sends the exact `Assinafy-PHP-SDK/v2.1.1` User-Agent on every request and
+  does not accept a per-request override. Custom `HttpClientInterface` implementations must send
+  the same header.
+- An injected concrete Guzzle client must use the configured API base URI and must not define
+  default `Authorization` or `X-Api-Key` headers. Supply credentials through `Configuration`.
+- Direct transport calls accept only version-relative request paths. Absolute, leading-slash, and
+  dot-segment paths throw `InvalidArgumentException` before network I/O.
+- Non-2xx application envelope statuses throw `ApiException`; malformed JSON, envelope status,
+  envelope data, and complete pagination headers throw `NetworkException`.
+- Document and template uploads require a readable, non-empty `.pdf` no larger than 25 MB, with a
+  PDF header in the first 1 KiB and `%%EOF` in the final 1 KiB.
+- Diagnostic object dumps and SDK transport logs redact configured credentials and common token
+  spellings.
+
+Run the full developer gate after upgrading:
+
+```bash
+composer check
+```

@@ -59,6 +59,65 @@ final class DocumentResourceTest extends TestCase
         }
     }
 
+    public function testUploadRejectsTextRenamedAsPdf(): void
+    {
+        $temporaryPath = tempnam(sys_get_temp_dir(), 'asn');
+        $this->assertIsString($temporaryPath);
+        $pdf = $temporaryPath . '.pdf';
+        rename($temporaryPath, $pdf);
+        file_put_contents($pdf, 'plain text');
+
+        $this->expectException(ValidationException::class);
+        $this->expectExceptionMessage('valid PDF');
+        try {
+            $this->documents->upload($pdf);
+        } finally {
+            @unlink($pdf);
+        }
+    }
+
+    public function testUploadRejectsPdfWithoutEndMarker(): void
+    {
+        $temporaryPath = tempnam(sys_get_temp_dir(), 'asn');
+        $this->assertIsString($temporaryPath);
+        $pdf = $temporaryPath . '.pdf';
+        rename($temporaryPath, $pdf);
+        file_put_contents($pdf, "%PDF-1.4\n1 0 obj\n");
+
+        $this->expectException(ValidationException::class);
+        $this->expectExceptionMessage('valid PDF');
+        try {
+            $this->documents->upload($pdf);
+        } finally {
+            @unlink($pdf);
+        }
+    }
+
+    public function testUploadRejectsPdfLargerThanApiLimit(): void
+    {
+        $pdf = $this->writeSparsePdf((25 * 1024 * 1024) + 1);
+
+        $this->expectException(ValidationException::class);
+        $this->expectExceptionMessage('25 MB');
+        try {
+            DocumentResource::assertUploadable($pdf);
+        } finally {
+            @unlink($pdf);
+        }
+    }
+
+    public function testUploadAcceptsPdfAtApiLimit(): void
+    {
+        $pdf = $this->writeSparsePdf(25 * 1024 * 1024);
+
+        try {
+            DocumentResource::assertUploadable($pdf);
+            $this->addToAssertionCount(1);
+        } finally {
+            @unlink($pdf);
+        }
+    }
+
     public function testUploadRejectsMissingFile(): void
     {
         $this->expectException(ValidationException::class);
@@ -433,6 +492,21 @@ final class DocumentResourceTest extends TestCase
         $this->assertArrayNotHasKey('pagination', $this->documents->list());
     }
 
+    public function testMalformedCompletePaginationHeadersAreRejected(): void
+    {
+        $this->http->queueJson(200, [], [
+            'x-pagination-current-page' => ['1'],
+            'x-pagination-page-count' => ['many'],
+            'x-pagination-per-page' => ['10'],
+            'x-pagination-total-count' => ['20'],
+        ]);
+
+        $this->expectException(NetworkException::class);
+        $this->expectExceptionMessage('invalid pagination headers');
+
+        $this->documents->list();
+    }
+
     private function writeFixturePdf(): string
     {
         $temporaryPath = tempnam(sys_get_temp_dir(), 'asn');
@@ -442,5 +516,27 @@ final class DocumentResourceTest extends TestCase
         file_put_contents($path, "%PDF-1.4\n%%EOF\n");
 
         return $path;
+    }
+
+    private function writeSparsePdf(int $size): string
+    {
+        $temporaryPath = tempnam(sys_get_temp_dir(), 'asn');
+        $this->assertIsString($temporaryPath);
+        $pdf = $temporaryPath . '.pdf';
+        rename($temporaryPath, $pdf);
+
+        $handle = fopen($pdf, 'w+b');
+        $this->assertIsResource($handle);
+        $trailer = "%%EOF\n";
+        try {
+            $this->assertNotFalse(fwrite($handle, "%PDF-1.4\n"));
+            $this->assertTrue(ftruncate($handle, $size));
+            $this->assertSame(0, fseek($handle, $size - strlen($trailer)));
+            $this->assertNotFalse(fwrite($handle, $trailer));
+        } finally {
+            fclose($handle);
+        }
+
+        return $pdf;
     }
 }

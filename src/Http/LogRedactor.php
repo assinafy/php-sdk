@@ -16,31 +16,25 @@ final class LogRedactor
     public const PLACEHOLDER = '[redacted]';
 
     /**
-     * Keys whose values are credentials, compared case-insensitively. Matching is exact
-     * rather than substring so that innocuous keys are not needlessly masked.
+     * Canonical credential keys. Input keys are lowercased and stripped of `-`/`_`,
+     * covering snake_case, kebab-case, and camelCase without substring matching.
      */
     private const SECRET_KEYS = [
         'password',
-        'new_password',
-        'current_password',
+        'newpassword',
+        'currentpassword',
         'token',
-        'access_token',
-        'refresh_token',
-        'api_key',
-        'api-key',
+        'accesstoken',
+        'refreshtoken',
         'apikey',
         'authorization',
-        'x-api-key',
-        'x_api_key',
-        'signer-access-code',
-        'signer_access_code',
-        'verification-code',
-        'verification_code',
-        'access-token',
-        'access_code',
-        'id_token',
-        'client_secret',
-        'webhook_secret',
+        'xapikey',
+        'signeraccesscode',
+        'verificationcode',
+        'accesscode',
+        'idtoken',
+        'clientsecret',
+        'webhooksecret',
         'secret',
     ];
 
@@ -189,20 +183,6 @@ final class LogRedactor
      */
     public static function redactText(string $text): string
     {
-        $queryNames = implode('|', [
-            'access-token',
-            'access_token',
-            'access_code',
-            'api-key',
-            'api_key',
-            'apikey',
-            'signer-access-code',
-            'signer_access_code',
-            'token',
-            'verification-code',
-            'verification_code',
-        ]);
-
         // Current sandbox signing URLs place the credential in `/sign/{code}`.
         // Mask this before handling query/fragment forms of the same credential.
         $redacted = preg_replace(
@@ -211,9 +191,11 @@ final class LogRedactor
             $text
         ) ?? $text;
 
-        $redacted = preg_replace(
-            '/([?&#](?:' . $queryNames . ')=)[^&#\s]*/i',
-            '$1' . self::PLACEHOLDER,
+        $redacted = preg_replace_callback(
+            '~([?&#])([^=&#\s]+)=([^&#\s]*)~',
+            static fn (array $matches): string => self::isSecret(rawurldecode($matches[2]))
+                ? $matches[1] . $matches[2] . '=' . self::PLACEHOLDER
+                : $matches[0],
             $redacted
         ) ?? $redacted;
 
@@ -232,6 +214,8 @@ final class LogRedactor
 
     private static function isSecret(string $key): bool
     {
-        return in_array(strtolower($key), self::SECRET_KEYS, true);
+        $canonical = str_replace(['-', '_'], '', strtolower($key));
+
+        return in_array($canonical, self::SECRET_KEYS, true);
     }
 }

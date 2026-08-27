@@ -45,7 +45,7 @@ final class TemplateResourceTest extends TestCase
         $this->assertIsString($temporaryPath);
         $pdf = $temporaryPath . '.pdf';
         rename($temporaryPath, $pdf);
-        file_put_contents($pdf, '%PDF-1.4');
+        file_put_contents($pdf, "%PDF-1.4\n%%EOF\n");
 
         $http->queueJson(200, ['id' => 'tpl-1', 'status' => 'Uploaded']);
         try {

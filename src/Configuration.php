@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Assinafy\SDK;
 
+use Assinafy\SDK\Http\LogRedactor;
+
 class Configuration
 {
-    public const SDK_VERSION = '2.1.0';
+    public const SDK_VERSION = '2.1.1';
     public const DEFAULT_BASE_URL = 'https://api.assinafy.com.br/v1';
     public const SANDBOX_BASE_URL = 'https://sandbox.assinafy.com.br/v1';
 
@@ -176,7 +178,7 @@ class Configuration
     {
         $headers = [
             'Accept' => 'application/json',
-            'User-Agent' => 'assinafy-php-sdk/' . self::SDK_VERSION,
+            'User-Agent' => 'Assinafy-PHP-SDK/v' . self::SDK_VERSION,
         ];
 
         if ($this->accessToken !== null) {
@@ -186,6 +188,25 @@ class Configuration
         }
 
         return $headers;
+    }
+
+    /**
+     * Keep credentials and workspace identifiers out of diagnostic object dumps.
+     *
+     * @return array{base_url: string, authentication: string, account_id: string,
+     *     timeout: int, connect_timeout: int}
+     */
+    public function __debugInfo(): array
+    {
+        return [
+            'base_url' => $this->baseUrl,
+            'authentication' => $this->isPublic()
+                ? 'public'
+                : ($this->isBearerAuthenticated() ? 'bearer' : 'api_key'),
+            'account_id' => $this->isPublic() ? '[public]' : LogRedactor::PLACEHOLDER,
+            'timeout' => $this->timeout,
+            'connect_timeout' => $this->connectTimeout,
+        ];
     }
 
     private function validateCredentials(

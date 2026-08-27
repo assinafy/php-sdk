@@ -3,8 +3,8 @@
 These examples target the Assinafy v1 sandbox. Keep production and sandbox credentials separate, load secrets from environment variables or a secret manager, and use disposable sandbox entities for operations that create, update, sign, or delete data.
 
 The complete endpoint and response mapping is in [API_REFERENCE.md](API_REFERENCE.md).
-These examples target the `v2.1.0` release and current repository `main`. Packagist does not
-currently expose `assinafy/php-sdk`; see
+These examples target the `v2.1.1` release. Packagist does not currently expose
+`assinafy/php-sdk`; see
 [INSTALLATION.md](INSTALLATION.md) for the released tag and repository installation choices.
 
 ## Sandbox setup
@@ -76,8 +76,8 @@ The helper accepts existing signer IDs as strings and accepts `verification_meth
 `notification_methods`, and `step` in signer arrays. An ordinary assignment allows zero or one
 notification method. For Email/WhatsApp verification, a non-empty notification must match; when
 only one is supplied, the API infers the other, and omitting both defaults to Email.
-DigitalCertificate is exempt from channel equality. An explicit empty notification list is
-forwarded as-is; ordinary cost estimation with that shape was live-verified `200`.
+DigitalCertificate is exempt from channel equality. The API accepts an explicit empty
+notification list, which the SDK forwards unchanged.
 An exact email match is reused without applying the supplied name or phone; update and verify the
 stored signer first if WhatsApp is required. For DigitalCertificate, supply an existing signer ID
 after setting its `government_id`; the helper deliberately does not resolve certificate signers by
@@ -116,8 +116,8 @@ $assignment = $client->assignments()->create(
 
 `waitUntilReady()` returns when document status reaches `metadata_ready`, `pending_signature`,
 `ready`, `certificating`, or `certificated`. It throws for terminal failure/rejection states or
-when the timeout expires. The published status catalog omits `ready`, but the webhook contract
-and runtime use it, so the SDK deliberately retains `STATUS_READY`.
+when the timeout expires. Webhook processing can emit `ready`, which is exposed as
+`DocumentResource::STATUS_READY`.
 
 ## Estimate assignment cost
 
@@ -147,9 +147,9 @@ requires the account's Digital Certificate feature, must have a CPF/CNPJ in `gov
 must be alone in its signing step. Signer creation has no `government_id` field, so update an
 existing signer first. Formatted CPF/CNPJ input is accepted and normalized to digits by the
 server. The update response omits `government_id`, so its absence there does not indicate failure.
-On 2026-08-19, sandbox assignment creation returned `400` with
-`Invalid method`; run the following only after Assinafy confirms the feature and completion
-protocol are enabled in the target environment:
+Sandbox currently rejects certificate assignment creation with `400` (`Invalid method`). Run the
+following only after Assinafy confirms the feature and completion protocol are enabled in the
+target environment:
 
 ```php
 $certificateSignerId = requiredEnv('ASSINAFY_CERTIFICATE_SIGNER_ID');
@@ -177,9 +177,10 @@ $certificateAssignment = $client->assignments()->create(
 );
 ```
 
-The ordinary `signerSession()->sign()` path cannot complete an ICP-Brasil certificate signature,
-and the published API defines no certificate start/complete endpoints. Do not invent or call
-undocumented certificate routes.
+The ordinary `signerSession()->sign()` path cannot complete an ICP-Brasil certificate signature.
+The sign-operation prose names `POST /v1/signers/certificate/start` and
+`POST /v1/signers/certificate/complete`, but publishes no path, authentication, request, or
+response contract for either route. The SDK does not call them.
 
 Changing a signer's already verified email or WhatsApp number is rejected while that signer has
 an in-flight document. Changing an unverified channel succeeds but rotates its access and
@@ -213,9 +214,8 @@ foreach ($matches['data'] ?? [] as $match) {
 
 These methods implement the published contract: account statistics cover the configured
 workspace, and user statistics aggregate every account available to the authenticated user.
-They are **not currently runnable against the audited sandbox**: on 2026-08-05, both published
-routes returned an application-level `404` route-not-deployed response. The following is the
-contract usage for a deployment where Assinafy has enabled the routes:
+These published routes are not currently available in sandbox. The following is the usage for a
+deployment where Assinafy has enabled them:
 
 ```php
 use Assinafy\SDK\Resources\AccountResource;
@@ -272,7 +272,8 @@ original, certificated, and certificate-page artifacts, plus `pades` when presen
 
 ## Templates
 
-Template upload, detail, update, delete, and page download work in the API runtime but are not currently present in the published OpenAPI document. Keep sandbox coverage around them.
+Template upload, detail, update, delete, and page download are runtime-supported compatibility
+operations outside the published OpenAPI document.
 
 ```php
 $template = $client->templates()->create(requiredEnv('ASSINAFY_TEST_PDF'));
@@ -311,10 +312,9 @@ $created = $client->documents()->createFromTemplate(
 );
 ```
 
-Do not apply the ordinary assignment's max-one/coupling validation to template payloads. Despite
-the template-create prose saying one method, the sandbox returned `200` for both template cost
-estimation and creation with `notification_methods: ['Email', 'Email']`; the SDK preserves that
-verified runtime behavior.
+Do not apply the ordinary assignment's max-one/coupling validation to template payloads. Template
+cost estimation and creation accept duplicate entries such as
+`notification_methods: ['Email', 'Email']`, which the SDK preserves.
 
 ## Public authentication
 
@@ -325,9 +325,9 @@ $publicClient = AssinafyClient::forAuth(Configuration::SANDBOX_BASE_URL);
 ```
 
 `socialLoginUrl()` and `socialLoginCallbackUrl()` remain as compatibility helpers, but both GET
-routes are outside the current OpenAPI document. Live checks on 2026-08-19 found malformed or
-non-production redirect configuration in sandbox and production. They are not an operational
-OAuth integration and are intentionally omitted from executable examples.
+routes are outside the current OpenAPI document. Their upstream sandbox and production
+configurations do not currently produce usable redirects. They are not an operational OAuth
+integration and are intentionally omitted from executable examples.
 
 For password login, load both values from secret input and never commit them:
 
@@ -357,20 +357,18 @@ $bearerDocuments = $bearerClient->documents()->list(page: 1, perPage: 20);
 $maskedApiKey = $bearerClient->auth()->getApiKey();
 ```
 
-OpenAPI declares the `/users/self` `data` member as an `AuthUser`. The sandbox currently wraps it
-as `{user: AuthUser, accounts: AuthAccount[]}`; `users()->get()` normalizes `data.user`, so
-`$authenticatedUser` is the user object in either case. Continue using `accounts()->list()` for
-account discovery.
+`users()->get()` normalizes both an `AuthUser` response and the wrapped
+`{user: AuthUser, accounts: AuthAccount[]}` form, so `$authenticatedUser` is always the user
+object. Continue using `accounts()->list()` for account discovery.
 
 ## Notification preferences (published; not deployed in sandbox)
 
 The authenticated user's nine owner-facing document email preferences default to `true` and are
 always returned as a complete map. A non-empty update may contain any subset; omitted values stay
 unchanged. Account and security email such as welcome messages, password resets, invitations, and
-account deletion cannot be disabled here. These methods are in the current production OpenAPI,
-but neither route was deployed in sandbox on 2026-08-19; GET returned application-level `404`
-(`Página não encontrada`). The following is the published usage and response shape, not a
-runnable sandbox example:
+account deletion cannot be disabled here. These methods are in the current production OpenAPI but
+are not currently available in sandbox. The following is the published usage and response shape,
+not a runnable sandbox example:
 
 ```php
 $preferences = $bearerClient->users()->notificationPreferences();
@@ -414,16 +412,15 @@ $bearerClient->auth()->changePassword(
 $bearerClient->auth()->deleteApiKey();
 ```
 
-The methods above are separately unit-tested. A successful live run requires a disposable user,
-password control, and—after deletion or password change—a recovery plan; the API key and email
-addresses alone are not sufficient authorization to exercise them safely.
+Using the credential-mutating methods above requires a disposable user, password control, and—after
+deletion or password change—a recovery plan. The API key and email addresses alone are not
+sufficient authorization to exercise them safely.
 
 ## Public document send-token
 
-This endpoint sends a real sandbox notification. The published body still shows `{email}`, but
-the running sandbox requires `{recipient, channel}`. The recipient must already be a signer
-assigned to the target document; an arbitrary email address is rejected. The workflow above
-created that assignment before this call, and the SDK deliberately sends the runtime body shape:
+This endpoint sends a real sandbox notification. Supply a recipient and channel; the recipient
+must already be a signer assigned to the target document. An arbitrary email address is rejected.
+The workflow above creates that assignment before this call:
 
 ```php
 use Assinafy\SDK\Resources\DocumentResource;
@@ -437,8 +434,7 @@ $publicClient->documents()->sendToken(
 
 The successful request asks Assinafy to deliver the one-time access code; it does not return that
 code. Read it from the assigned signer's controlled inbox. The assignment's `signing_urls` expose
-only signer IDs and URLs, and a URL path segment is not a usable substitute—the audited sandbox
-returned `401` for that heuristic.
+only signer IDs and URLs; a URL path segment is not the one-time access code.
 
 ## Signer-facing flow
 
@@ -464,11 +460,8 @@ $session->verifyCode(
 ```
 
 `acceptTerms()` sends `signer-access-code` in the query and deliberately sends no request body.
-The `confirm-data` schema lists `full_name`, `email`, and `government_id`, but the `GET /sign`
-prose says a digital-certificate signer must also send `has_accepted_terms: true` in this body.
-The SDK forwards that extra field. The optional `has_accepted_terms` query on `GET /sign` is too
-late to open that gate; the endpoint documents `400` until both data confirmation and terms
-acceptance have occurred.
+For a virtual assignment, confirm the signer data, load the current document, and finalize with
+an empty field list:
 
 ```php
 $confirmedSigner = $session->confirmData(
@@ -477,12 +470,12 @@ $confirmedSigner = $session->confirmData(
     data: [
         'full_name' => 'Sandbox Signer',
         'email' => requiredEnv('ASSINAFY_TEST_SIGNER_EMAIL'),
-        'government_id' => requiredEnv('ASSINAFY_TEST_GOVERNMENT_ID'),
         'has_accepted_terms' => true,
     ],
 );
 
 $currentDocument = $session->currentDocument($accessCode);
+$session->sign($documentId, $assignmentId, $accessCode, []);
 ```
 
 Collect assignments accept field entries using the API's camelCase field names:
@@ -498,8 +491,9 @@ $session->sign($documentId, $assignmentId, $accessCode, [
 ]);
 ```
 
-This ordinary sign call handles virtual/collect signatures. It is not a digital-certificate
-completion operation.
+For a DigitalCertificate assignment, `confirmData()` also needs the signer's `government_id` and
+`has_accepted_terms: true` before `currentDocument()`. The certificate completion routes have no
+published wire contract and are not implemented by this SDK.
 
 Signer document methods use the same query authentication, including search and download:
 
@@ -534,10 +528,9 @@ $client->documents()->appendTags($documentId, [$tag['name']]);
 $documentTags = $client->documents()->listTags($documentId);
 ```
 
-Document-tag list/replace/append/detach routes are part of the current OpenAPI document. Its body
-description calls the values tag IDs, but the sandbox and SDK use names and auto-create missing
-names. These operations should not be confused with template create/get/update/delete and page
-download, which remain live-tested runtime extensions absent from the published path inventory.
+Document-tag list/replace/append/detach methods use names and auto-create missing names. Template
+create/get/update/delete and page download are separate runtime-supported compatibility methods
+outside the published OpenAPI path inventory.
 
 ## Webhook subscription and receiver
 
@@ -593,9 +586,9 @@ http_response_code(200);
 Pass any PSR-3 logger to the client constructor or install one later. The internal `MutableLogger` proxy propagates `setLogger()` to already-created resources and the default transport.
 
 ```php
-use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 
-/** @var LoggerInterface $logger */
+$logger = new NullLogger();
 $client->documents(); // A resource may already exist.
 $client->setLogger($logger);
 ```
@@ -605,6 +598,8 @@ The default transport passes diagnostic context through `LogRedactor`. Applicati
 ```php
 use Assinafy\SDK\Http\LogRedactor;
 
+$documentId = requiredEnv('ASSINAFY_DOCUMENT_ID');
+$accessToken = requiredEnv('ASSINAFY_ACCESS_TOKEN');
 $safeContext = LogRedactor::redact([
     'document_id' => $documentId,
     'authorization' => 'Bearer ' . $accessToken,

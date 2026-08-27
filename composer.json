@@ -17,6 +17,7 @@
         "psr/log": "^1.1 || ^2.0 || ^3.0"
     },
     "require-dev": {
+        "phpmd/phpmd": "^2.15.0",
         "phpstan/phpstan": "^2.2.8",
         "phpunit/phpunit": "^11.5.56 || ^12.5 || ^13.2",
         "squizlabs/php_codesniffer": "^3.13.6 || ^4.0.2"
@@ -38,12 +39,14 @@
         "test": "phpunit --testsuite=unit",
         "test:integration": "phpunit --testsuite=integration",
         "phpstan": "phpstan analyse --no-progress --memory-limit=512M",
+        "phpmd": "@php -d error_reporting=8191 vendor/bin/phpmd src text phpmd.xml --baseline-file phpmd.baseline.xml",
         "phpcs": "phpcs",
         "audit:dependencies": "@composer audit --format=plain --abandoned=fail",
         "check": [
             "@composer validate --strict --no-check-lock",
             "@test",
             "@phpstan",
+            "@phpmd",
             "@phpcs",
             "@audit:dependencies"
         ]

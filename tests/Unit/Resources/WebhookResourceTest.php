@@ -78,6 +78,16 @@ final class WebhookResourceTest extends TestCase
         $webhooks->register('ftp://example.com/hook', 'a@b.com');
     }
 
+    public function testRegisterAcceptsAbsoluteHttpUrlWithQuery(): void
+    {
+        [$http, $webhooks] = $this->build();
+        $http->queueJson(200, []);
+
+        $webhooks->register('http://example.com/hook?source=sdk', 'developer@example.test');
+
+        $this->assertSame('http://example.com/hook?source=sdk', $http->lastCall()['body']['url']);
+    }
+
     public function testGet(): void
     {
         [$http, $webhooks] = $this->build();

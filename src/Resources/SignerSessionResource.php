@@ -80,7 +80,7 @@ class SignerSessionResource extends AbstractResource
     }
 
     /**
-     * Confirm (or set) the signer's email / WhatsApp / terms acceptance.
+     * Confirm the signer's name, email, government ID, or terms acceptance.
      * `PUT /documents/{documentId}/signers/confirm-data?signer-access-code={code}`
      *
      * The `signer-access-code` is sent as a query parameter, the rest of the data

@@ -387,10 +387,7 @@ class AssignmentResource extends AbstractResource
                     $entry['step'] = $signer['step'];
                 }
 
-                // `role_id` is documented on the template→document endpoints rather than on
-                // create-assignment, so the API most likely ignores it here. Forwarded anyway:
-                // it is harmless if ignored, and dropping it would silently change behaviour
-                // for anyone already passing it.
+                // Preserve the optional role reference accepted by existing integrations.
                 if (isset($signer['role_id'])) {
                     $entry['role_id'] = $signer['role_id'];
                 }
