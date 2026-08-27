@@ -50,10 +50,45 @@ class WebhookResource extends AbstractResource
      * Register or replace the workspace webhook subscription.
      * `PUT /accounts/{account_id}/webhooks/subscriptions`
      *
-     * The API requires `is_active`, `url`, `email`, and `events` in the body.
+     * A workspace has exactly one subscription, and this call is an upsert — it creates the
+     * subscription or replaces it wholesale. All four body fields are mandatory, so a
+     * partial update is not possible; read the current values with {@see self::get()} first
+     * if you only mean to change one.
      *
-     * @param array<int, mixed> $events when empty, {@see DEFAULT_EVENTS} is sent
+     * `email` is the address the platform notifies when deliveries start failing; it is not
+     * a delivery target.
+     *
+     * Request body:
+     * ```
+     * [
+     *   'url'       => 'https://example.com/hooks/assinafy',  // required
+     *   'email'     => 'ops@example.com',                     // required
+     *   'events'    => ['document_ready', 'signer_signed_document'],  // required
+     *   'is_active' => true,                                  // required
+     * ]
+     * ```
+     *
+     * Response (unwrapped `data`):
+     * ```
+     * [
+     *   'events'     => ['document_ready', 'signer_signed_document'],
+     *   'is_active'  => true,
+     *   'url'        => 'https://example.com/hooks/assinafy',
+     *   'email'      => 'ops@example.com',
+     *   'updated_at' => '2026-08-27T17:55:12Z',
+     * ]
+     * ```
+     *
+     * Deliveries are **unsigned** — there is no secret to register and no signature header.
+     * Secure the endpoint as described by {@see \Assinafy\SDK\Support\WebhookEventParser}.
+     *
+     * @param string            $url    absolute HTTP(S) endpoint to POST deliveries to
+     * @param string            $email  address alerted when delivery fails
+     * @param array<int, mixed> $events event type IDs; when empty, {@see DEFAULT_EVENTS} is sent
+     * @param bool              $isActive whether to start delivering immediately
      * @return array<string, mixed> the stored subscription
+     * @throws ValidationException on a non-absolute URL, a malformed email, or a
+     *     non-string event
      */
     public function register(
         #[\SensitiveParameter] string $url,
@@ -103,7 +138,23 @@ class WebhookResource extends AbstractResource
      * Get the current webhook subscription (or null if none has ever been configured).
      * `GET /accounts/{account_id}/webhooks/subscriptions`
      *
-     * @return array<string, mixed>|null
+     * Request: no parameters.
+     *
+     * Response (unwrapped `data`):
+     * ```
+     * [
+     *   'events'     => ['document_ready', 'signer_signed_document', 'signer_rejected_document'],
+     *   'is_active'  => false,
+     *   'url'        => 'https://example.com/hooks/assinafy',
+     *   'email'      => 'ops@example.com',
+     *   'updated_at' => '2026-08-27T17:55:12Z',
+     * ]
+     * ```
+     *
+     * Returns `null` — not an empty array — when the workspace has never configured one, so
+     * `if ($client->webhooks()->get() === null)` is the way to test for absence.
+     *
+     * @return array<string, mixed>|null the subscription, or null when none exists
      */
     public function get(): ?array
     {
@@ -119,7 +170,21 @@ class WebhookResource extends AbstractResource
      * `PUT /accounts/{account_id}/webhooks/inactivate`
      *
      * The URL / email / events stay on file so the subscription can be re-enabled
-     * later with {@see activate()} without re-supplying them.
+     * later with {@see activate()} without re-supplying them. This is the only way to stop
+     * deliveries — the API has no `DELETE` route for subscriptions.
+     *
+     * Request: no body.
+     *
+     * Response (unwrapped `data`) — the subscription with `is_active` flipped:
+     * ```
+     * [
+     *   'events'     => ['document_ready', 'signer_signed_document'],
+     *   'is_active'  => false,
+     *   'url'        => 'https://example.com/hooks/assinafy',
+     *   'email'      => 'ops@example.com',
+     *   'updated_at' => '2026-08-27T17:55:12Z',
+     * ]
+     * ```
      *
      * @return array<string, mixed>
      */
@@ -133,10 +198,24 @@ class WebhookResource extends AbstractResource
     /**
      * Re-enable delivery on the existing subscription.
      *
-     * There is no dedicated "activate" route, so this re-sends the stored URL / email /
-     * events via {@see register()} with `is_active = true`.
+     * Client-side helper, not a single endpoint. There is no dedicated "activate" route, so
+     * this reads the stored subscription with {@see self::get()} and re-sends its URL /
+     * email / events through {@see self::register()} with `is_active = true` — two requests.
      *
-     * @return array<string, mixed>
+     * Request/Response: as {@see self::get()} then {@see self::register()}.
+     *
+     * Response (unwrapped `data` from the register call):
+     * ```
+     * [
+     *   'events'     => ['document_ready', 'signer_signed_document'],
+     *   'is_active'  => true,
+     *   'url'        => 'https://example.com/hooks/assinafy',
+     *   'email'      => 'ops@example.com',
+     *   'updated_at' => '2026-08-27T18:02:44Z',
+     * ]
+     * ```
+     *
+     * @return array<string, mixed> the reactivated subscription
      * @throws \RuntimeException when no subscription has been configured yet
      */
     public function activate(): array
@@ -161,6 +240,27 @@ class WebhookResource extends AbstractResource
      * List the available webhook event types and their descriptions.
      * `GET /webhooks/event-types` (not account-scoped).
      *
+     * The authoritative vocabulary for the `events` array of {@see self::register()}. The
+     * `EVENT_*` constants mirror these IDs; prefer this call over hard-coding if you render
+     * a picker, since the platform can add types.
+     *
+     * Request: no parameters.
+     *
+     * Response (unwrapped `data`):
+     * ```
+     * [
+     *   ['id' => 'document_uploaded',
+     *    'description' => 'Triggered when the User has uploaded a Document'],
+     *   ['id' => 'document_metadata_ready',
+     *    'description' => 'Triggered when the document is ready to be prepared…'],
+     *   ['id' => 'assignment_created',
+     *    'description' => 'Triggered when the User created an assignment for a Document…'],
+     *   ['id' => 'document_ready',
+     *    'description' => 'Triggered when the last Signer of the assignment signs…'],
+     *   // …one entry per EVENT_* constant on this class
+     * ]
+     * ```
+     *
      * @return array<int, array{id: string, description: string}>
      */
     public function eventTypes(): array
@@ -174,11 +274,54 @@ class WebhookResource extends AbstractResource
      * List the webhook delivery history (dispatches) for the workspace.
      * `GET /accounts/{account_id}/webhooks`
      *
+     * The delivery log — what was sent, where, and whether it landed. Each entry embeds the
+     * exact `payload` that was POSTed, so a failed delivery can be replayed or inspected
+     * without reproducing the original event.
+     *
+     * Request (query string): `event`, `delivered` (`true`/`false`), `from` and `to` (Unix
+     * timestamps), `page`, `per-page`.
+     *
+     * Response (full envelope — pagination lifted from the `X-Pagination-*` headers):
+     * ```
+     * [
+     *   'status'  => 200,
+     *   'message' => '',
+     *   'data'    => [
+     *     [
+     *       'id'          => '10413df9999b0bbd9e53220370c0',
+     *       'event'       => 'signature_requested',
+     *       'activity_id' => 22970,
+     *       'endpoint'    => 'https://example.com/hooks/assinafy',
+     *       'payload'     => [
+     *         'id' => 22970, 'event' => 'signature_requested',
+     *         'account_id' => '64f000000000000000000001',
+     *         'object'  => ['id' => '1041…', 'type' => 'Document',
+     *                       'status' => 'pending_signature', 'assignment' => [ … ]],
+     *         'payload' => [ … ],
+     *       ],
+     *       'delivered'     => false,
+     *       'http_status'   => 404,
+     *       'response_body' => '{"success":false,"error":{"message":"…"}}',
+     *       'error'         => 'Client error: `POST https://example.com/hooks/assinafy` …',
+     *       'created_at'    => '2026-08-20T15:31:08Z',
+     *       'updated_at'    => '2026-08-20T15:31:08Z',
+     *     ],
+     *   ],
+     *   'pagination' => ['current_page' => 1, 'page_count' => 4, 'per_page' => 20, 'total_count' => 76],
+     * ]
+     * ```
+     *
+     * `http_status`, `response_body`, and `error` are the diagnostics for a failed delivery —
+     * they record what your endpoint actually answered. On a successful delivery `delivered`
+     * is true and `error` is empty.
+     *
      * @param array<string, scalar> $filters optional `event`, `delivered`, `from`, `to`,
      *     `page`, `per-page`
      * @return array{status?: int, message?: string, data?: array<int, array<string, mixed>>,
      *     pagination?: array{current_page: int, page_count: int, per_page: int, total_count: int}}
      *     full envelope with pagination lifted from response headers
+     * @throws ValidationException when `page`/`per-page` are not integers, or `per-page` is
+     *     outside 1–100
      */
     public function dispatches(array $filters = []): array
     {
@@ -199,9 +342,36 @@ class WebhookResource extends AbstractResource
      * Manually retry a single webhook dispatch.
      * `POST /accounts/{account_id}/webhooks/{dispatch_id}/retry`
      *
-     * Returns the newly created dispatch entry.
+     * Re-sends the original payload byte-for-byte to the currently configured endpoint — use
+     * it after fixing an outage. `$dispatchId` is the `id` of an entry from
+     * {@see self::dispatches()}.
      *
-     * @return array<string, mixed>
+     * A retry creates a **new** dispatch record rather than mutating the old one, so the
+     * history keeps both attempts.
+     *
+     * Request: no body.
+     *
+     * Response (unwrapped `data`) — the newly created dispatch entry, in the same shape
+     * {@see self::dispatches()} returns:
+     * ```
+     * [
+     *   'id'            => '10413dfa1187c2ad0f7745e19b32',
+     *   'event'         => 'signature_requested',
+     *   'activity_id'   => 22970,
+     *   'endpoint'      => 'https://example.com/hooks/assinafy',
+     *   'payload'       => [ … the original payload, unchanged … ],
+     *   'delivered'     => true,
+     *   'http_status'   => 200,
+     *   'response_body' => '',
+     *   'error'         => '',
+     *   'created_at'    => '2026-08-27T18:10:31Z',
+     *   'updated_at'    => '2026-08-27T18:10:31Z',
+     * ]
+     * ```
+     *
+     * @return array<string, mixed> the new dispatch record
+     * @throws ValidationException when `$dispatchId` is empty
+     * @throws \Assinafy\SDK\Exceptions\ApiException 404 when the dispatch does not exist
      */
     public function retryDispatch(string $dispatchId): array
     {

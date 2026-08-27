@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Assinafy\SDK\Resources;
 
 use Assinafy\SDK\Exceptions\ValidationException;
+use Assinafy\SDK\Support\Iso8601;
 
 /**
  * Assignments resource — every endpoint under `/documents/{document_id}/assignments`.
@@ -38,12 +39,92 @@ class AssignmentResource extends AbstractResource
      * Create an assignment (signature request).
      * `POST /documents/{document_id}/assignments`
      *
+     * This is the call that actually notifies signers. The document must have finished
+     * processing first — see {@see DocumentResource::waitUntilReady()}.
+     *
+     * `virtual` collects a click-to-sign consent from each signer. `collect` additionally
+     * places named input fields on the pages, so it requires `entries`.
+     *
+     * Request body:
+     * ```
+     * [
+     *   'method'  => 'virtual',                       // 'virtual' | 'collect'
+     *   'signers' => [
+     *     [
+     *       'id'                   => '19e6b92e7895332ed9708535d8c',   // required
+     *       'verification_method'  => 'Email',        // Email | Whatsapp | DigitalCertificate
+     *       'notification_methods' => ['Email'],      // exactly one: Email | Whatsapp
+     *       'step'                 => 1,              // 1-based signing order
+     *     ],
+     *   ],
+     *   // 'collect' only — where each field is stamped on the page:
+     *   'entries' => [
+     *     [
+     *       'page_id' => '1a0439be3231e685cee68093a12',
+     *       'fields'  => [
+     *         [
+     *           'signer_id'        => '19e6b92e7895332ed9708535d8c',
+     *           'field_id'         => '102d25a48bec03ebcf3b5f651998',
+     *           'display_settings' => [
+     *             'left' => 120.0, 'top' => 400.0, 'width' => 180.0, 'height' => 32.0,
+     *             'fontSize' => 12.0, 'fontFamily' => 'Helvetica',
+     *             'backgroundColor' => '#ffffff',
+     *           ],
+     *         ],
+     *       ],
+     *     ],
+     *   ],
+     *   'message'        => 'Please sign this contract',
+     *   'expires_at'     => '2026-12-31T23:59:59Z',   // ISO 8601, must carry Z or ±HH:MM
+     *   'copy_receivers' => ['103033c9cd9426bbbb78eccd2c79'],  // signer IDs CC'd on completion
+     * ]
+     * ```
+     *
+     * Response (unwrapped `data`):
+     * ```
+     * [
+     *   'id'           => '103033c9d2cec233bf65eea04999',
+     *   'sender_email' => 'sender@example.com',
+     *   'method'       => 'virtual',
+     *   'expires_at'   => null,
+     *   'message'      => 'Please sign this contract',
+     *   'signers'      => [
+     *     [
+     *       'id' => '19e6b92e7895332ed9708535d8c', 'full_name' => 'Jane Doe',
+     *       'email' => 'jane@example.com', 'whatsapp_phone_number' => null,
+     *       'has_accepted_terms' => false, 'completed' => false, 'notified' => true,
+     *       'verification_method' => 'Email', 'notification_methods' => ['Email'],
+     *       'step' => 1, 'notification_history' => [],
+     *     ],
+     *   ],
+     *   'copy_receivers' => [],
+     *   'items'          => [
+     *     [
+     *       'id' => '103033c9d33326458deb74fc3052', 'page' => null, 'value' => null,
+     *       'completed' => false, 'display_settings' => [],
+     *       'signer' => ['id' => '19e6…', 'full_name' => 'Jane Doe', 'email' => 'jane@example.com'],
+     *       'field'  => ['id' => '102d…', 'name' => 'Virtual', 'type' => 'virtual'],
+     *     ],
+     *   ],
+     *   'summary'      => [],
+     *   'signing_urls' => [
+     *     ['signer_id' => '19e6b92e7895332ed9708535d8c', 'url' => 'https://app…/sign/…'],
+     *   ],
+     * ]
+     * ```
+     *
+     * The `signing_urls` entries are what you hand to each signer. They do **not** contain
+     * the signer access code — that is delivered separately by the notification channel.
+     *
      * @param array<int, string|array<string, mixed>> $signers
-     *     Either a list of signer IDs (strings) or a list of `{ id, verification_method?, notification_methods? }`
-     *     objects. String IDs are normalized to `{ id }` objects before being sent.
+     *     Either a list of signer IDs (strings) or a list of `{ id, verification_method?,
+     *     notification_methods?, step? }` objects. String IDs are normalized to `{ id }`.
      * @param array<string, mixed> $options
      *     Optional keys: `entries` (required for collect), `message`, `expires_at`, `copy_receivers`.
      * @return array<string, mixed> the created assignment
+     * @throws ValidationException on an unknown method, an empty signer list, a `collect`
+     *     assignment without entries, a malformed `expires_at`, non-contiguous steps, or a
+     *     digital-certificate signer sharing a step with another signer
      */
     public function create(
         string $documentId,
@@ -210,7 +291,33 @@ class AssignmentResource extends AbstractResource
      * Resend the signing-notification to a single signer.
      * `PUT /documents/{document_id}/assignments/{assignment_id}/signers/{signer_id}/resend`
      *
+     * Sends over the signer's configured `notification_methods` channel. A resend may
+     * consume credits — price it first with {@see self::estimateResendCost()}.
+     *
+     * Request: no body; everything is addressed through the path.
+     *
+     * Response (unwrapped `data` — the refreshed signer entry, in the same shape the
+     * assignment's `signers` array uses, with the delivery recorded in
+     * `notification_history`):
+     * ```
+     * [
+     *   'id'                    => '19e6b92e7895332ed9708535d8c',
+     *   'full_name'             => 'Jane Doe',
+     *   'email'                 => 'jane@example.com',
+     *   'whatsapp_phone_number' => null,
+     *   'has_accepted_terms'    => false,
+     *   'completed'             => false,
+     *   'notified'              => true,
+     *   'verification_method'   => 'Email',
+     *   'notification_methods'  => ['Email'],
+     *   'step'                  => 1,
+     *   'notification_history'  => [ … one entry per delivery attempt … ],
+     * ]
+     * ```
+     *
      * @return array<string, mixed>
+     * @throws ValidationException when any identifier is empty
+     * @throws \Assinafy\SDK\Exceptions\ApiException when the signer has already completed
      */
     public function resend(string $documentId, string $assignmentId, string $signerId): array
     {
@@ -228,7 +335,34 @@ class AssignmentResource extends AbstractResource
      * Estimate the credit cost of resending a notification to one signer.
      * `POST /documents/{document_id}/assignments/{assignment_id}/signers/{signer_id}/estimate-resend-cost`
      *
+     * Read-only — nothing is sent to the signer and no credits are spent. Check
+     * `has_sufficient_resources` before calling {@see self::resend()}.
+     *
+     * Request: no body; everything is addressed through the path.
+     *
+     * Response (unwrapped `data`) — the same estimate shape as {@see self::estimateCost()}:
+     * ```
+     * [
+     *   'documents'                => 0,
+     *   'credits'                  => 1,
+     *   'needs_extra_document'     => false,
+     *   'extra_document_cost'      => 0,
+     *   'total_credits'            => 1,
+     *   'breakdown'                => [],
+     *   'document_balance'         => 100,
+     *   'credit_balance'           => 25,
+     *   'has_sufficient_resources' => true,
+     *   'blocking_reason'          => null,
+     *   'message'                  => null,
+     * ]
+     * ```
+     *
+     * When the workspace cannot afford it, `has_sufficient_resources` is false and
+     * `blocking_reason` carries a machine-readable code (e.g. `'InsufficientDocuments'`)
+     * alongside a localised `message`.
+     *
      * @return array<string, mixed>
+     * @throws ValidationException when any identifier is empty
      */
     public function estimateResendCost(string $documentId, string $assignmentId, string $signerId): array
     {
@@ -246,7 +380,29 @@ class AssignmentResource extends AbstractResource
      * Reset the expiration date of an assignment.
      * `PUT /documents/{document_id}/assignments/{assignment_id}/reset-expiration`
      *
+     * Use this to revive an assignment whose deadline has passed, or to extend one still
+     * running. `$expiresAt` is validated locally before the request is sent, so a malformed
+     * value never reaches the API.
+     *
+     * Request body:
+     * ```
+     * ['expires_at' => '2026-12-31T23:59:59Z']  // ISO 8601; a Z or ±HH:MM offset is mandatory
+     * ```
+     *
+     * Response (unwrapped `data` — the assignment with its new deadline):
+     * ```
+     * [
+     *   'id'         => '103033c9d2cec233bf65eea04999',
+     *   'method'     => 'virtual',
+     *   'expires_at' => '2026-12-31T23:59:59Z',
+     *   'message'    => 'Please sign this contract',
+     *   'signers'    => [ … ],
+     * ]
+     * ```
+     *
+     * @param string $expiresAt ISO 8601 date-time ending in `Z` or an explicit `±HH:MM` offset
      * @return array<string, mixed>
+     * @throws ValidationException when `$expiresAt` is not a valid ISO 8601 date-time
      */
     public function resetExpiration(string $documentId, string $assignmentId, string $expiresAt): array
     {
@@ -266,7 +422,19 @@ class AssignmentResource extends AbstractResource
      * header/body/buttons exactly as the signer sees them.
      * `GET /documents/{document_id}/assignments/{assignment_id}/whatsapp-notifications`
      *
-     * @return array<int, array<string, mixed>>
+     * Useful for supporting a signer who says the message never arrived: `status` shows how
+     * far the delivery got. Returns an empty array for assignments notified only by email.
+     *
+     * Request: no parameters.
+     *
+     * Response (unwrapped `data`) — a list with one entry per message sent, each carrying the
+     * delivery state plus the rendered `header`, `body`, and `buttons` as the signer sees
+     * them. WhatsApp availability is plan-dependent: on a workspace without it, creating such
+     * an assignment is refused with `403 "A notificação via WhatsApp não está disponível para
+     * o seu plano atual."`, so this list stays empty.
+     *
+     * @return array<int, array<string, mixed>> empty when nothing was sent over WhatsApp
+     * @throws ValidationException when any identifier is empty
      */
     public function whatsappNotifications(string $documentId, string $assignmentId): array
     {
@@ -501,34 +669,9 @@ class AssignmentResource extends AbstractResource
 
     private function assertDateTime(string $value): void
     {
-        $pattern = '/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-](\d{2}):(\d{2}))$/';
-        if (preg_match($pattern, $value, $matches) !== 1) {
-            throw new ValidationException('Expiration must be an ISO 8601 date-time', [
-                'expires_at' => $value,
-            ]);
-        }
-        if (isset($matches[1]) && ((int) $matches[1] > 23 || (int) $matches[2] > 59)) {
-            throw new ValidationException('Expiration must use a valid UTC offset', [
-                'expires_at' => $value,
-            ]);
-        }
-
-        try {
-            new \DateTimeImmutable($value);
-        } catch (\Exception $e) {
-            throw new ValidationException('Expiration must be a valid ISO 8601 date-time', [
-                'expires_at' => $value,
-            ]);
-        }
-
-        $parseErrors = \DateTimeImmutable::getLastErrors();
-        if (
-            is_array($parseErrors)
-            && ($parseErrors['warning_count'] > 0 || $parseErrors['error_count'] > 0)
-        ) {
-            throw new ValidationException('Expiration must be a valid ISO 8601 date-time', [
-                'expires_at' => $value,
-            ]);
+        $reason = Iso8601::reasonInvalid($value);
+        if ($reason !== null) {
+            throw new ValidationException('Expiration ' . $reason, ['expires_at' => $value]);
         }
     }
 }

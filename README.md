@@ -4,10 +4,30 @@ Framework-independent PHP client for the [Assinafy v1 API](https://api.assinafy.
 It covers workspace administration, document preparation, signature requests, signer sessions,
 artifacts, templates, tags, fields, and webhooks.
 
-This guide follows a document from upload through certification. For every SDK method, request
-field, response field, authentication scheme, and error status, use
-[docs/API_REFERENCE.md](docs/API_REFERENCE.md). Additional focused examples are available in
+This guide follows a document from upload through certification. Every SDK method also carries
+its own request and response payloads in its docblock, so an IDE shows the exact shapes at the
+call site. For the same material as a single reference, use
+[docs/API_REFERENCE.md](docs/API_REFERENCE.md); additional focused examples are in
 [docs/EXAMPLES.md](docs/EXAMPLES.md).
+
+**Contents**
+
+- [Requirements](#requirements) · [Installation](#installation)
+- **Document workflow** — [1. Configure the client](#1-configure-the-client) ·
+  [2. Upload and prepare the PDF](#2-upload-and-prepare-the-pdf) ·
+  [3. Create or reuse signers](#3-create-or-reuse-signers) ·
+  [4. Estimate the assignment](#4-estimate-the-assignment) ·
+  [5. Assign and notify](#5-assign-and-notify) ·
+  [6. Complete the signer flow](#6-complete-the-signer-flow) ·
+  [7. Monitor progress](#7-monitor-progress) ·
+  [8. Download and verify](#8-download-and-verify)
+- [Organize documents with tags](#organize-documents-with-tags) ·
+  [Reuse a template](#reuse-a-template) · [Receive webhooks](#receive-webhooks)
+- [Responses and pagination](#responses-and-pagination) ·
+  [Errors, logging, and secrets](#errors-logging-and-secrets) ·
+  [Resource map](#resource-map)
+- [Sandbox and production differences](#sandbox-and-production-differences) ·
+  [Testing](#testing) · [Upgrading and license](#upgrading-and-license)
 
 ## Requirements
 
@@ -80,7 +100,7 @@ $client = new AssinafyClient($configuration, logger: $logger);
 ```
 
 The bundled transport enforces `User-Agent: Assinafy-PHP-SDK/v{SDK_VERSION}` on every request—for
-example, version 2.1.1 sends `Assinafy-PHP-SDK/v2.1.1`. This applies to authenticated, public,
+example, version 2.1.2 sends `Assinafy-PHP-SDK/v2.1.2`. This applies to authenticated, public,
 signer, JSON, multipart-upload, raw-body, and binary-download requests.
 `Configuration::SDK_VERSION` is the single source for the header version.
 Applications that replace the bundled `HttpClientInterface` transport must send the same exact
@@ -601,6 +621,29 @@ or signature data.
 | `signerSession()` | Signer identity, terms, verification, signature image, sign, and decline actions |
 | `signerDocuments()` | Signer document list, search, bulk actions, and downloads |
 | `webhookEvents()` | Incoming webhook payload parsing |
+
+## Sandbox and production differences
+
+The sandbox does not serve every production route. These three answer normally on
+`api.assinafy.com.br` but return `404 {"name":"Not Found","message":"Página não encontrada."}`
+on `sandbox.assinafy.com.br`:
+
+| SDK method | Endpoint |
+| --- | --- |
+| `accounts()->stats()` | `GET /accounts/{account_id}/stats` |
+| `users()->stats()` | `GET /users/self/stats` |
+| `users()->notificationPreferences()` and `updateNotificationPreferences()` | `GET`/`PUT /users/self/notification-preferences` |
+
+A 404 from the sandbox is therefore not evidence that a route is gone. To tell a missing route
+from a missing resource, read the error body rather than the status: a framework routing miss
+carries a `name` key (`{"name":"Not Found", …}`), while a real route reporting a missing resource
+returns the API envelope instead (`{"status":404,"data":null,"message":"Documento não
+encontrado."}`).
+
+The same distinction works without credentials, because routing resolves before authentication:
+an unauthenticated request to a route that exists answers
+`401 {"status":401,"data":null,"message":"Credenciais inválidas."}`, and one to a route that does
+not exist answers the framework 404 above.
 
 ## Testing
 

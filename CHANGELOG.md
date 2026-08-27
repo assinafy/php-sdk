@@ -7,6 +7,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.2] - 2026-08-27
+
+Documentation and internal-consistency release. No public API, request shape, or response
+handling changed; the transport behaves exactly as in 2.1.1.
+
+### Added
+
+- **Request and response payloads on every public method.** All 107 public methods across the
+  resource classes and `WebhookEventParser` now document the exact request body or query
+  parameters they send and the response shape they return, with concrete examples, so an IDE
+  shows the contract at the call site. Previously six methods carried payload examples.
+  Notable details now written down:
+  - `AuthResource::generateApiKey()` is the only call that returns the API key in full;
+    `getApiKey()` returns it masked to the last four characters.
+  - `DocumentResource::verify()` answers `200` with `is_valid => false` for an unknown hash
+    rather than `404`, so callers must branch on the field and not the status.
+  - `DocumentResource::activities()` returns newest-first, with an integer `id` and a
+    nullable `origin`.
+  - `FieldResource::validate()` and `validateMultiple()` report a failed value as `200` with
+    `success => false`, not as an error status.
+  - `FieldResource::types()` repeats `email` in the live list; de-duplicate on `type` before
+    rendering a picker.
+  - `WebhookResource::get()` returns `null`, not `[]`, when no subscription exists.
+- **README navigation and a "Sandbox and production differences" section.** `accounts()->stats()`,
+  `users()->stats()`, and `users()->notificationPreferences()` are served on production but not
+  by the sandbox, which answers a framework `404`. The section records how to tell a missing
+  route from a missing resource by the error body, and notes that an unauthenticated request
+  makes the same distinction because routing resolves before authentication.
+- **Missing changelog entries for 2.1.0 and 2.1.1**, which shipped as tags without being
+  recorded here.
+
+### Changed
+
+- **ISO 8601 expiry validation lives in one place.** `AssinafyClient::validateExpiration()` and
+  `AssignmentResource::assertDateTime()` carried byte-identical copies of the same pattern,
+  UTC-offset range check, and `DateTimeImmutable` round-trip. Both now call
+  `Support\Iso8601::reasonInvalid()`, which returns the reason so each caller keeps raising its
+  own exception type — `\InvalidArgumentException` and `ValidationException` respectively — with
+  the same messages as before.
+
+### Fixed
+
+- **Changelog link references** were split across two blocks, one stranded mid-file between the
+  1.4.0 and 1.3.0 sections. They are now consolidated at the end, with the 2.1.x releases added.
+
+## [2.1.1] - 2026-08-21
+
+Transport hardening. No resource method signatures changed.
+
+### Added
+
+- **Response envelope validation.** A `2xx` HTTP response whose body carries a non-2xx `status`
+  is now raised as an `ApiException` for that status instead of being returned as success, and a
+  `status` that is not an integer in `100`–`599` raises a `NetworkException`. A `data` key that
+  is present but neither `null` nor an array is likewise rejected rather than passed through.
+- **Guards on injected Guzzle clients.** A client supplied to `GuzzleHttpClient` may not define
+  default `Authorization` or `X-Api-Key` headers, and its `base_uri` must match the configured
+  API base URL.
+- **`__debugInfo()` on `Configuration` and `GuzzleHttpClient`** so `var_dump()` and exception
+  dumps report the authentication mode and header names rather than credential values.
+
+### Changed
+
+- **Request URIs must be relative to the configured base URL.** Absolute URLs, leading slashes,
+  and `..` traversal segments are rejected before the request is built.
+- **`LogRedactor::summarizeRequestOptions()`** logs the structure of a request — query keys,
+  header names, JSON keys, body size — instead of its values, so the default transport never
+  writes a payload to the log.
+
+## [2.1.0] - 2026-08-14
+
+### Added
+
+- **`UserResource::notificationPreferences()` and `updateNotificationPreferences()`**
+  (`GET`/`PUT /users/self/notification-preferences`) covering the nine owner-facing document
+  email preferences. The update is a merge: omitted keys keep their current value, and the full
+  map is returned. Codes are validated locally against
+  `UserResource::NOTIFICATION_PREFERENCE_CODES`.
+
+### Fixed
+
+- **Public and signer-facing routes no longer inherit workspace credentials.** Requests to the
+  unauthenticated bootstrap, verification, and signer-session endpoints now omit `X-Api-Key` and
+  `Authorization` even when issued from a client configured with workspace credentials, so a
+  workspace key is not presented to a route that does not expect one. Explicit per-request
+  headers are left untouched.
+
 ## [2.0.0] - 2026-08-06
 
 This release is a full audit against the current Assinafy API reference and
@@ -231,11 +318,6 @@ each new endpoint below was verified end-to-end against the production API befor
 - **`DocumentResource::assertArtifact()`** promoted to `public static` so
   `SignerDocumentResource::download()` validates artifact names through the same list (DRY).
 
-[Unreleased]: https://github.com/assinafy/php-sdk/compare/v2.0.0...HEAD
-[2.0.0]: https://github.com/assinafy/php-sdk/compare/v1.4.1...v2.0.0
-[1.4.1]: https://github.com/assinafy/php-sdk/releases/tag/v1.4.1
-[1.4.0]: https://github.com/assinafy/php-sdk/releases/tag/v1.4.0
-
 ## [1.3.0] - 2026-05-12
 
 Second pass against `https://api.assinafy.com.br/v1/docs` plus a full live verification
@@ -433,6 +515,13 @@ All new endpoints from the official API catalog added without breaking existing 
 - **PHP 8.0+**: Full support with named arguments
 - **PHP 8.1+**: Recommended for best developer experience
 
+[Unreleased]: https://github.com/assinafy/php-sdk/compare/v2.1.2...HEAD
+[2.1.2]: https://github.com/assinafy/php-sdk/compare/v2.1.1...v2.1.2
+[2.1.1]: https://github.com/assinafy/php-sdk/compare/v2.1.0...v2.1.1
+[2.1.0]: https://github.com/assinafy/php-sdk/compare/v2.0.0...v2.1.0
+[2.0.0]: https://github.com/assinafy/php-sdk/compare/v1.4.1...v2.0.0
+[1.4.1]: https://github.com/assinafy/php-sdk/releases/tag/v1.4.1
+[1.4.0]: https://github.com/assinafy/php-sdk/releases/tag/v1.4.0
 [1.3.0]: https://github.com/assinafy/php-sdk/releases/tag/v1.3.0
 [1.2.0]: https://github.com/assinafy/php-sdk/releases/tag/v1.2.0
 [1.1.1]: https://github.com/assinafy/php-sdk/releases/tag/v1.1.1

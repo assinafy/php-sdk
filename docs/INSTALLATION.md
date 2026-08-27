@@ -15,22 +15,22 @@ install a separate HTTP client.
 
 ## Install with Composer
 
-Version 2.1.1 is available as repository tag `v2.1.1`, but Packagist does not currently expose
+Version 2.1.2 is available as repository tag `v2.1.2`, but Packagist does not currently expose
 `assinafy/php-sdk`. After the package is published there, install it with:
 
 ```bash
 composer require assinafy/php-sdk:^2.1
 ```
 
-Until that publication is complete, Composer can install the stable `v2.1.1` tag directly from
+Until that publication is complete, Composer can install the stable `v2.1.2` tag directly from
 the public GitHub mirror:
 
 ```bash
 composer config repositories.assinafy vcs https://github.com/assinafy/php-sdk.git
-composer require assinafy/php-sdk:2.1.1
+composer require assinafy/php-sdk:2.1.2
 ```
 
-The documentation on the repository's current `main` describes the `v2.1.1` release. Use the
+The documentation on the repository's current `main` describes the `v2.1.2` release. Use the
 documentation shipped with a tag when installing that tag.
 
 Optional PSR-3 logging integrations, such as Monolog, can be installed separately:

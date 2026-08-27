@@ -18,6 +18,7 @@ use Assinafy\SDK\Resources\TagResource;
 use Assinafy\SDK\Resources\TemplateResource;
 use Assinafy\SDK\Resources\UserResource;
 use Assinafy\SDK\Resources\WebhookResource;
+use Assinafy\SDK\Support\Iso8601;
 use Assinafy\SDK\Support\MutableLogger;
 use Assinafy\SDK\Support\WebhookEventParser;
 use Psr\Log\LoggerInterface;
@@ -549,26 +550,9 @@ class AssinafyClient
 
     private function validateExpiration(string $expiresAt): void
     {
-        $pattern = '/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-](\d{2}):(\d{2}))$/';
-        if (preg_match($pattern, $expiresAt, $matches) !== 1) {
-            throw new \InvalidArgumentException('Expiration must be an ISO 8601 date-time');
-        }
-        if (isset($matches[1]) && ((int) $matches[1] > 23 || (int) $matches[2] > 59)) {
-            throw new \InvalidArgumentException('Expiration must use a valid UTC offset');
-        }
-
-        try {
-            new \DateTimeImmutable($expiresAt);
-        } catch (\Exception $e) {
-            throw new \InvalidArgumentException('Expiration must be a valid ISO 8601 date-time', 0, $e);
-        }
-
-        $parseErrors = \DateTimeImmutable::getLastErrors();
-        if (
-            is_array($parseErrors)
-            && ($parseErrors['warning_count'] > 0 || $parseErrors['error_count'] > 0)
-        ) {
-            throw new \InvalidArgumentException('Expiration must be a valid ISO 8601 date-time');
+        $reason = Iso8601::reasonInvalid($expiresAt);
+        if ($reason !== null) {
+            throw new \InvalidArgumentException('Expiration ' . $reason);
         }
     }
 

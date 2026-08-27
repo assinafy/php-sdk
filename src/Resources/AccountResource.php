@@ -104,12 +104,26 @@ class AccountResource extends AbstractResource
      *
      * Request body:
      * ```
-     * ['name' => 'Acme Inc.', 'notification_sender_type' => 'User']  // name required
+     * [
+     *   'name'                     => 'Acme Inc.',  // required
+     *   'notification_sender_type' => 'User',       // optional: 'User' | 'Account'
+     * ]
+     * ```
+     *
+     * Response (unwrapped `data`):
+     * ```
+     * [
+     *   'id'              => '64f000000000000000000001',
+     *   'name'            => 'Acme Inc.',
+     *   'primary_color'   => null,
+     *   'secondary_color' => null,
+     *   'created_at'      => '2026-05-12T18:05:11Z',
+     * ]
      * ```
      *
      * @param string|null $notificationSenderType one of the `NOTIFICATION_SENDER_*` constants
      * @return array<string, mixed> the created account
-     * @throws \Assinafy\SDK\Exceptions\ValidationException on an unknown sender type
+     * @throws \Assinafy\SDK\Exceptions\ValidationException on an empty name or unknown sender type
      */
     public function create(
         string $name,
@@ -140,7 +154,24 @@ class AccountResource extends AbstractResource
      * Update the configured account.
      * `PUT /accounts/{account_id}`
      *
-     * Both fields are optional; send only what you want to change.
+     * Both fields are optional; send only what you want to change. Omitted keys are left
+     * untouched, so this is a partial update despite the `PUT` verb.
+     *
+     * Request body (at least one key required):
+     * ```
+     * ['name' => 'Acme Holdings', 'notification_sender_type' => 'Account']
+     * ```
+     *
+     * Response (unwrapped `data`) — the account after the change:
+     * ```
+     * [
+     *   'id'              => '64f000000000000000000001',
+     *   'name'            => 'Acme Holdings',
+     *   'primary_color'   => null,
+     *   'secondary_color' => null,
+     *   'created_at'      => '2026-05-12T18:05:11Z',
+     * ]
+     * ```
      *
      * @param string|null $notificationSenderType one of the `NOTIFICATION_SENDER_*` constants
      * @return array<string, mixed> the updated account
@@ -182,12 +213,28 @@ class AccountResource extends AbstractResource
      * Destructive and irreversible: removes the workspace and every document, signer, tag
      * and field in it.
      *
-     * Request body: `['force' => true]` — sent as JSON per the documented schema. The
+     * Request body: `['force' => true]` when `$force` is set, otherwise no body. The
      * lifecycle is live-tested only against a disposable sandbox workspace; the configured
      * workspace is never used as the deletion target.
      *
+     * Response (full envelope — `data` is an empty array, there is nothing left to return):
+     * ```
+     * ['status' => 200, 'message' => '', 'data' => []]
+     * ```
+     *
+     * On refusal the API answers `400` and this method raises an
+     * {@see \Assinafy\SDK\Exceptions\ApiException} whose `getResponseData()` carries the
+     * blocking `restrictions`:
+     * ```
+     * [
+     *   'status'       => 400,
+     *   'message'      => 'Cannot delete while restrictions are active.',
+     *   'restrictions' => [['code' => 'ActivePaidSubscription'], ['code' => 'PendingDocuments']],
+     * ]
+     * ```
+     *
      * @param bool $force cancel an active paid subscription instead of refusing to delete
-     * @return array<string, mixed>
+     * @return array<string, mixed> the raw envelope
      */
     public function delete(bool $force = false): array
     {
@@ -232,8 +279,41 @@ class AccountResource extends AbstractResource
      *
      * Monthly mode returns the latest 12 months. Daily mode requires `$month`
      * in `YYYY-MM` form and returns every day in that month. Both series are
-     * zero-filled by the API.
+     * zero-filled by the API, so there are no gaps to interpolate.
      *
+     * Request (query string): `granularity=monthly|daily`, plus `month=YYYY-MM` which is
+     * required for `daily` and optional for `monthly`.
+     *
+     * Signature requests carry two independent breakdowns of the same total: the
+     * `*_notification_*` counters split them by the channel the signer was notified
+     * through, the `*_verification_*` counters by how the signer proved identity.
+     *
+     * Response (unwrapped `data` — one entry per period):
+     * ```
+     * [
+     *   [
+     *     'period'                                   => '2026-08',  // 'YYYY-MM-DD' when daily
+     *     'documents_uploaded'                       => 42,
+     *     'documents_sent'                           => 37,
+     *     'signature_requests'                       => 51,
+     *     'signature_requests_notification_email'    => 48,
+     *     'signature_requests_notification_whatsapp' => 3,
+     *     'signature_requests_notification_bypass'   => 0,
+     *     'signature_requests_verification_email'    => 45,
+     *     'signature_requests_verification_whatsapp' => 3,
+     *     'signature_requests_verification_bypass'   => 0,
+     *     'signature_requests_verification_digital_certificate' => 3,
+     *     'signature_requests_viewed'                => 44,
+     *     'signature_requests_completed'             => 39,
+     *     'documents_certified'                      => 39,
+     *   ],
+     * ]
+     * ```
+     *
+     * Available on production. The sandbox does not route this endpoint and answers 404.
+     *
+     * @throws \Assinafy\SDK\Exceptions\ValidationException on an unknown granularity, or on
+     *     `daily` without a `YYYY-MM` month
      * @return array<int, array{period: string, documents_uploaded: int, documents_sent: int,
      *     signature_requests: int, signature_requests_notification_email: int,
      *     signature_requests_notification_whatsapp: int,
@@ -261,8 +341,17 @@ class AccountResource extends AbstractResource
      * Download the account logo.
      * `GET /accounts/{account_id}/logo`
      *
-     * Returns the raw binary image body — not JSON. Throws
-     * {@see \Assinafy\SDK\Exceptions\ApiException} (404) when no logo has been uploaded.
+     * Request: no parameters.
+     *
+     * Response: the raw image bytes — **not** JSON, and not the envelope. The
+     * `Content-Type` header carries the format the workspace uploaded (`image/png`,
+     * `image/jpeg`). Write the return value straight to disk:
+     * ```php
+     * file_put_contents('logo.png', $client->accounts()->downloadLogo());
+     * ```
+     *
+     * @return string raw image bytes
+     * @throws \Assinafy\SDK\Exceptions\ApiException 404 when no logo has been uploaded
      */
     public function downloadLogo(): string
     {
@@ -275,10 +364,18 @@ class AccountResource extends AbstractResource
      * Upload (or replace) the account logo.
      * `POST /accounts/{account_id}/logo`
      *
-     * Sent as multipart/form-data under the field name `file`.
+     * Request: `multipart/form-data` with the image under the field name `file`.
+     * Replaces any logo already stored — there is no separate update route.
      *
-     * @return array<string, mixed>
-     * @throws \InvalidArgumentException when the file does not exist
+     * Response: the envelope carries no `data` for this operation, so the unwrapped
+     * result is an empty array. Call {@see self::theme()} afterwards to read back the
+     * public `logo` URL:
+     * ```
+     * ['status' => 200, 'message' => '']
+     * ```
+     *
+     * @return array<string, mixed> empty on success
+     * @throws \InvalidArgumentException when the file does not exist or is unreadable
      */
     public function uploadLogo(#[\SensitiveParameter] string $filePath): array
     {
@@ -293,7 +390,14 @@ class AccountResource extends AbstractResource
      * Remove the account logo.
      * `DELETE /accounts/{account_id}/logo`
      *
-     * @return array<string, mixed>
+     * Request: no body. Succeeds even when no logo is currently set.
+     *
+     * Response (full envelope, no `data` key for this operation):
+     * ```
+     * ['status' => 200, 'message' => '']
+     * ```
+     *
+     * @return array<string, mixed> the raw envelope
      */
     public function deleteLogo(): array
     {

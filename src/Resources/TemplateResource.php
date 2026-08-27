@@ -30,6 +30,31 @@ class TemplateResource extends AbstractResource
      * pages asynchronously, so poll {@see get()} until `status` is `Ready` before
      * downloading pages or creating documents from it.
      *
+     * Request: `multipart/form-data` with the PDF under the field name `file`.
+     *
+     * Response (unwrapped `data`):
+     * ```
+     * [
+     *   'resource'      => 'template',
+     *   'id'            => '10414160b9d1a5ff705effd35c43',
+     *   'name'          => 'service-agreement.pdf',
+     *   'document_name' => 'service-agreement.pdf',
+     *   'message'       => null,
+     *   'status'        => 'Uploaded',   // PascalCase here, unlike document statuses
+     *   'pages'         => [],           // populated once rendering finishes
+     *   'roles'         => [
+     *     ['id' => '10414160d1669a27520ea6d385cf', 'name' => 'TemplateEditor',
+     *      'assignment_type' => 'Editor', 'created_at' => '2026-08-20T17:06:18Z',
+     *      'updated_at' => '2026-08-20T17:06:18Z'],
+     *   ],
+     *   'tags'       => [],
+     *   'created_at' => '2026-08-20T17:06:17Z',
+     *   'updated_at' => '2026-08-20T17:06:17Z',
+     * ]
+     * ```
+     *
+     * This route is not part of the published OpenAPI contract but exists on the live API.
+     *
      * @throws \Assinafy\SDK\Exceptions\ValidationException when the file is missing,
      *     not a PDF, or larger than the 25 MB API limit
      * @return array<string, mixed> the created template
@@ -51,11 +76,48 @@ class TemplateResource extends AbstractResource
      * List templates in the workspace.
      * `GET /accounts/{account_id}/templates`
      *
+     * Request (query string): `page`, `per-page`, plus any `$filters` merged over them.
+     *
+     * Response (full envelope — pagination lifted from the `X-Pagination-*` headers). List
+     * entries carry `pages` and `roles` but omit `default_document_tags`, which only
+     * {@see self::get()} returns:
+     * ```
+     * [
+     *   'status'  => 200,
+     *   'message' => '',
+     *   'data'    => [
+     *     [
+     *       'id'            => '10414160b9d1a5ff705effd35c43',
+     *       'name'          => 'service-agreement.pdf',
+     *       'document_name' => 'service-agreement.pdf',
+     *       'message'       => null,
+     *       'status'        => 'Ready',
+     *       'pages'         => [
+     *         ['id' => '104141610fe1037c1b4a9a9ca62c', 'number' => 1,
+     *          'width' => 1275, 'height' => 1651,
+     *          'download_url' => 'https://…/templates/1041…/pages/1041…/download',
+     *          'fields' => []],
+     *       ],
+     *       'roles' => [
+     *         ['id' => '10414160d1669a27520ea6d385cf', 'name' => 'TemplateEditor',
+     *          'assignment_type' => 'Editor', 'created_at' => '2026-08-20T17:06:18Z',
+     *          'updated_at' => '2026-08-20T17:06:18Z'],
+     *       ],
+     *       'tags'       => [],
+     *       'created_at' => '2026-08-20T17:06:17Z',
+     *       'updated_at' => '2026-08-20T17:06:21Z',
+     *     ],
+     *   ],
+     *   'pagination' => ['current_page' => 1, 'page_count' => 2, 'per_page' => 20, 'total_count' => 24],
+     * ]
+     * ```
+     *
      * @param array<string, scalar> $filters optional documented `search`; the live API also
      *     accepts the runtime-undocumented `status` and `sort` filters
      * @return array{status?: int, message?: string, data?: array<int, array<string, mixed>>,
      *     pagination?: array{current_page: int, page_count: int, per_page: int, total_count: int}}
      *     full envelope with pagination lifted from response headers
+     * @throws ValidationException when `$page` < 1 or `$perPage` is outside 1–100
      */
     public function list(int $page = 1, int $perPage = 20, array $filters = []): array
     {
@@ -72,7 +134,45 @@ class TemplateResource extends AbstractResource
      * {@see DocumentResource::createFromTemplate()} relies on to bind signers to
      * role slots, plus `default_document_tags` (omitted from the list endpoint).
      *
+     * Request: no parameters.
+     *
+     * Response (unwrapped `data`):
+     * ```
+     * [
+     *   'resource'      => 'template',
+     *   'id'            => '10414160b9d1a5ff705effd35c43',
+     *   'name'          => 'service-agreement.pdf',
+     *   'document_name' => 'service-agreement.pdf',
+     *   'message'       => null,
+     *   'status'        => 'Ready',      // 'Uploaded' | 'Processing' | 'Ready' | 'Failed'
+     *   'pages'         => [
+     *     [
+     *       'id' => '104141610fe1037c1b4a9a9ca62c', 'number' => 1,
+     *       'width' => 1275, 'height' => 1651,
+     *       'download_url' => 'https://…/templates/1041…/pages/1041…/download',
+     *       'fields' => [],   // field placements configured in the web app
+     *     ],
+     *   ],
+     *   'roles' => [
+     *     ['id' => '10414160d1669a27520ea6d385cf', 'name' => 'TemplateEditor',
+     *      'assignment_type' => 'Editor', 'created_at' => '2026-08-20T17:06:18Z',
+     *      'updated_at' => '2026-08-20T17:06:18Z'],
+     *   ],
+     *   'tags'                  => [],
+     *   'default_document_tags' => [],
+     *   'created_at'            => '2026-08-20T17:06:17Z',
+     *   'updated_at'            => '2026-08-20T17:06:21Z',
+     * ]
+     * ```
+     *
+     * Take the `roles[].id` values from here for `createFromTemplate()`, and the
+     * `pages[].id` values for {@see self::downloadPage()}.
+     *
+     * This route is not part of the published OpenAPI contract but exists on the live API.
+     *
      * @return array<string, mixed>
+     * @throws ValidationException when `$templateId` is empty
+     * @throws \Assinafy\SDK\Exceptions\ApiException 404 when the template does not exist
      */
     public function get(string $templateId): array
     {
@@ -90,8 +190,36 @@ class TemplateResource extends AbstractResource
      * display `name`, the default `document_name` applied to documents created from
      * the template, and the default invitation `message`.
      *
+     * Request body (at least one key required):
+     * ```
+     * [
+     *   'name'          => 'Service agreement (2026)',  // shown in the template list
+     *   'document_name' => 'Acme — service agreement',  // default name for new documents
+     *   'message'       => 'Please sign this contract', // default invitation message
+     * ]
+     * ```
+     *
+     * Response (unwrapped `data`) — the template after the change, same shape as
+     * {@see self::get()}:
+     * ```
+     * [
+     *   'resource'      => 'template',
+     *   'id'            => '10414160b9d1a5ff705effd35c43',
+     *   'name'          => 'Service agreement (2026)',
+     *   'document_name' => 'Acme — service agreement',
+     *   'message'       => 'Please sign this contract',
+     *   'status'        => 'Ready',
+     *   'pages'         => [ … ],
+     *   'roles'         => [ … ],
+     *   'updated_at'    => '2026-08-27T15:02:11Z',
+     * ]
+     * ```
+     *
+     * This route is not part of the published OpenAPI contract but exists on the live API.
+     *
      * @param array<string, mixed> $data subset of { name, document_name, message }
      * @return array<string, mixed> the updated template
+     * @throws ValidationException when `$data` is empty or `$templateId` is empty
      */
     public function update(string $templateId, #[\SensitiveParameter] array $data): array
     {
@@ -109,7 +237,21 @@ class TemplateResource extends AbstractResource
      * Delete a template.
      * `DELETE /accounts/{account_id}/templates/{template_id}`
      *
+     * Documents already created from the template are unaffected; they keep their
+     * `template_id` even though the template is gone.
+     *
+     * Request: no body.
+     *
+     * Response (unwrapped `data`; empty on success):
+     * ```
+     * []
+     * ```
+     *
+     * This route is not part of the published OpenAPI contract but exists on the live API.
+     *
      * @return array<array-key, mixed>
+     * @throws ValidationException when `$templateId` is empty
+     * @throws \Assinafy\SDK\Exceptions\ApiException 404 when the template does not exist
      */
     public function delete(string $templateId): array
     {
@@ -125,7 +267,18 @@ class TemplateResource extends AbstractResource
      * Download a rendered template page as JPEG (raw binary body).
      * `GET /accounts/{account_id}/templates/{template_id}/pages/{page_id}/download`
      *
-     * The page IDs come from the `pages` array on the {@see get()} response.
+     * The page IDs come from the `pages` array on the {@see get()} response. The `width` and
+     * `height` reported there are the coordinate space field placements use.
+     *
+     * Request: no parameters.
+     *
+     * Response: raw `image/jpeg` bytes — not the JSON envelope.
+     *
+     * This route is not part of the published OpenAPI contract but exists on the live API.
+     *
+     * @return string raw JPEG bytes
+     * @throws ValidationException when either identifier is empty
+     * @throws \Assinafy\SDK\Exceptions\ApiException 404 before rendering finishes
      */
     public function downloadPage(string $templateId, string $pageId): string
     {
@@ -139,11 +292,29 @@ class TemplateResource extends AbstractResource
     }
 
     /**
-     * Poll the runtime-supported template detail route until processing completes.
-     * The deadline is checked between calls; an in-flight request is bounded by the
-     * configured transport timeout.
+     * Poll {@see self::get()} until the template finishes processing.
      *
-     * @return array<string, mixed>
+     * Client-side helper, not an API endpoint — the mirror of
+     * {@see DocumentResource::waitUntilReady()} for templates. Page rendering after
+     * {@see self::create()} is asynchronous, and `pages` stays empty until it completes:
+     * ```php
+     * $template = $client->templates()->create('/path/agreement.pdf');
+     * $ready    = $client->templates()->waitUntilReady($template['id']);
+     * ```
+     *
+     * Returns as soon as `status` is `Ready` (compared case-insensitively — the API sends
+     * template statuses in PascalCase, unlike document statuses), throws on `Failed` or
+     * `processing_failed`, and otherwise sleeps and retries. The deadline is checked between
+     * calls; an in-flight request is bounded separately by the configured transport timeout.
+     *
+     * Response: the same payload as {@see self::get()}, once it is ready.
+     *
+     * @param int $maxWaitSeconds      total budget before giving up
+     * @param int $pollIntervalSeconds delay between polls; the last sleep is trimmed so the
+     *     helper never overshoots the deadline
+     * @return array<string, mixed> the ready template
+     * @throws ValidationException when either interval is not a positive integer
+     * @throws \RuntimeException on a failed template or on timeout
      */
     public function waitUntilReady(
         string $templateId,

@@ -10,7 +10,7 @@ Version 2.0.0 is available as repository tag `v2.0.0`, but Packagist does not cu
 [docs/INSTALLATION.md](docs/INSTALLATION.md), and switch to `assinafy/php-sdk:^2.0` after
 Packagist publication.
 
-Version 2.1.1 implements the published Assinafy v1 operation set. It also retains five
+Version 2.1.2 implements the published Assinafy v1 operation set. It also retains five
 runtime-supported template-management methods outside OpenAPI. Two legacy OAuth URL routes remain
 for compatibility, but their upstream redirects are not operational.
 
@@ -379,6 +379,31 @@ boundaries:
   PDF header in the first 1 KiB and `%%EOF` in the final 1 KiB.
 - Diagnostic object dumps and SDK transport logs redact configured credentials and common token
   spellings.
+
+Run the full developer gate after upgrading:
+
+```bash
+composer check
+```
+
+## v2.1.1 → v2.1.2
+
+No code change is required. This release adds documentation and consolidates one internal
+validator; no public method, request shape, or response handling changed.
+
+- Every public method now carries its request and response payloads in its docblock. Where the
+  documented shape differs from what an integration might assume, the docblock says so: an
+  unknown hash makes `documents()->verify()` answer `200` with `is_valid => false` rather than
+  `404`, a failed value makes `fields()->validate()` answer `200` with `success => false`, and
+  `webhooks()->get()` returns `null` rather than `[]` when no subscription exists.
+- `Support\Iso8601` is a new `@internal` helper holding the `expires_at` validation that
+  `AssinafyClient` and `AssignmentResource` previously duplicated. Both still throw the exception
+  types and messages they always did — `\InvalidArgumentException` from
+  `uploadAndRequestSignatures()`, `ValidationException` from the assignment methods. Do not
+  depend on `Iso8601` directly; it is not covered by the compatibility promise.
+- The README documents which endpoints the sandbox does not serve. `accounts()->stats()`,
+  `users()->stats()`, and `users()->notificationPreferences()` work against production and return
+  a framework `404` against the sandbox, so sandbox-only testing cannot exercise them.
 
 Run the full developer gate after upgrading:
 

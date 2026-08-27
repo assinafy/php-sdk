@@ -14,6 +14,26 @@
     </rule>
 
     <rule ref="rulesets/codesize.xml">
+        <exclude name="ExcessiveClassLength"/>
+        <exclude name="ExcessiveMethodLength"/>
+    </rule>
+
+    <!--
+        Length is measured in executable lines, not raw lines. Both rules default to PDepend's
+        `loc`, which counts docblocks, so a thoroughly documented class trips them without
+        gaining a single statement. `ignore-whitespace` switches the metric to `eloc`, which is
+        what "this is trying to do too much" actually means. Thresholds are otherwise the
+        upstream defaults.
+    -->
+    <rule ref="rulesets/codesize.xml/ExcessiveClassLength">
+        <properties>
+            <property name="ignore-whitespace" value="true"/>
+        </properties>
+    </rule>
+    <rule ref="rulesets/codesize.xml/ExcessiveMethodLength">
+        <properties>
+            <property name="ignore-whitespace" value="true"/>
+        </properties>
     </rule>
 
     <rule ref="rulesets/controversial.xml"/>

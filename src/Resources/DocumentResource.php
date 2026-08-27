@@ -72,7 +72,33 @@ class DocumentResource extends AbstractResource
      * Upload a PDF and create a new document.
      * `POST /accounts/{account_id}/documents`
      *
+     * The first step of every signature workflow. The file is checked locally (exists,
+     * readable, PDF, ≤ 25 MB) before any bytes go over the wire.
+     *
+     * The upload returns immediately with `status: uploaded`; the API then renders pages
+     * asynchronously. Wait for {@see self::waitUntilReady()} before creating an assignment.
+     *
+     * Request: `multipart/form-data` with the PDF under the field name `file`.
+     *
+     * Response (unwrapped `data`):
+     * ```
+     * [
+     *   'id'          => '1042a416aaa85fcf325679fecb97',
+     *   'account_id'  => '64f000000000000000000001',
+     *   'template_id' => null,
+     *   'name'        => 'contract.pdf',
+     *   'status'      => 'uploaded',        // see the STATUS_* constants
+     *   'artifacts'   => ['original' => 'https://…/download/original'],
+     *   'is_closed'   => false,
+     *   'signing_url' => 'https://app…/sign/1042a416aaa85fcf325679fecb97',
+     *   'tags'        => [],
+     *   'created_at'  => '2026-08-27T14:24:43Z',
+     *   'updated_at'  => '2026-08-27T14:24:43Z',
+     * ]
+     * ```
+     *
      * @return array<string, mixed> the created document
+     * @throws ValidationException when the file is missing, not a PDF, or over 25 MB
      */
     public function upload(#[\SensitiveParameter] string $filePath): array
     {
@@ -91,10 +117,48 @@ class DocumentResource extends AbstractResource
     }
 
     /**
-     * Retrieve a document.
+     * Retrieve a document, including its pages and current assignment.
      * `GET /documents/{document_id}`
      *
+     * Richer than the {@see self::list()} entries: only this route returns `pages` (with the
+     * page IDs {@see self::downloadPage()} and `collect` assignments need) and the fully
+     * expanded `assignment`.
+     *
+     * Request: no parameters.
+     *
+     * Response (unwrapped `data`):
+     * ```
+     * [
+     *   'id'          => '1042a416aaa85fcf325679fecb97',
+     *   'account_id'  => '64f000000000000000000001',
+     *   'template_id' => null,
+     *   'name'        => 'contract.pdf',
+     *   'status'      => 'pending_signature',
+     *   'artifacts'   => [
+     *     'original'  => 'https://…/documents/1042…/download/original',
+     *     'thumbnail' => 'https://…/documents/1042…/thumbnail',
+     *   ],
+     *   'is_closed'      => false,
+     *   'signing_url'    => 'https://app…/sign/1042a416aaa85fcf325679fecb97',
+     *   'decline_reason' => null,
+     *   'declined_by'    => null,
+     *   'tags'           => [],
+     *   'created_at'     => '2026-08-27T14:24:43Z',
+     *   'updated_at'     => '2026-08-27T14:24:46Z',
+     *   'assignment'     => ['id' => '1030…', 'method' => 'virtual', 'signers' => [ … ], 'items' => [ … ]],
+     *   'pages'          => [
+     *     [
+     *       'id' => '1a0439be3231e685cee68093a12', 'number' => 1,
+     *       'width' => 1275, 'height' => 1651,
+     *       'download_url' => 'https://…/documents/1042…/pages/1a04…/download',
+     *     ],
+     *   ],
+     * ]
+     * ```
+     *
      * @return array<string, mixed>
+     * @throws ValidationException when `$documentId` is empty
+     * @throws \Assinafy\SDK\Exceptions\ApiException 404 when the document does not exist
      */
     public function get(string $documentId): array
     {
@@ -145,9 +209,42 @@ class DocumentResource extends AbstractResource
      * Search documents, returning a lighter representation than {@see self::list()}.
      * `GET /accounts/{account_id}/documents/search`
      *
-     * @param array<string, scalar> $filters additional optional filters
+     * Matches `$term` against the document name. Entries omit `assignment` and `pages`,
+     * which makes this the cheaper choice for type-ahead and pickers; fetch the full record
+     * with {@see self::get()} once the user picks one.
+     *
+     * Request (query string): `search`, `page`, `per-page`, plus an optional `status` filter.
+     *
+     * Response (full envelope — pagination lifted from the `X-Pagination-*` headers):
+     * ```
+     * [
+     *   'status'  => 200,
+     *   'message' => '',
+     *   'data'    => [
+     *     [
+     *       'id'          => '1042a416aaa85fcf325679fecb97',
+     *       'account_id'  => '64f000000000000000000001',
+     *       'template_id' => null,
+     *       'name'        => 'contract.pdf',
+     *       'status'      => 'metadata_ready',
+     *       'artifacts'   => ['original' => 'https://…', 'thumbnail' => 'https://…'],
+     *       'is_closed'   => false,
+     *       'signing_url' => 'https://app…/sign/1042a416aaa85fcf325679fecb97',
+     *       'decline_reason' => null,
+     *       'declined_by'    => null,
+     *       'tags'           => [],
+     *       'created_at'     => '2026-08-27T14:24:43Z',
+     *       'updated_at'     => '2026-08-27T14:24:46Z',
+     *     ],
+     *   ],
+     *   'pagination' => ['current_page' => 1, 'page_count' => 9, 'per_page' => 2, 'total_count' => 17],
+     * ]
+     * ```
+     *
+     * @param array<string, scalar> $filters additional optional filters, e.g. `status`
      * @return array{status?: int, message?: string, data?: array<int, array<string, mixed>>,
      *     pagination?: array{current_page: int, page_count: int, per_page: int, total_count: int}}
+     * @throws ValidationException when `$page` < 1 or `$perPage` is outside 1–100
      */
     public function search(string $term, int $page = 1, int $perPage = 20, array $filters = []): array
     {
@@ -170,10 +267,28 @@ class DocumentResource extends AbstractResource
      * characters become dashes, so `"renamed áç.pdf"` is stored as `"renamed ac.pdf"`.
      * Max 255 characters.
      *
-     * Request body: `['name' => 'Service agreement.pdf']`
+     * Request body:
+     * ```
+     * ['name' => 'Service agreement.pdf']
+     * ```
+     *
+     * Response (unwrapped `data` — note `name` reflects the server-side normalisation):
+     * ```
+     * [
+     *   'id'         => '1042a416aaa85fcf325679fecb97',
+     *   'account_id' => '64f000000000000000000001',
+     *   'name'       => 'Service agreement.pdf',
+     *   'status'     => 'metadata_ready',
+     *   'artifacts'  => ['original' => 'https://…', 'thumbnail' => 'https://…'],
+     *   'tags'       => [],
+     *   'created_at' => '2026-08-27T14:24:43Z',
+     *   'updated_at' => '2026-08-27T15:02:11Z',
+     * ]
+     * ```
      *
      * @return array<string, mixed> the updated document
      * @throws ValidationException when `$name` is empty or exceeds 255 characters
+     * @throws \Assinafy\SDK\Exceptions\ApiException 400 once signing has started
      */
     public function rename(string $documentId, #[\SensitiveParameter] string $name): array
     {
@@ -201,7 +316,20 @@ class DocumentResource extends AbstractResource
      * Delete a document.
      * `DELETE /documents/{document_id}`
      *
-     * @return array<array-key, mixed>
+     * Only allowed from a status whose `deletable` flag is true — call
+     * {@see self::statuses()} for the authoritative list. A document mid-certification
+     * cannot be removed.
+     *
+     * Request: no body.
+     *
+     * Response (full envelope; `data` is empty because the resource is gone):
+     * ```
+     * ['status' => 200, 'message' => '', 'data' => []]
+     * ```
+     *
+     * @return array<array-key, mixed> the raw envelope
+     * @throws ValidationException when `$documentId` is empty
+     * @throws \Assinafy\SDK\Exceptions\ApiException 400 from a non-deletable status
      */
     public function delete(string $documentId): array
     {
@@ -214,10 +342,32 @@ class DocumentResource extends AbstractResource
     }
 
     /**
-     * Download an artifact for a document (original, certificated, certificate-page, pades, bundle).
+     * Download an artifact for a document.
      * `GET /documents/{document_id}/download/{artifact_name}`
      *
-     * Returns the raw binary body.
+     * Artifacts, via the `ARTIFACT_*` constants:
+     *
+     * | Constant                     | Value              | What you get                              |
+     * |------------------------------|--------------------|-------------------------------------------|
+     * | `ARTIFACT_ORIGINAL`          | `original`         | The PDF exactly as uploaded               |
+     * | `ARTIFACT_CERTIFICATED`      | `certificated`     | Signed PDF with the certificate page      |
+     * | `ARTIFACT_CERTIFICATE_PAGE`  | `certificate-page` | The audit/certificate page on its own     |
+     * | `ARTIFACT_PADES`            | `pades`            | PAdES-conformant signed PDF               |
+     * | `ARTIFACT_BUNDLE`           | `bundle`           | ZIP of every artifact above               |
+     *
+     * Everything except `original` exists only once the document reaches `certificated`.
+     *
+     * Request: no parameters — the artifact is a path segment.
+     *
+     * Response: the raw bytes (`application/pdf`, or `application/zip` for `bundle`) —
+     * **not** the JSON envelope:
+     * ```php
+     * file_put_contents('signed.pdf', $client->documents()->download($id));
+     * ```
+     *
+     * @return string raw file bytes
+     * @throws ValidationException on an unknown artifact name or an empty document ID
+     * @throws \Assinafy\SDK\Exceptions\ApiException 404 when the artifact is not ready yet
      */
     public function download(string $documentId, string $artifact = self::ARTIFACT_CERTIFICATED): string
     {
@@ -233,6 +383,16 @@ class DocumentResource extends AbstractResource
     /**
      * Download the JPEG thumbnail for a document.
      * `GET /documents/{document_id}/thumbnail`
+     *
+     * A preview of the first page, available once the document reaches `metadata_ready`.
+     *
+     * Request: no parameters.
+     *
+     * Response: raw `image/jpeg` bytes — not the JSON envelope.
+     *
+     * @return string raw JPEG bytes
+     * @throws ValidationException when `$documentId` is empty
+     * @throws \Assinafy\SDK\Exceptions\ApiException 404 before page rendering finishes
      */
     public function downloadThumbnail(string $documentId): string
     {
@@ -245,6 +405,17 @@ class DocumentResource extends AbstractResource
     /**
      * Download a rendered page as JPEG.
      * `GET /documents/{document_id}/pages/{page_id}/download`
+     *
+     * Page IDs come from the `pages` array on {@see self::get()}. Use these renders to
+     * position fields when building a `collect` assignment — the `width`/`height` reported
+     * alongside each page are the coordinate space `display_settings` is expressed in.
+     *
+     * Request: no parameters.
+     *
+     * Response: raw `image/jpeg` bytes — not the JSON envelope.
+     *
+     * @return string raw JPEG bytes
+     * @throws ValidationException when either identifier is empty
      */
     public function downloadPage(string $documentId, string $pageId): string
     {
@@ -259,7 +430,39 @@ class DocumentResource extends AbstractResource
      * List activity events for a document.
      * `GET /documents/{document_id}/activities`
      *
+     * The audit trail: upload, preparation, each notification, each view, each signature,
+     * and certification — **newest first**. This is the record behind the certificate page.
+     *
+     * `event` uses the same vocabulary as the webhook event types
+     * ({@see \Assinafy\SDK\Resources\WebhookResource} `EVENT_*`), so one switch can handle
+     * both. `origin` is null for events the platform raised itself rather than a request.
+     *
+     * Request: no parameters.
+     *
+     * Response (unwrapped `data`):
+     * ```
+     * [
+     *   [
+     *     'id'         => 26166,                        // integer, not an opaque string ID
+     *     'event'      => 'document_metadata_ready',
+     *     'message'    => 'Documento processado.',      // localised, for display only
+     *     'payload'    => [],
+     *     'origin'     => null,
+     *     'created_at' => '2026-08-27T14:24:45Z',
+     *   ],
+     *   [
+     *     'id'         => 26165,
+     *     'event'      => 'document_uploaded',
+     *     'message'    => 'Documento criado.',
+     *     'payload'    => [],
+     *     'origin'     => ['ip' => '203.0.113.10', 'user-agent' => 'Acme/1.0'],
+     *     'created_at' => '2026-08-27T14:24:44Z',
+     *   ],
+     * ]
+     * ```
+     *
      * @return array<int, array<string, mixed>>
+     * @throws ValidationException when `$documentId` is empty
      */
     public function activities(string $documentId): array
     {
@@ -272,6 +475,29 @@ class DocumentResource extends AbstractResource
     /**
      * List all possible document statuses, with their `deletable` flag.
      * `GET /documents/statuses`
+     *
+     * The authoritative source for which statuses {@see self::delete()} accepts — prefer it
+     * over hard-coding, since the platform can add statuses. The `STATUS_*` constants mirror
+     * the codes below.
+     *
+     * Request: no parameters. Not account-scoped.
+     *
+     * Response (unwrapped `data`, verbatim from the API):
+     * ```
+     * [
+     *   ['code' => 'uploading',           'deletable' => false],
+     *   ['code' => 'uploaded',            'deletable' => false],
+     *   ['code' => 'metadata_processing', 'deletable' => false],
+     *   ['code' => 'metadata_ready',      'deletable' => true],
+     *   ['code' => 'expired',             'deletable' => true],
+     *   ['code' => 'certificating',       'deletable' => false],
+     *   ['code' => 'certificated',        'deletable' => false],
+     *   ['code' => 'rejected_by_signer',  'deletable' => true],
+     *   ['code' => 'pending_signature',   'deletable' => true],
+     *   ['code' => 'rejected_by_user',    'deletable' => true],
+     *   ['code' => 'failed',              'deletable' => true],
+     * ]
+     * ```
      *
      * @return array<int, array{code: string, deletable: bool}>
      */
@@ -286,7 +512,40 @@ class DocumentResource extends AbstractResource
      * Verify a certificated document by its signature hash. Public endpoint, no auth.
      * `GET /documents/{signature_hash}/verify`
      *
+     * The hash is printed on the certificate page, so any recipient can confirm a PDF is
+     * genuine and unaltered without holding credentials. The SDK strips workspace
+     * credentials from this request even on an authenticated client.
+     *
+     * Request: no parameters — the hash is the path segment.
+     *
+     * Response (unwrapped `data`):
+     * ```
+     * [
+     *   'hash'            => 'c2f1a0…',
+     *   'id'              => '1042a416aaa85fcf325679fecb97',
+     *   'status'          => 'certificated',
+     *   'page_count'      => 3,
+     *   'signer_count'    => 2,
+     *   'completed_count' => 2,
+     *   'completed_at'    => '2026-08-27T15:11:22Z',
+     *   'verified_at'     => '2026-08-27T22:20:03Z',
+     *   'is_valid'        => true,
+     *   'message'         => '',
+     * ]
+     * ```
+     *
+     * An unknown or unsigned hash answers **200, not 404** — always branch on `is_valid`:
+     * ```
+     * [
+     *   'hash' => '000000000000000000000000', 'id' => null, 'status' => null,
+     *   'page_count' => null, 'signer_count' => null, 'completed_count' => null,
+     *   'completed_at' => null, 'verified_at' => '2026-08-27T22:20:03Z',
+     *   'is_valid' => false, 'message' => 'Documento não assinado ou não encontrado.',
+     * ]
+     * ```
+     *
      * @return array<string, mixed>
+     * @throws ValidationException when `$signatureHash` is empty
      */
     public function verify(string $signatureHash): array
     {
@@ -300,7 +559,27 @@ class DocumentResource extends AbstractResource
      * Public document info (no auth).
      * `GET /public/documents/{document_id}`
      *
+     * The deliberately thin projection behind a public signing link — enough to render
+     * "Acme Inc. sent you contract.pdf" before the recipient has proved who they are. No
+     * signer list, no artifacts, no content. The SDK strips workspace credentials from this
+     * request even on an authenticated client.
+     *
+     * Request: no parameters.
+     *
+     * Response (unwrapped `data`):
+     * ```
+     * [
+     *   'resource'   => 'document',
+     *   'id'         => '1042a416aaa85fcf325679fecb97',
+     *   'name'       => 'contract.pdf',
+     *   'page_count' => '1',            // note: the API sends this as a string
+     *   'created_by' => 'Jane Doe',
+     * ]
+     * ```
+     *
      * @return array<string, mixed>
+     * @throws ValidationException when `$documentId` is empty
+     * @throws \Assinafy\SDK\Exceptions\ApiException 404 when the document does not exist
      */
     public function publicInfo(string $documentId): array
     {
@@ -314,11 +593,34 @@ class DocumentResource extends AbstractResource
      * Request an access token to be sent to a signer through email.
      * `PUT /public/documents/{document_id}/send-token` (no auth).
      *
-     * Only the `email` channel is documented today. Pass {@see SEND_TOKEN_CHANNEL_EMAIL}
-     * or one of the constants exposed here — arbitrary strings are rejected up front
-     * so a typo doesn't get silently forwarded to the API.
+     * Only the `email` channel is supported today. Pass {@see SEND_TOKEN_CHANNEL_EMAIL} —
+     * arbitrary strings are rejected up front so a typo never reaches the API. The
+     * recipient is validated as an email address locally for the same reason.
      *
+     * Request body:
+     * ```
+     * ['recipient' => 'jane@example.com', 'channel' => 'email']
+     * ```
+     *
+     * Both keys are mandatory. The published OpenAPI schema for this operation shows a
+     * single optional `email` property instead; that body is rejected by the running API
+     * with `400 "O atributo \"channel\" é obrigatório."`, so the SDK sends the pair above,
+     * which the server accepts. Verified against the live API — do not "correct" this
+     * toward the published schema without re-testing it.
+     *
+     * The document must be in `pending_signature`; otherwise the API answers
+     * `400 "O documento não está com status de assinatura pendente."`
+     *
+     * Response (full envelope; no `data` payload — the token goes to the recipient, never
+     * back over the wire):
+     * ```
+     * ['status' => 200, 'message' => '']
+     * ```
+     *
+     * @param string $recipient email address to receive the one-time token
+     * @param string $channel   delivery channel; only {@see SEND_TOKEN_CHANNEL_EMAIL}
      * @return array<array-key, mixed>
+     * @throws ValidationException on an unsupported channel or a malformed recipient
      */
     public function sendToken(
         string $documentId,
@@ -350,7 +652,23 @@ class DocumentResource extends AbstractResource
      * List the tags currently attached to a document.
      * `GET /accounts/{account_id}/documents/{document_id}/tags`
      *
+     * Request: no parameters.
+     *
+     * Response (unwrapped `data`; `[]` when nothing is attached):
+     * ```
+     * [
+     *   [
+     *     'id'         => '103aa221874346e6b3de41688526',
+     *     'name'       => 'contracts',
+     *     'color'      => null,          // 6-char hex without '#', or null
+     *     'created_at' => '2026-07-18T19:03:45Z',
+     *     'updated_at' => '2026-07-18T19:03:45Z',
+     *   ],
+     * ]
+     * ```
+     *
      * @return array<int, array<string, mixed>>
+     * @throws ValidationException when `$documentId` is empty
      */
     public function listTags(string $documentId): array
     {
@@ -365,10 +683,29 @@ class DocumentResource extends AbstractResource
      * `PUT /accounts/{account_id}/documents/{document_id}/tags`
      *
      * Names that don't yet exist in the workspace are created automatically
-     * (case-insensitive). An empty array detaches all tags.
+     * (case-insensitive). An empty array detaches all tags — that is the difference from
+     * {@see self::appendTags()}, which never removes anything.
      *
-     * @param array<int, string> $tagNames
+     * Tags are addressed by **name**, not ID, in both directions of this call.
+     *
+     * Request body:
+     * ```
+     * ['tags' => ['contracts', 'q3-2026']]   // [] clears every tag
+     * ```
+     *
+     * Response (unwrapped `data` — the document's complete resulting tag set):
+     * ```
+     * [
+     *   ['id' => '103aa221874346e6b3de41688526', 'name' => 'contracts', 'color' => null,
+     *    'created_at' => '2026-07-18T19:03:45Z', 'updated_at' => '2026-07-18T19:03:45Z'],
+     *   ['id' => '104175c4b3e5e6905c2b509b3f85', 'name' => 'q3-2026', 'color' => null,
+     *    'created_at' => '2026-08-21T17:31:14Z', 'updated_at' => '2026-08-21T17:31:14Z'],
+     * ]
+     * ```
+     *
+     * @param array<int, string> $tagNames tag names; `[]` detaches all
      * @return array<int, array<string, mixed>> the document's resulting tag set
+     * @throws ValidationException when a name is not a non-empty string
      */
     public function replaceTags(string $documentId, array $tagNames): array
     {
@@ -386,12 +723,29 @@ class DocumentResource extends AbstractResource
      * Attach tags to a document without removing existing ones (idempotent).
      * `POST /accounts/{account_id}/documents/{document_id}/tags`
      *
-     * Unknown names are auto-created.
+     * Unknown names are auto-created. Re-attaching a tag the document already carries is a
+     * no-op rather than an error, which makes this safe to retry.
      *
-     * @param array<int, string> $tagNames
+     * Request body (at least one name required):
+     * ```
+     * ['tags' => ['urgent']]
+     * ```
+     *
+     * Response (unwrapped `data` — the full resulting tag set, not just the added ones):
+     * ```
+     * [
+     *   ['id' => '103aa221874346e6b3de41688526', 'name' => 'contracts', 'color' => null,
+     *    'created_at' => '2026-07-18T19:03:45Z', 'updated_at' => '2026-07-18T19:03:45Z'],
+     *   ['id' => '10428699b0c62399df6266326993', 'name' => 'urgent', 'color' => null,
+     *    'created_at' => '2026-08-27T00:40:10Z', 'updated_at' => '2026-08-27T00:40:10Z'],
+     * ]
+     * ```
+     *
+     * @param array<int, string> $tagNames tag names to attach
      * @return array<int, array<string, mixed>> the document's resulting tag set
      *
-     * @throws ValidationException when no tag names are provided
+     * @throws ValidationException when no tag names are provided, or one is not a
+     *     non-empty string
      */
     public function appendTags(string $documentId, array $tagNames): array
     {
@@ -410,7 +764,19 @@ class DocumentResource extends AbstractResource
      * Detach a single tag from a document (the tag itself is not deleted).
      * `DELETE /accounts/{account_id}/documents/{document_id}/tags/{tag_id}`
      *
+     * Note the asymmetry with {@see self::appendTags()}: attaching takes tag **names**,
+     * detaching takes a tag **ID** — read it from {@see self::listTags()}. To remove the
+     * tag from the workspace entirely, use {@see TagResource::delete()} instead.
+     *
+     * Request: no body.
+     *
+     * Response (unwrapped `data`; empty on success):
+     * ```
+     * []
+     * ```
+     *
      * @return array<string, mixed>
+     * @throws ValidationException when either identifier is empty
      */
     public function detachTag(string $documentId, string $tagId): array
     {
@@ -427,10 +793,58 @@ class DocumentResource extends AbstractResource
      * Create a document from a template.
      * `POST /accounts/{account_id}/templates/{template_id}/documents`
      *
-     * @param array<int, array<string, mixed>> $signers each entry: { role_id, id, verification_method?, notification_methods? }
+     * Instantiates a prepared template — its field placements are reused, so no `entries`
+     * are needed here. Each signer binds to one of the template's `roles`; read the role IDs
+     * from {@see TemplateResource::get()}. Unlike {@see self::upload()} this creates the
+     * document *and* dispatches its assignment in one call.
+     *
+     * Signer roles and field placements are configured in the Assinafy web app; a template
+     * created through the API carries only the default `Editor` role.
+     *
+     * Request body:
+     * ```
+     * [
+     *   'signers' => [
+     *     [
+     *       'role_id'              => '10414160d1669a27520ea6d385cf',  // required
+     *       'id'                   => '19e6b92e7895332ed9708535d8c',   // required
+     *       'verification_method'  => 'Email',
+     *       'notification_methods' => ['Email'],
+     *       'step'                 => 1,
+     *     ],
+     *   ],
+     *   'editor_fields' => [
+     *     ['field_id' => '102d25a48bec03ebcf3b5f651998', 'value' => 'Acme Inc.'],
+     *   ],
+     *   'name'       => 'Acme — service agreement.pdf',
+     *   'message'    => 'Please sign this contract',
+     *   'expires_at' => '2026-12-31T23:59:59Z',
+     *   'tags'       => ['contracts'],
+     * ]
+     * ```
+     *
+     * Response (unwrapped `data` — the created document, with `template_id` set and the
+     * assignment already attached):
+     * ```
+     * [
+     *   'id'          => '1042a416aaa85fcf325679fecb97',
+     *   'account_id'  => '64f000000000000000000001',
+     *   'template_id' => '10414160b9d1a5ff705effd35c43',
+     *   'name'        => 'Acme — service agreement.pdf',
+     *   'status'      => 'pending_signature',
+     *   'artifacts'   => ['original' => 'https://…', 'thumbnail' => 'https://…'],
+     *   'tags'        => [['id' => '103aa…', 'name' => 'contracts', 'color' => null]],
+     *   'assignment'  => ['id' => '1030…', 'method' => 'virtual', 'signers' => [ … ]],
+     *   'created_at'  => '2026-08-27T14:24:43Z',
+     * ]
+     * ```
+     *
+     * @param array<int, array<string, mixed>> $signers each entry: `{ role_id, id,
+     *     verification_method?, notification_methods?, step? }`
      * @param array<string, mixed>             $options optional `name`, `message`, `editor_fields`,
      *     `expires_at`, and `tags`
      * @return array<string, mixed> the created document
+     * @throws ValidationException when `$signers` is empty or an entry is malformed
      */
     public function createFromTemplate(
         string $templateId,
@@ -461,8 +875,48 @@ class DocumentResource extends AbstractResource
      * Estimate cost of creating a document from a template.
      * `POST /accounts/{account_id}/templates/{template_id}/documents/estimate-cost`
      *
-     * @param array<int, array<string, mixed>> $signers
+     * Read-only: nothing is created and no credits are spent. Signer IDs are not needed —
+     * price depends only on `role_id` plus the verification/notification channels, so you
+     * can quote a workflow before the signers exist.
+     *
+     * Request body:
+     * ```
+     * [
+     *   'signers' => [
+     *     [
+     *       'role_id'              => '10414160d1669a27520ea6d385cf',  // required
+     *       'verification_method'  => 'Whatsapp',
+     *       'notification_methods' => ['Whatsapp'],
+     *     ],
+     *   ],
+     * ]
+     * ```
+     *
+     * Response (unwrapped `data`) — the same estimate shape as
+     * {@see AssignmentResource::estimateCost()}:
+     * ```
+     * [
+     *   'documents'                => 1,
+     *   'credits'                  => 0,
+     *   'needs_extra_document'     => true,
+     *   'extra_document_cost'      => 1,
+     *   'total_credits'            => 1,
+     *   'breakdown'                => [],
+     *   'document_balance'         => 0,
+     *   'credit_balance'           => 0,
+     *   'has_sufficient_resources' => false,
+     *   'blocking_reason'          => 'InsufficientDocuments',
+     *   'message'                  => 'A conta não possui documentos suficientes.',
+     * ]
+     * ```
+     *
+     * Check `has_sufficient_resources` before creating; `blocking_reason` is a
+     * machine-readable code and `message` is localised for display.
+     *
+     * @param array<int, array<string, mixed>> $signers each entry: `{ role_id,
+     *     verification_method?, notification_methods? }`
      * @return array<string, mixed>
+     * @throws ValidationException when `$signers` is empty or an entry is malformed
      */
     public function estimateCostFromTemplate(
         string $templateId,
@@ -483,11 +937,29 @@ class DocumentResource extends AbstractResource
 
     /**
      * Poll `GET /documents/{id}` until the document reaches a usable status.
-     * The deadline is checked between calls; an in-flight request is bounded by the
-     * transport timeout configured on {@see \Assinafy\SDK\Configuration}.
      *
+     * Client-side helper, not an API endpoint. Page rendering after {@see self::upload()}
+     * is asynchronous, and an assignment cannot be created until it finishes — this bridges
+     * that gap:
+     * ```php
+     * $document = $client->documents()->upload('/path/contract.pdf');
+     * $ready    = $client->documents()->waitUntilReady($document['id']);
+     * ```
+     *
+     * Returns as soon as `status` is one of {@see self::READY_STATUSES}, throws on any of
+     * {@see self::FAILURE_STATUSES}, and otherwise sleeps `$pollIntervalSeconds` and retries.
+     * The deadline is checked between calls; an in-flight request is bounded separately by
+     * the transport timeout on {@see \Assinafy\SDK\Configuration}, so the worst-case wall
+     * time is `$maxWaitSeconds` plus one request timeout.
+     *
+     * Response: the same payload as {@see self::get()}, once it is ready.
+     *
+     * @param int $maxWaitSeconds      total budget before giving up
+     * @param int $pollIntervalSeconds delay between polls; the last sleep is trimmed so the
+     *     helper never overshoots the deadline
      * @return array<string, mixed> the ready document
-     * @throws \RuntimeException on terminal failure or timeout
+     * @throws ValidationException when either interval is not a positive integer
+     * @throws \RuntimeException on a terminal failure status or on timeout
      */
     public function waitUntilReady(string $documentId, int $maxWaitSeconds = 60, int $pollIntervalSeconds = 2): array
     {
@@ -524,7 +996,19 @@ class DocumentResource extends AbstractResource
         throw new \RuntimeException("Timed out after {$maxWaitSeconds}s waiting for document to become ready");
     }
 
-    /** `true` once every signer has completed, including while certification is in progress. */
+    /**
+     * `true` once every signer has completed, including while certification is in progress.
+     *
+     * Client-side helper over {@see self::get()} — costs one API call. True for `ready`,
+     * `certificating` and `certificated`, so it answers "is everyone done signing?" rather
+     * than "is the certified PDF downloadable?". For the latter, compare `status` against
+     * {@see self::STATUS_CERTIFICATED} directly.
+     *
+     * Request/Response: as {@see self::get()}; only `status` is read.
+     *
+     * @throws ValidationException when `$documentId` is empty
+     * @throws \Assinafy\SDK\Exceptions\ApiException 404 when the document does not exist
+     */
     public function isFullySigned(string $documentId): bool
     {
         return in_array(
@@ -537,7 +1021,24 @@ class DocumentResource extends AbstractResource
     /**
      * Return a signed/total/percentage summary derived from the document's assignment.
      *
+     * Client-side helper over {@see self::get()} — costs one API call, and derives the
+     * counts from the assignment's `items`/`signers` rather than a dedicated endpoint.
+     *
+     * Request: as {@see self::get()}; only `status` and `assignment` are read.
+     *
+     * Response (computed locally, ready for a progress bar):
+     * ```
+     * ['signed' => 1, 'total' => 3, 'pending' => 2, 'percentage' => 33.33]
+     * ```
+     *
+     * Once the document reaches a fully-signed status the counts are forced to 100% —
+     * the API prunes assignment items after certification, so counting them would
+     * otherwise regress to 0%.
+     *
+     * A document with no assignment yields `total => 0` and `percentage => 0.0`.
+     *
      * @return array{signed:int,total:int,pending:int,percentage:float}
+     * @throws ValidationException when `$documentId` is empty
      */
     public function getSigningProgress(string $documentId): array
     {
