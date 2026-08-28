@@ -58,7 +58,7 @@ jobs:
         run: composer test
 
   static-analysis:
-    name: Static analysis (PHPStan + PHPMD)
+    name: Static analysis (PHPStan)
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -82,9 +82,6 @@ jobs:
       # --memory-limit: PHPStan's parallel workers exceed PHP's default 128M on this codebase.
       - name: Run PHPStan
         run: composer run phpstan -- --error-format=github
-
-      - name: Run PHPMD
-        run: composer phpmd
 
   coding-standards:
     name: Coding standards (PSR-12)

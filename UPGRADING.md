@@ -10,7 +10,7 @@ that installed an earlier release through a VCS or path repository should drop t
 `repositories` entry from `composer.json` first, so Composer resolves from Packagist instead of
 the pinned mirror.
 
-Version 2.1.2 implements the published Assinafy v1 operation set. It also retains five
+Version 2.1.3 implements the published Assinafy v1 operation set. It also retains five
 runtime-supported template-management methods outside OpenAPI. Two legacy OAuth URL routes remain
 for compatibility, but their upstream redirects are not operational.
 
@@ -404,6 +404,27 @@ validator; no public method, request shape, or response handling changed.
 - The README documents which endpoints the sandbox does not serve. `accounts()->stats()`,
   `users()->stats()`, and `users()->notificationPreferences()` work against production and return
   a framework `404` against the sandbox, so sandbox-only testing cannot exercise them.
+
+Run the full developer gate after upgrading:
+
+```bash
+composer check
+```
+
+## v2.1.2 → v2.1.3
+
+No code change is required. This release changes packaging and development tooling only; no
+public method, request shape, or response handling changed. The one runtime difference is the
+`User-Agent`, which now reads `Assinafy-PHP-SDK/v2.1.3`.
+
+- Installation is a plain `composer require assinafy/php-sdk`. Projects that installed an earlier
+  release through a VCS or path repository should drop that `repositories` entry so Composer
+  resolves from Packagist.
+- PHPMD is no longer part of the developer gate. `composer check` now runs `composer validate`,
+  the unit suite, PHPStan, PHPCS, and the dependency audit. Contributors who kept a local
+  `composer phpmd` habit or a `make phpmd` invocation should drop it; both are gone, along with
+  `phpmd.xml` and `phpmd.baseline.xml`. This affects contributors only, not consumers of the
+  package.
 
 Run the full developer gate after upgrading:
 

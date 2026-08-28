@@ -1,4 +1,4 @@
-.PHONY: help install test integration check quality phpcs phpcbf phpstan phpmd audit \
+.PHONY: help install test integration check quality phpcs phpcbf phpstan audit \
 	docker-up docker-down docker-build docker-logs docker-install quickstart docker-quickstart
 
 help:
@@ -31,9 +31,6 @@ phpcbf:
 
 phpstan:
 	composer phpstan
-
-phpmd:
-	composer phpmd
 
 audit:
 	composer audit:dependencies

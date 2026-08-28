@@ -99,7 +99,7 @@ $client = new AssinafyClient($configuration, logger: $logger);
 ```
 
 The bundled transport enforces `User-Agent: Assinafy-PHP-SDK/v{SDK_VERSION}` on every request—for
-example, version 2.1.2 sends `Assinafy-PHP-SDK/v2.1.2`. This applies to authenticated, public,
+example, version 2.1.3 sends `Assinafy-PHP-SDK/v2.1.3`. This applies to authenticated, public,
 signer, JSON, multipart-upload, raw-body, and binary-download requests.
 `Configuration::SDK_VERSION` is the single source for the header version.
 Applications that replace the bundled `HttpClientInterface` transport must send the same exact
@@ -657,7 +657,6 @@ The individual commands are:
 ```bash
 composer test
 composer phpstan
-composer phpmd
 composer phpcs
 composer audit:dependencies
 composer validate --strict --no-check-lock

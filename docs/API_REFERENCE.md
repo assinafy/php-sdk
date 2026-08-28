@@ -5,7 +5,7 @@ This reference maps every public resource method in this SDK to the Assinafy API
 - <https://api.assinafy.com.br/v1/docs>
 - <https://api.assinafy.com.br/v1/docs/openapi.json>
 
-It describes the `v2.1.2` release and current repository `main`, installable with
+It describes the `v2.1.3` release and current repository `main`, installable with
 `composer require assinafy/php-sdk`. See [INSTALLATION.md](INSTALLATION.md) for version
 constraints and development setup.
 

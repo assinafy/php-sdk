@@ -32,10 +32,10 @@ composer require assinafy/php-sdk:^2.1
 To install one exact release:
 
 ```bash
-composer require assinafy/php-sdk:2.1.2
+composer require assinafy/php-sdk:2.1.3
 ```
 
-The documentation on the repository's current `main` describes the `v2.1.2` release. Use the
+The documentation on the repository's current `main` describes the `v2.1.3` release. Use the
 documentation shipped with a tag when installing that tag.
 
 Optional PSR-3 logging integrations, such as Monolog, can be installed separately:

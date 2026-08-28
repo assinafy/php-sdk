@@ -3,7 +3,7 @@
 These examples target the Assinafy v1 sandbox. Keep production and sandbox credentials separate, load secrets from environment variables or a secret manager, and use disposable sandbox entities for operations that create, update, sign, or delete data.
 
 The complete endpoint and response mapping is in [API_REFERENCE.md](API_REFERENCE.md).
-These examples target the `v2.1.2` release, installable with
+These examples target the `v2.1.3` release, installable with
 `composer require assinafy/php-sdk`. See [INSTALLATION.md](INSTALLATION.md) for version
 constraints and development setup.
 

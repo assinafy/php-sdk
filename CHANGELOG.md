@@ -7,13 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.3] - 2026-08-27
+
+Packaging and tooling release. No public API, request shape, or response handling changed; the
+transport behaves exactly as in 2.1.2. The only runtime difference is the `User-Agent`, which now
+reads `Assinafy-PHP-SDK/v2.1.3`.
+
 ### Changed
 
 - **Installation is now a plain `composer require assinafy/php-sdk`.** The package is published
   on Packagist, so the VCS/path-repository workaround the documentation carried is no longer
   needed. Projects that added a `repositories` entry to install an earlier release should remove
-  it so Composer resolves from Packagist. Documentation only; the package itself is unchanged
-  from 2.1.2.
+  it so Composer resolves from Packagist.
+
+### Removed
+
+- **PHPMD is no longer part of the developer gate.** Its design rules were suppressed heavily
+  enough that the remaining signal did not justify the dependency: `phpmd/phpmd` pulled thirteen
+  transitive packages into `require-dev` (PDepend, six Symfony components, `composer/pcre`,
+  `composer/xdebug-handler`), and the findings it still produced were parked in a baseline file.
+  PHPStan, PHPCS, and the unit suite continue to run in `composer check` and in CI. Removed:
+  `phpmd.xml`, `phpmd.baseline.xml`, the `composer phpmd` script, the `make phpmd` target, and
+  the CI step. Consumers are unaffected; the removal touches development tooling only.
 
 ## [2.1.2] - 2026-08-27
 
@@ -523,7 +538,8 @@ All new endpoints from the official API catalog added without breaking existing 
 - **PHP 8.0+**: Full support with named arguments
 - **PHP 8.1+**: Recommended for best developer experience
 
-[Unreleased]: https://github.com/assinafy/php-sdk/compare/v2.1.2...HEAD
+[Unreleased]: https://github.com/assinafy/php-sdk/compare/v2.1.3...HEAD
+[2.1.3]: https://github.com/assinafy/php-sdk/compare/v2.1.2...v2.1.3
 [2.1.2]: https://github.com/assinafy/php-sdk/compare/v2.1.1...v2.1.2
 [2.1.1]: https://github.com/assinafy/php-sdk/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/assinafy/php-sdk/compare/v2.0.0...v2.1.0

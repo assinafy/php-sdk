@@ -53,8 +53,6 @@ assinafy-php-sdk/
 │   └── quickstart.php
 ├── composer.json
 ├── phpcs.xml
-├── phpmd.xml
-├── phpmd.baseline.xml
 ├── phpstan.neon
 └── phpunit.xml
 ```
@@ -234,7 +232,6 @@ Integration tests are opt-in and target the sandbox. Credentials are supplied on
 ```bash
 composer test
 composer phpstan
-composer phpmd
 composer phpcs
 
 # Explicitly opt in to sandbox tests after setting secret environment variables.
