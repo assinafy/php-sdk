@@ -18,11 +18,13 @@ final class MutableLogger extends AbstractLogger
     {
     }
 
+    /** Redirect every holder of this proxy to a new logger. */
     public function setLogger(LoggerInterface $logger): void
     {
         $this->logger = $logger;
     }
 
+    /** The logger currently being proxied to. */
     public function getLogger(): LoggerInterface
     {
         return $this->logger;

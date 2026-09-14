@@ -29,6 +29,7 @@ class ApiException extends AssinafyException
         $this->responseHeaders = self::normalizeHeaders($responseHeaders);
     }
 
+    /** The HTTP status code the API answered with. */
     public function getStatusCode(): int
     {
         return $this->statusCode;
@@ -53,6 +54,7 @@ class ApiException extends AssinafyException
         return $this->responseHeaders;
     }
 
+    /** One response header, comma-joined, matched case-insensitively; `''` when absent. */
     public function getResponseHeaderLine(string $name): string
     {
         foreach ($this->responseHeaders as $headerName => $values) {

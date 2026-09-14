@@ -3,5 +3,13 @@ composer.lock
 .phpunit.result.cache
 .phpunit.cache
 .env
-.DS_Store
 
+# Local agent/editor state. settings.local.json accumulates approved commands,
+# which can embed live API keys — never commit it.
+/.claude/
+
+# Local agent guidance. Kept out of the published package.
+/AGENTS.md
+/CLAUDE.md
+
+.DS_Store

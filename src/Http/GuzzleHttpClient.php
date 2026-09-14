@@ -94,6 +94,7 @@ class GuzzleHttpClient implements HttpClientInterface
         ]);
     }
 
+    /** {@inheritDoc} */
     public function get(
         string $uri,
         #[\SensitiveParameter] array $params = [],
@@ -105,6 +106,7 @@ class GuzzleHttpClient implements HttpClientInterface
         ]);
     }
 
+    /** {@inheritDoc} */
     public function post(
         string $uri,
         #[\SensitiveParameter] ?array $data = null,
@@ -114,6 +116,7 @@ class GuzzleHttpClient implements HttpClientInterface
         return $this->request('POST', $uri, $this->jsonOptions($data, $headers, $query));
     }
 
+    /** {@inheritDoc} */
     public function put(
         string $uri,
         #[\SensitiveParameter] ?array $data = null,
@@ -123,6 +126,7 @@ class GuzzleHttpClient implements HttpClientInterface
         return $this->request('PUT', $uri, $this->jsonOptions($data, $headers, $query));
     }
 
+    /** {@inheritDoc} */
     public function patch(
         string $uri,
         #[\SensitiveParameter] ?array $data = null,
@@ -132,6 +136,7 @@ class GuzzleHttpClient implements HttpClientInterface
         return $this->request('PATCH', $uri, $this->jsonOptions($data, $headers, $query));
     }
 
+    /** {@inheritDoc} */
     public function delete(
         string $uri,
         #[\SensitiveParameter] array $headers = [],
@@ -147,6 +152,7 @@ class GuzzleHttpClient implements HttpClientInterface
         return $this->request('DELETE', $uri, $this->withOptionalQuery($options, $query));
     }
 
+    /** {@inheritDoc} */
     public function uploadFile(
         string $uri,
         #[\SensitiveParameter] string $filePath,
@@ -194,6 +200,7 @@ class GuzzleHttpClient implements HttpClientInterface
         }
     }
 
+    /** {@inheritDoc} */
     public function postRaw(
         string $uri,
         #[\SensitiveParameter] string $body,

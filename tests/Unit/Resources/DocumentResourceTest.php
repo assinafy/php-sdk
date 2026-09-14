@@ -9,6 +9,7 @@ use Assinafy\SDK\Exceptions\NetworkException;
 use Assinafy\SDK\Exceptions\ValidationException;
 use Assinafy\SDK\Resources\DocumentResource;
 use Assinafy\SDK\Tests\Unit\Support\FakeHttpClient;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 final class DocumentResourceTest extends TestCase
@@ -221,10 +222,32 @@ final class DocumentResourceTest extends TestCase
         $this->assertSame(['recipient' => 'a@b.com', 'channel' => 'email'], $call['body']);
     }
 
-    public function testSendTokenRejectsUnknownChannel(): void
+    /**
+     * `email` is the only send-token channel, and the guard is deliberate.
+     *
+     * Live-verified: `whatsapp` draws `400 "Canal inválido"` from the API — the same error a
+     * nonsense channel gets — despite the published prose claiming "email/WhatsApp". Lowercase
+     * `sms` passes the API's channel check but can never succeed, because it needs an SMS signer
+     * entry and neither `verification_method` nor `notification_methods` accepts SMS. Rejecting
+     * both locally saves a round trip that could only ever fail.
+     *
+     */
+    #[DataProvider('unsupportedSendTokenChannels')]
+    public function testSendTokenRejectsUnsupportedChannel(string $channel): void
     {
         $this->expectException(ValidationException::class);
-        $this->documents->sendToken('doc1', 'a@b.com', 'whatsapp');
+        $this->documents->sendToken('doc1', 'a@b.com', $channel);
+    }
+
+    /** @return array<string, array{0: string}> */
+    public static function unsupportedSendTokenChannels(): array
+    {
+        return [
+            'whatsapp — API answers 400 Canal inválido' => ['whatsapp'],
+            'sms — recognised by the API but unreachable' => ['sms'],
+            'uppercase EMAIL — the API enum is case-sensitive' => ['EMAIL'],
+            'nonsense' => ['carrier-pigeon'],
+        ];
     }
 
     public function testDelete(): void

@@ -593,9 +593,17 @@ class DocumentResource extends AbstractResource
      * Request an access token to be sent to a signer through email.
      * `PUT /public/documents/{document_id}/send-token` (no auth).
      *
-     * Only the `email` channel is supported today. Pass {@see SEND_TOKEN_CHANNEL_EMAIL} —
-     * arbitrary strings are rejected up front so a typo never reaches the API. The
-     * recipient is validated as an email address locally for the same reason.
+     * Only the `email` channel is supported. Pass {@see SEND_TOKEN_CHANNEL_EMAIL} — arbitrary
+     * strings are rejected up front so a typo never reaches the API. The recipient is validated
+     * as an email address locally for the same reason.
+     *
+     * The published description claims "email/WhatsApp", but the schema declares no `channel`
+     * property at all and the running API answers `400 "Canal inválido"` for `whatsapp` — the
+     * same error a nonsense channel gets. A lowercase `sms` does pass the API's channel check,
+     * yet always fails with `404 "Solicitação de entrada do signatário não encontrada."`: it
+     * needs an SMS signer entry, and none can be created, because `verification_method` accepts
+     * only Email/Whatsapp/DigitalCertificate and `notification_methods` only Email/Whatsapp.
+     * The single-channel list is deliberate and live-verified; do not widen it.
      *
      * Request body:
      * ```

@@ -10,6 +10,9 @@ call site. For the same material as a single reference, use
 [docs/API_REFERENCE.md](docs/API_REFERENCE.md); additional focused examples are in
 [docs/EXAMPLES.md](docs/EXAMPLES.md).
 
+Contributing or working on the SDK itself? [ARCHITECTURE.md](ARCHITECTURE.md) covers the internal
+structure, and [Testing](#testing) below describes the quality gate and the live sandbox suite.
+
 **Contents**
 
 - [Requirements](#requirements) · [Installation](#installation)
@@ -481,8 +484,15 @@ detaching it from one document.
 
 ## Reuse a template
 
-Template uploads use the same PDF validation and asynchronous processing as documents. Configure
-roles and field placements in Assinafy before creating documents from the template.
+Template uploads use the same PDF validation and asynchronous processing as documents.
+
+> **Signing roles come from the web app.** A template uploaded through the API is given exactly
+> one role, and its `assignment_type` is `Editor` — an editing role, not a signing one. Binding a
+> signer to it makes `createFromTemplate()` fail with
+> `400 "Pelo menos um signatário deve ter uma função de assinatura."` Configure the signing roles
+> and field placements for a template in Assinafy before creating documents from it.
+> `create`, `get`, `update`, `delete`, `waitUntilReady`, `downloadPage`, and
+> `estimateCostFromTemplate` all work on an API-created template.
 
 ```php
 $template = $client->templates()->create('/absolute/path/to/template.pdf');
@@ -674,7 +684,12 @@ export ASSINAFY_INTEGRATION=1
 vendor/bin/phpunit --testsuite=integration
 ```
 
-Tests that send notifications require addresses controlled by the operator:
+That run covers the full document and assignment lifecycle — upload, estimate, assign, resend,
+reset expiration, progress, download, templates, tags, fields, webhooks, and accounts — with no
+further switches. Recipients are unique addresses in the reserved `example.com` domain, so the
+API accepts them and no mail is delivered.
+
+Only tests that must *read* a delivered message need real, operator-controlled inboxes:
 
 ```bash
 export ASSINAFY_NOTIFICATION_TESTS=1

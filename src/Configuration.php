@@ -127,6 +127,7 @@ class Configuration
         return new self('', $accountId, $baseUrl, $timeout, $connectTimeout, $accessToken);
     }
 
+    /** True when built by {@see self::forPublic()} — no credential is sent. */
     public function isPublic(): bool
     {
         return $this->apiKey === self::PUBLIC_PLACEHOLDER
@@ -134,36 +135,43 @@ class Configuration
             && $this->accessToken === null;
     }
 
+    /** True when requests carry an `Authorization: Bearer` header instead of `X-Api-Key`. */
     public function isBearerAuthenticated(): bool
     {
         return $this->accessToken !== null;
     }
 
+    /** The API root, without a trailing slash (e.g. `https://api.assinafy.com.br/v1`). */
     public function getBaseUrl(): string
     {
         return $this->baseUrl;
     }
 
+    /** The raw API key. Empty on a Bearer configuration; a sentinel on a public one. */
     public function getApiKey(): string
     {
         return $this->apiKey;
     }
 
+    /** The Bearer access token, or null when authenticating with an API key. */
     public function getAccessToken(): ?string
     {
         return $this->accessToken;
     }
 
+    /** The workspace id account-scoped routes are built from. */
     public function getAccountId(): string
     {
         return $this->accountId;
     }
 
+    /** Total per-request timeout, in seconds. */
     public function getTimeout(): int
     {
         return $this->timeout;
     }
 
+    /** Connection-establishment timeout, in seconds. */
     public function getConnectTimeout(): int
     {
         return $this->connectTimeout;

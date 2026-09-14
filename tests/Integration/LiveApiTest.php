@@ -33,6 +33,8 @@ final class LiveApiTest extends TestCase
     private array $createdDocuments = [];
     /** @var array<int, string> signer ids we created and need to clean up */
     private array $createdSigners = [];
+    /** @var array<int, string> template ids we created and need to clean up */
+    private array $createdTemplates = [];
     /** @var array<int, string> temporary fixture paths we created */
     private array $temporaryFiles = [];
 
@@ -91,6 +93,13 @@ final class LiveApiTest extends TestCase
                 $cleanupErrors[] = "signer {$id}: {$e->getMessage()}";
             }
         }
+        foreach ($this->createdTemplates as $id) {
+            try {
+                $this->retryRateLimited(fn () => $this->client->templates()->delete($id));
+            } catch (\Throwable $e) {
+                $cleanupErrors[] = "template {$id}: {$e->getMessage()}";
+            }
+        }
         foreach ($this->temporaryFiles as $path) {
             if (is_file($path) && !unlink($path)) {
                 $cleanupErrors[] = "temporary file {$path}";
@@ -99,6 +108,7 @@ final class LiveApiTest extends TestCase
 
         $this->createdDocuments = [];
         $this->createdSigners = [];
+        $this->createdTemplates = [];
         $this->temporaryFiles = [];
 
         if ($cleanupErrors !== []) {
@@ -167,6 +177,24 @@ final class LiveApiTest extends TestCase
     }
 
     /**
+     * A unique address in the RFC 2606 reserved `example.com` domain.
+     *
+     * The API accepts these for signer creation, assignment, and send-token, and no mail
+     * is ever delivered, so flows that only assert on the API response need no opt-in and
+     * no real inbox. Use {@see self::notificationEmails()} instead only when the test must
+     * read the message that was sent.
+     */
+    private function reservedEmail(string $prefix): string
+    {
+        return $prefix . '-' . uniqid() . '@example.com';
+    }
+
+    /**
+     * Real, deliverable addresses for the few flows that must produce a readable message.
+     *
+     * Opt-in because these send actual mail. Anything that only asserts on the API
+     * response should use {@see self::reservedEmail()} and run unconditionally.
+     *
      * @return array{0: string, 1: string}
      */
     private function notificationEmails(): array
@@ -390,60 +418,64 @@ final class LiveApiTest extends TestCase
         }
     }
 
-    /** Exercise TemplateResource::get when the sandbox account contains a template. */
-    public function testTemplatesGetWhenAvailable(): void
+    /**
+     * `templates()->get` must expose `roles`, which the README's template flow relies on.
+     *
+     * Creates its own template rather than depending on one already existing in the
+     * account, so the assertion runs on every CI execution.
+     */
+    public function testTemplatesGetExposesRoles(): void
     {
-        $page = $this->client->templates()->list(1, 1);
-        $items = $page['data'] ?? [];
+        $templateId = $this->makeReadyTemplate();
 
-        if ($items === []) {
-            $this->markTestSkipped('No templates in sandbox account — cannot exercise templates()->get');
-        }
-
-        $first = $items[0];
-        $template = $this->client->templates()->get($first['id']);
-        $this->assertSame($first['id'], $template['id'] ?? null);
+        $template = $this->client->templates()->get($templateId);
+        $this->assertSame($templateId, $template['id'] ?? null);
         $this->assertArrayHasKey(
             'roles',
             $template,
             'Template detail response must expose `roles` — the SDK readme relies on it'
         );
+        $this->assertNotEmpty(
+            $template['roles'],
+            'A template created through the API is given a default role'
+        );
     }
 
-    /** estimateCostFromTemplate is read-only, but needs a real template with roles. */
-    public function testEstimateCostFromTemplateWhenAvailable(): void
+    /** estimateCostFromTemplate is read-only; it needs a ready template and a role mapping. */
+    public function testEstimateCostFromTemplate(): void
     {
-        $page = $this->client->templates()->list(1, 1, ['status' => 'ready']);
-        $items = $page['data'] ?? [];
+        $templateId = $this->makeReadyTemplate();
+        $template = $this->client->templates()->get($templateId);
 
-        if ($items === []) {
-            $this->markTestSkipped('No ready templates in sandbox — cannot estimate cost from template');
-        }
-
-        $template = $this->client->templates()->get($items[0]['id']);
         $roleIds = array_column($template['roles'] ?? [], 'id');
-        if ($roleIds === []) {
-            $this->markTestSkipped('Template has no roles — cannot build signer/role mapping');
-        }
+        $this->assertNotEmpty($roleIds, 'template must carry at least one role');
 
         $signerEntries = [];
         foreach ($roleIds as $roleId) {
             $signer = $this->client->signers()->create(
                 'SDK estimateCost ' . uniqid(),
-                'sdk-integration+' . uniqid() . '@example.com'
+                $this->reservedEmail('sdk-estimate')
             );
             $this->createdSigners[] = $signer['id'];
             $signerEntries[] = ['role_id' => $roleId, 'id' => $signer['id']];
         }
 
-        $estimate = $this->client->documents()->estimateCostFromTemplate($template['id'], $signerEntries);
+        $estimate = $this->client->documents()->estimateCostFromTemplate($templateId, $signerEntries);
         $this->assertIsArray($estimate);
+        $this->assertArrayHasKey('total_credits', $estimate);
     }
 
-    /** Full assignment lifecycle (estimateCost → create → estimateResendCost → resend → resetExpiration). */
+    /**
+     * Full assignment lifecycle (estimateCost → create → estimateResendCost → resend →
+     * resetExpiration → whatsappNotifications).
+     *
+     * Runs unconditionally against a reserved `example.com` recipient: every call here is
+     * asserted on its API response, never on a delivered message, so no real inbox is
+     * required. This is the SDK's primary flow and must not be opt-in.
+     */
     public function testAssignmentFullLifecycle(): void
     {
-        [$email] = $this->notificationEmails();
+        $email = $this->reservedEmail('sdk-assignment');
         $pdf = $this->makePdfFixture();
         $doc = $this->client->documents()->upload($pdf);
         $this->createdDocuments[] = $doc['id'];
@@ -495,7 +527,21 @@ final class LiveApiTest extends TestCase
             $assignmentId,
             '2100-01-31T23:59:00Z'
         );
-        $this->assertIsArray($reset);
+        $this->assertSame('2100-01-31T23:59:00Z', $reset['expires_at'] ?? null);
+
+        // 6. The WhatsApp notification log — empty for an email-notified signer, but the
+        //    endpoint must answer rather than 404.
+        $this->assertIsArray(
+            $this->client->assignments()->whatsappNotifications($doc['id'], $assignmentId)
+        );
+
+        // 7. Progress reporting reflects the pending signature. `percentage` is a float,
+        //    as the @return contract on getSigningProgress declares.
+        $this->assertSame(
+            ['signed' => 0, 'total' => 1, 'pending' => 1, 'percentage' => 0.0],
+            $this->client->documents()->getSigningProgress($doc['id'])
+        );
+        $this->assertFalse($this->client->documents()->isFullySigned($doc['id']));
     }
 
     /** Exercises the high-level workflow and sends assignment/access-token emails. */
@@ -592,33 +638,35 @@ final class LiveApiTest extends TestCase
         $this->assertStringStartsWith('%PDF', $download);
     }
 
-    /** createFromTemplate, skipped unless the sandbox has a ready template. */
-    public function testCreateFromTemplateWhenAvailable(): void
+    /**
+     * createFromTemplate against a template whose roles can actually sign.
+     *
+     * A template created through the API is given exactly one role, and that role's
+     * `assignment_type` is `Editor`, not a signing type. Binding a signer to it makes the
+     * API reject the call with `400 "Pelo menos um signatário deve ter uma função de
+     * assinatura."` — signing roles can only be configured in the web app today. So this
+     * test uses a pre-existing template that has a signing role, and skips when the
+     * account has none. Verified live; do not "fix" it by creating a template here.
+     */
+    public function testCreateFromTemplateWhenSigningRoleExists(): void
     {
-        [$email, $alternateEmail] = $this->notificationEmails();
-        $page = $this->client->templates()->list(1, 1, ['status' => 'ready']);
-        $items = $page['data'] ?? [];
-
-        if ($items === []) {
-            $this->markTestSkipped('No ready templates in sandbox — cannot exercise createFromTemplate');
+        $signingTemplate = $this->findTemplateWithSigningRole();
+        if ($signingTemplate === null) {
+            $this->markTestSkipped(
+                'No template with a signing role in this account. API-created templates only '
+                . 'receive an Editor role; configure a signing role in the web app to cover this.'
+            );
         }
 
-        $template = $this->client->templates()->get($items[0]['id']);
-        $roleIds = array_column($template['roles'] ?? [], 'id');
-        if ($roleIds === []) {
-            $this->markTestSkipped('Template has no roles — cannot bind signers');
-        }
-
-        $emails = strcasecmp($email, $alternateEmail) === 0
-            ? [$email]
-            : [$email, $alternateEmail];
-        if (count($roleIds) > count($emails)) {
-            $this->markTestSkipped('Template needs more controlled signer emails than configured');
-        }
+        [$template, $roleIds] = $signingTemplate;
 
         $signerEntries = [];
-        foreach ($roleIds as $index => $roleId) {
-            $signer = $this->controlledSigner($emails[$index], 'SDK createFromTemplate');
+        foreach ($roleIds as $roleId) {
+            $signer = $this->client->signers()->create(
+                'SDK createFromTemplate ' . uniqid(),
+                $this->reservedEmail('sdk-from-template')
+            );
+            $this->createdSigners[] = $signer['id'];
             $signerEntries[] = [
                 'role_id' => $roleId,
                 'id' => $signer['id'],
@@ -788,10 +836,33 @@ final class LiveApiTest extends TestCase
     }
 
     /** Read-only webhook discovery endpoints. */
-    public function testWebhookEventTypesAndDispatches(): void
+    /**
+     * Every event the API advertises must have an `EVENT_*` constant.
+     *
+     * Asserted as a subset, not equality, and deliberately so: the SDK tracks the documented
+     * catalogue, which is a superset of what any one environment serves. The sandbox omits the
+     * three `template_*` events, so requiring equality would fail on an SDK that is correct.
+     * This direction is the one that matters — it fails when the API gains an event the SDK
+     * does not know about.
+     */
+    public function testWebhookEventTypesAreAllKnownToTheSdk(): void
     {
         $eventTypes = $this->client->webhooks()->eventTypes();
-        $this->assertContains('document_ready', array_column($eventTypes, 'id'));
+        $liveIds = array_column($eventTypes, 'id');
+        $this->assertContains('document_ready', $liveIds);
+
+        $known = [];
+        foreach ((new \ReflectionClass(WebhookResource::class))->getConstants() as $name => $value) {
+            if (str_starts_with($name, 'EVENT_')) {
+                $known[] = $value;
+            }
+        }
+
+        $this->assertSame(
+            [],
+            array_values(array_diff($liveIds, $known)),
+            'The API advertises an event with no EVENT_* constant — add it to WebhookResource'
+        );
 
         $dispatches = $this->client->webhooks()->dispatches(['per-page' => 1]);
         $this->assertArrayHasKey('data', $dispatches);
@@ -1125,6 +1196,52 @@ final class LiveApiTest extends TestCase
                 'Expected 401: signer-access-code was present but invalid.'
             );
         }
+    }
+
+    /**
+     * Find an existing template whose roles can sign, rather than merely edit.
+     *
+     * @return array{0: array<string, mixed>, 1: array<int, string>}|null template and role ids
+     */
+    private function findTemplateWithSigningRole(): ?array
+    {
+        foreach ($this->client->templates()->list(1, 25)['data'] ?? [] as $summary) {
+            $id = $summary['id'] ?? null;
+            if (!is_string($id)) {
+                continue;
+            }
+
+            $template = $this->client->templates()->get($id);
+            $roleIds = [];
+            foreach ($template['roles'] ?? [] as $role) {
+                if (strcasecmp((string) ($role['assignment_type'] ?? ''), 'Editor') !== 0) {
+                    $roleIds[] = (string) $role['id'];
+                }
+            }
+
+            if ($roleIds !== []) {
+                return [$template, $roleIds];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Upload a template, wait for its pages to render, and register it for cleanup.
+     *
+     * @return string the ready template's id
+     */
+    private function makeReadyTemplate(): string
+    {
+        $created = $this->client->templates()->create($this->makePdfFixture());
+        $templateId = (string) ($created['id'] ?? '');
+        self::assertNotSame('', $templateId, 'template create must return an id');
+        $this->createdTemplates[] = $templateId;
+
+        $this->client->templates()->waitUntilReady($templateId, 90, 2);
+
+        return $templateId;
     }
 
     private function makePdfFixture(): string

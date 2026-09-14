@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+No public API, request shape, or response handling changed.
+
+### Added
+
+- Docblocks on the remaining client, configuration, transport, and response accessors, so every
+  public method in the SDK now carries documentation.
+
+### Changed
+
+- The README's template section now states that a template created through the API receives only
+  an `Editor` role; signing roles are configured in the web app, and `createFromTemplate()`
+  requires one.
+- The live integration suite exercises the full assignment lifecycle — estimate, create, resend,
+  reset expiration, WhatsApp notification log, and signing progress — on every run. It previously
+  required an opt-in switch and an operator-controlled mailbox. Recipients now use the reserved
+  `example.com` domain, so no mail is delivered. Template detail and cost-estimate coverage
+  likewise no longer depends on a template already existing in the account.
+- `/.claude/` is gitignored. Locally approved-command history can embed live API keys.
+
 ## [2.1.3] - 2026-08-27
 
 Packaging and tooling release. No public API, request shape, or response handling changed; the

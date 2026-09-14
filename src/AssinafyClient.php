@@ -116,6 +116,12 @@ class AssinafyClient
         return $this->accounts;
     }
 
+    /**
+     * Documents: upload, list, search, rename, download, tag, and delete.
+     *
+     * The heart of the SDK. A document is uploaded, processed asynchronously into pages,
+     * then assigned for signature via {@see self::assignments()}. Account-scoped.
+     */
     public function documents(): DocumentResource
     {
         if ($this->documents === null) {
@@ -125,6 +131,12 @@ class AssinafyClient
         return $this->documents;
     }
 
+    /**
+     * Signers: the address book of people who can be asked to sign.
+     *
+     * Signers are workspace-level and reusable across documents; create one once and
+     * reference its id in every assignment. Account-scoped.
+     */
     public function signers(): SignerResource
     {
         if ($this->signers === null) {
@@ -134,6 +146,12 @@ class AssinafyClient
         return $this->signers;
     }
 
+    /**
+     * Assignments: request signatures on a document and manage those requests.
+     *
+     * Create binds signers to a document and notifies them; the rest of the resource
+     * estimates cost, resends notifications, and extends deadlines.
+     */
     public function assignments(): AssignmentResource
     {
         if ($this->assignments === null) {
@@ -143,6 +161,12 @@ class AssinafyClient
         return $this->assignments;
     }
 
+    /**
+     * Templates: reusable documents with named roles bound to signers at creation time.
+     *
+     * Note that a template created through the API receives only an `Editor` role;
+     * signing roles are configured in the web app. Account-scoped.
+     */
     public function templates(): TemplateResource
     {
         if ($this->templates === null) {
@@ -152,6 +176,12 @@ class AssinafyClient
         return $this->templates;
     }
 
+    /**
+     * Tags: workspace labels that can be attached to documents for filtering.
+     *
+     * Attach and detach them through {@see DocumentResource::appendTags()} and friends.
+     * Account-scoped.
+     */
     public function tags(): TagResource
     {
         if ($this->tags === null) {
@@ -161,6 +191,12 @@ class AssinafyClient
         return $this->tags;
     }
 
+    /**
+     * Fields: custom and standard data captured from signers during signing.
+     *
+     * Covers field definitions, their types, and server-side value validation.
+     * Account-scoped.
+     */
     public function fields(): FieldResource
     {
         if ($this->fields === null) {
@@ -170,6 +206,12 @@ class AssinafyClient
         return $this->fields;
     }
 
+    /**
+     * Webhooks: the workspace's single event subscription and its delivery history.
+     *
+     * Deliveries are unsigned — see {@see self::webhookEvents()} for how to handle that.
+     * Account-scoped.
+     */
     public function webhooks(): WebhookResource
     {
         if ($this->webhooks === null) {
@@ -179,6 +221,12 @@ class AssinafyClient
         return $this->webhooks;
     }
 
+    /**
+     * Authentication: login, social login, API-key management, and password flows.
+     *
+     * Mostly used on a client built with {@see self::forAuth()}, before any workspace
+     * credential exists.
+     */
     public function auth(): AuthResource
     {
         if ($this->auth === null) {
@@ -188,6 +236,12 @@ class AssinafyClient
         return $this->auth;
     }
 
+    /**
+     * The signer's own session: everything a recipient does with their access code.
+     *
+     * Accept terms, verify a one-time code, confirm data, upload a signature image,
+     * then sign or decline. Authenticated by the signer access code, not the API key.
+     */
     public function signerSession(): SignerSessionResource
     {
         if ($this->signerSession === null) {
@@ -197,6 +251,12 @@ class AssinafyClient
         return $this->signerSession;
     }
 
+    /**
+     * A signer's view of the documents assigned to them.
+     *
+     * Read-only listing, search, and download, plus bulk sign/decline. Authenticated by
+     * the signer access code, not the API key.
+     */
     public function signerDocuments(): SignerDocumentResource
     {
         if ($this->signerDocuments === null) {
@@ -556,21 +616,30 @@ class AssinafyClient
         }
     }
 
+    /** The immutable configuration this client was built with. */
     public function getConfig(): Configuration
     {
         return $this->config;
     }
 
+    /** The transport in use — the injected client, or the SDK's Guzzle default. */
     public function getHttpClient(): HttpClientInterface
     {
         return $this->httpClient;
     }
 
+    /** The PSR-3 logger currently receiving request and error diagnostics. */
     public function getLogger(): LoggerInterface
     {
         return $this->logger;
     }
 
+    /**
+     * Swap the logger after construction.
+     *
+     * Takes effect immediately on resources that were already created: they hold a shared
+     * proxy rather than the logger itself.
+     */
     public function setLogger(LoggerInterface $logger): self
     {
         $this->logger = $logger;

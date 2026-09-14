@@ -24,6 +24,7 @@ class Response
         $this->data = $this->parseBody($body);
     }
 
+    /** The HTTP status line code, e.g. `200`. */
     public function getStatusCode(): int
     {
         return $this->statusCode;
@@ -37,6 +38,7 @@ class Response
         return $this->headers;
     }
 
+    /** The raw response body — JSON text, or bytes for a download. */
     public function getBody(): string
     {
         return $this->body;
@@ -50,16 +52,19 @@ class Response
         return $this->data;
     }
 
+    /** True for any 2xx status. */
     public function isSuccess(): bool
     {
         return $this->statusCode >= 200 && $this->statusCode < 300;
     }
 
+    /** True for any 4xx status. */
     public function isClientError(): bool
     {
         return $this->statusCode >= 400 && $this->statusCode < 500;
     }
 
+    /** True for any 5xx status. */
     public function isServerError(): bool
     {
         return $this->statusCode >= 500;
