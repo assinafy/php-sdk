@@ -1,64 +1,44 @@
-# Assinafy PHP SDK
+# SDK PHP da Assinafy
 
-Framework-independent PHP client for the [Assinafy v1 API](https://api.assinafy.com.br/v1/docs).
-It covers workspace administration, document preparation, signature requests, signer sessions,
-artifacts, templates, tags, fields, and webhooks.
+*Português · [Read in English](README.en.md)*
 
-This guide follows a document from upload through certification. Every SDK method also carries
-its own request and response payloads in its docblock, so an IDE shows the exact shapes at the
-call site. For the same material as a single reference, use
-[docs/API_REFERENCE.md](docs/API_REFERENCE.md); additional focused examples are in
-[docs/EXAMPLES.md](docs/EXAMPLES.md).
+Cliente PHP independente de framework para a [API Assinafy v1](https://api.assinafy.com.br/v1/docs)
+— plataforma brasileira de assinatura eletrônica de documentos. Cobre administração de workspace,
+preparação de documentos, solicitações de assinatura, sessões do signatário, artefatos, templates,
+tags, campos e webhooks.
 
-Contributing or working on the SDK itself? [ARCHITECTURE.md](ARCHITECTURE.md) covers the internal
-structure, and [Testing](#testing) below describes the quality gate and the live sandbox suite.
+> **Referência completa em inglês.** Este documento cobre instalação, autenticação e os fluxos
+> principais. O guia que acompanha um documento do upload até a certificação está em
+> **[README.en.md](README.en.md)**, e a referência consolidada em
+> [docs/API_REFERENCE.md](docs/API_REFERENCE.md).
 
-**Contents**
+## Requisitos
 
-- [Requirements](#requirements) · [Installation](#installation)
-- **Document workflow** — [1. Configure the client](#1-configure-the-client) ·
-  [2. Upload and prepare the PDF](#2-upload-and-prepare-the-pdf) ·
-  [3. Create or reuse signers](#3-create-or-reuse-signers) ·
-  [4. Estimate the assignment](#4-estimate-the-assignment) ·
-  [5. Assign and notify](#5-assign-and-notify) ·
-  [6. Complete the signer flow](#6-complete-the-signer-flow) ·
-  [7. Monitor progress](#7-monitor-progress) ·
-  [8. Download and verify](#8-download-and-verify)
-- [Organize documents with tags](#organize-documents-with-tags) ·
-  [Reuse a template](#reuse-a-template) · [Receive webhooks](#receive-webhooks)
-- [Responses and pagination](#responses-and-pagination) ·
-  [Errors, logging, and secrets](#errors-logging-and-secrets) ·
-  [Resource map](#resource-map)
-- [Sandbox and production differences](#sandbox-and-production-differences) ·
-  [Testing](#testing) · [Upgrading and license](#upgrading-and-license)
-
-## Requirements
-
-- PHP 8.2 through PHP 8.5
+- PHP 8.2 até PHP 8.5
 - `ext-json`
 - `ext-mbstring`
 - Composer 2
 
-The default transport uses Guzzle. Applications may inject a PSR-3 logger or the SDK's own
-`HttpClientInterface`; the transport is not a PSR-18 implementation.
+O transporte padrão usa Guzzle. Aplicações podem injetar um logger PSR-3 ou a própria
+`HttpClientInterface` do SDK; o transporte não é uma implementação PSR-18.
 
-## Installation
+## Instalação
 
 ```bash
 composer require assinafy/php-sdk
 ```
 
-The package is published on Packagist as
-[`assinafy/php-sdk`](https://packagist.org/packages/assinafy/php-sdk); no repository
-configuration is needed. See [docs/INSTALLATION.md](docs/INSTALLATION.md) for version constraints
-and development setup. Keep API keys and account identifiers in a secret manager or environment
-variables, never in `composer.json`, source code, fixtures, or CI configuration.
+O pacote é publicado no Packagist como
+[`assinafy/php-sdk`](https://packagist.org/packages/assinafy/php-sdk) — nenhuma configuração de
+repositório é necessária. Veja [docs/INSTALLATION.md](docs/INSTALLATION.md) para restrições de versão
+e setup de desenvolvimento.
 
-## Document workflow
+Mantenha chaves de API e identificadores de conta em um gerenciador de segredos ou em variáveis de
+ambiente — **nunca** em `composer.json`, no código-fonte, em fixtures ou na configuração de CI.
 
-### 1. Configure the client
+## Configurando o cliente
 
-Use production unless the operation is intentionally a sandbox test:
+Use produção, a menos que a operação seja intencionalmente um teste de sandbox:
 
 ```php
 <?php
@@ -75,7 +55,7 @@ $client = AssinafyClient::create(
 );
 ```
 
-For development, change only the base URL:
+Para desenvolvimento, mude apenas a URL base:
 
 ```php
 $sandbox = AssinafyClient::create(
@@ -85,10 +65,10 @@ $sandbox = AssinafyClient::create(
 );
 ```
 
-Use `Configuration` directly to control timeouts or inject a logger:
+Use `Configuration` diretamente para controlar timeouts ou injetar um logger:
 
 ```php
-$logger = new \Psr\Log\NullLogger(); // Replace with your application's PSR-3 logger.
+$logger = new \Psr\Log\NullLogger(); // Troque pelo logger PSR-3 da sua aplicação.
 
 $configuration = new Configuration(
     apiKey: (string) getenv('ASSINAFY_API_KEY'),
@@ -101,630 +81,122 @@ $configuration = new Configuration(
 $client = new AssinafyClient($configuration, logger: $logger);
 ```
 
-The bundled transport enforces `User-Agent: Assinafy-PHP-SDK/v{SDK_VERSION}` on every request—for
-example, version 2.1.3 sends `Assinafy-PHP-SDK/v2.1.3`. This applies to authenticated, public,
-signer, JSON, multipart-upload, raw-body, and binary-download requests.
-`Configuration::SDK_VERSION` is the single source for the header version.
-Applications that replace the bundled `HttpClientInterface` transport must send the same exact
-header on every Assinafy request.
+O transporte embutido impõe `User-Agent: Assinafy-PHP-SDK/v{SDK_VERSION}` em toda requisição — por
+exemplo, a versão 2.1.3 envia `Assinafy-PHP-SDK/v2.1.3`. Isso vale para requisições autenticadas,
+públicas, de signatário, JSON, upload multipart, corpo bruto e download binário.
+`Configuration::SDK_VERSION` é a fonte única da versão no header. Aplicações que substituírem o
+transporte `HttpClientInterface` embutido precisam enviar exatamente o mesmo header.
 
-Remote and custom base URLs must use HTTPS. Plain HTTP is accepted only for loopback development
-hosts. Credentials, query strings, and fragments are rejected in base URLs, and timeouts must be
-positive.
+URLs base remotas e customizadas precisam usar HTTPS. HTTP puro só é aceito em hosts de
+desenvolvimento em loopback. Credenciais, query strings e fragmentos são rejeitados nas URLs base, e
+timeouts precisam ser positivos.
 
-### Authentication modes
+## Modos de autenticação
 
-Workspace API-key authentication is the normal mode for document operations. Login and other
-public operations start without workspace credentials:
+A autenticação por chave de API do workspace é o modo normal para operações de documento. Login e
+outras operações públicas começam sem credenciais de workspace:
 
 ```php
 $public = AssinafyClient::forAuth(Configuration::DEFAULT_BASE_URL);
 $session = $public->auth()->login(
-    'developer@example.test',
+    'desenvolvedor@exemplo.com.br',
     (string) getenv('ASSINAFY_PASSWORD'),
 );
 
-$accounts = $public->accounts()->list($session['access_token']);
+$contas = $public->accounts()->list($session['access_token']);
 ```
 
-After selecting an account, a Bearer client can call account-scoped resources:
+Depois de escolher uma conta, um cliente Bearer pode chamar recursos com escopo de conta:
 
 ```php
 $bearerClient = AssinafyClient::forBearer(
     accessToken: $session['access_token'],
-    accountId: $accounts['data'][0]['id'],
+    accountId: $contas['data'][0]['id'],
     baseUrl: Configuration::DEFAULT_BASE_URL,
 );
 ```
 
-API keys, Bearer tokens, and signer access codes are separate credentials. A public client sends
-neither `X-Api-Key` nor `Authorization`; calling an account-scoped resource on it fails locally.
+Chaves de API, tokens Bearer e códigos de acesso do signatário são credenciais **separadas**. Um
+cliente público não envia nem `X-Api-Key` nem `Authorization`; chamar um recurso com escopo de conta
+nele falha localmente.
 
-### 2. Upload and prepare the PDF
+## Métodos de verificação do signatário
 
-Uploads accept a readable PDF up to 25 MB. The SDK checks the extension, PDF header, end marker,
-readability, and size before opening a network connection.
+Definidos por signatário ao criar o assignment. O método de verificação e o de notificação são
+**acoplados**: envie um, os dois ou nenhum — o lado que faltar é inferido. Sem nenhum dos dois, ambos
+assumem `Email`.
 
-```php
-$document = $client->documents()->upload('/absolute/path/to/agreement.pdf');
-$documentId = $document['id'];
+| Método | Como funciona | Custo por signatário |
+| --- | --- | --- |
+| `Email` *(padrão)* | Código de uso único (OTP) por e-mail, exigido antes de assinar | Gratuito |
+| `Whatsapp` | Código de uso único (OTP) por WhatsApp | Verificação gratuita; notificação 0,45 crédito, só em planos pagos |
+| `DigitalCertificate` | O signatário assina com o **próprio certificado ICP-Brasil (A1/A3)**, pela extensão de navegador Web PKI, gerando uma assinatura **PAdES qualificada** | 2 créditos |
 
-// Processing is asynchronous. Continue only after the document is usable.
-$document = $client->documents()->waitUntilReady(
-    documentId: $documentId,
-    maxWaitSeconds: 60,
-    pollIntervalSeconds: 2,
-);
+Combinações permitidas: `Email` → notifica por `Email`; `Whatsapp` → notifica por `Whatsapp`;
+`DigitalCertificate` → notifica por `Email` **ou** `Whatsapp`. Apenas um método de notificação por
+signatário.
+
+Estime sempre antes de enviar: `$client->assignments()->estimateCost(...)` devolve o custo em
+créditos com o detalhamento por item.
+
+### Certificado digital ICP-Brasil
+
+Exige o recurso **Certificado Digital** na conta (planos Standard e Pro), CPF ou CNPJ em
+`government_id` do signatário, e exatamente **um signatário por certificado naquele passo**. Um CPF
+exige o certificado daquela pessoa (e-CPF, ou e-CNPJ que a nomeie como representante legal); um CNPJ
+exige um e-CNPJ da empresa.
+
+Antes de abrir o assignment, o signatário precisa confirmar os dados de identidade e aceitar os
+termos. O endpoint comum de assinatura **rejeita** signatários por certificado — a assinatura deles é
+produzida por um handshake de dois passos com a extensão Web PKI:
+
+```
+POST /v1/signers/certificate/start     → data.token   (token da operação Web PKI)
+        ↓  o navegador assina o token com o certificado do signatário
+POST /v1/signers/certificate/complete  → data.signerName
 ```
 
-The upload returns the document object. Common fields include:
+> Essas duas rotas são extensões implantadas **somente em produção**: o sandbox não as expõe e elas
+> não constam do documento OpenAPI publicado.
 
-```php
-[
-    'id' => 'document-id',
-    'account_id' => 'account-id',
-    'name' => 'agreement.pdf',
-    'status' => 'metadata_ready',
-    'artifacts' => [],
-    'tags' => [],
-    'created_at' => '2026-01-01T12:00:00Z',
-]
-```
+Concluído o fluxo, baixar o artefato `pades` devolve a assinatura PAdES qualificada.
 
-Rename before starting the signature process:
+## Trilha de atividades e artefatos
 
-```php
-$document = $client->documents()->rename($documentId, 'Service agreement.pdf');
-```
+As atividades de um documento devolvem todos os eventos registrados, cada um com um snapshot do
+`payload` do evento e a `origin` da requisição (`ip`, `user-agent`).
 
-Once an assignment exists, treat the document name and signer plan as part of the immutable
-signature record.
+Artefatos disponíveis para download:
 
-### 3. Create or reuse signers
-
-Signers belong to the configured workspace. Search before creating one when your application
-uses email as its identity key:
-
-```php
-$email = 'signer@example.test';
-
-$signer = $client->signers()->findByEmail($email)
-    ?? $client->signers()->create(
-        fullName: 'Example Signer',
-        email: $email,
-    );
-
-$signerId = $signer['id'];
-```
-
-`findByEmail()` returns the stored signer without changing its name or phone. Apply intentional
-changes explicitly:
-
-```php
-$signer = $client->signers()->update($signerId, [
-    'full_name' => 'Updated Signer Name',
-]);
-```
-
-WhatsApp numbers require `+`, a country code, and 8–15 digits. Visual separators are normalized:
-
-```php
-$signer = $client->signers()->create(
-    fullName: 'Mobile Signer',
-    whatsappPhoneNumber: '+55 (48) 99999-0000',
-);
-```
-
-Digital-certificate assignments require an account with that feature enabled and an existing
-signer whose `government_id` has been set with `signers()->update()`. A certificate signer must
-be alone in its signing step. The v1 signer-session methods do not expose a certificate
-start/complete protocol; use the completion flow provided by Assinafy for the account.
-
-### 4. Estimate the assignment
-
-Estimate before creating an assignment so the application can verify balances and display cost.
-Signer IDs are optional for an estimate because the cost is based on verification and notification
-methods.
-
-```php
-use Assinafy\SDK\Resources\AssignmentResource;
-
-$signerPlan = [[
-    'id' => $signerId,
-    'verification_method' => AssignmentResource::VERIFICATION_EMAIL,
-    'notification_methods' => [AssignmentResource::NOTIFICATION_EMAIL],
-    'step' => 1,
-]];
-
-$estimate = $client->assignments()->estimateCost(
-    documentId: $documentId,
-    signers: $signerPlan,
-    method: AssignmentResource::METHOD_VIRTUAL,
-);
-
-if (!($estimate['has_sufficient_resources'] ?? false)) {
-    throw new RuntimeException($estimate['blocking_reason'] ?? 'Insufficient account resources');
-}
-```
-
-The estimate data contains `documents`, `credits`, `needs_extra_document`,
-`extra_document_cost`, `total_credits`, `breakdown`, `document_balance`, `credit_balance`,
-`has_sufficient_resources`, `blocking_reason`, and `message`.
-
-An ordinary Email or WhatsApp assignment uses at most one notification method, and its
-verification and delivery channels must match. `DigitalCertificate` uses its own verification
-rules and may still use Email notification.
-
-### 5. Assign and notify
-
-Creating an assignment starts the signature request and sends the configured notifications:
-
-```php
-$assignment = $client->assignments()->create(
-    documentId: $documentId,
-    signers: $signerPlan,
-    method: AssignmentResource::METHOD_VIRTUAL,
-    options: [
-        'message' => 'Please sign this agreement.',
-        'expires_at' => '2027-12-31T23:59:00Z',
-    ],
-);
-
-$assignmentId = $assignment['id'];
-```
-
-The assignment includes its ID, method, expiration, message, signers, items, summary, copy
-receivers, and signing URLs. Treat signing URLs as credentials even though the separate signer
-access code is delivered through the selected channel.
-
-Before resending, estimate the additional cost:
-
-```php
-$resendEstimate = $client->assignments()->estimateResendCost(
-    $documentId,
-    $assignmentId,
-    $signerId,
-);
-
-if ($resendEstimate['has_sufficient_resources'] ?? false) {
-    $client->assignments()->resend($documentId, $assignmentId, $signerId);
-}
-```
-
-Use `resetExpiration()` to change the assignment deadline and
-`whatsappNotifications()` to inspect rendered WhatsApp delivery history.
-
-For the standard virtual flow, the high-level helper performs upload, readiness polling, signer
-lookup/creation, and assignment creation:
-
-```php
-$result = $client->uploadAndRequestSignatures(
-    filePath: '/absolute/path/to/agreement.pdf',
-    signers: [[
-        'full_name' => 'Example Signer',
-        'email' => 'signer@example.test',
-        'verification_method' => AssignmentResource::VERIFICATION_EMAIL,
-        'notification_methods' => [AssignmentResource::NOTIFICATION_EMAIL],
-        'step' => 1,
-    ]],
-    message: 'Please sign this agreement.',
-    expiresAt: '2027-12-31T23:59:00Z',
-);
-
-$document = $result['document'];
-$assignment = $result['assignment'];
-$signerIds = $result['signer_ids'];
-```
-
-The helper validates all signer descriptions before upload. Remote objects created before a later
-API failure are not automatically rolled back; record the returned or logged IDs and apply your
-application's cleanup policy.
-
-### 6. Complete the signer flow
-
-Signer operations use `signer-access-code`, not the workspace API key. Send a fresh token only to
-an address already assigned to the document:
-
-```php
-$public = AssinafyClient::forAuth(Configuration::DEFAULT_BASE_URL);
-
-$public->documents()->sendToken(
-    documentId: $documentId,
-    recipient: 'signer@example.test',
-);
-```
-
-Obtain the signer access code through the controlled delivery channel. Do not derive it from a
-signing URL, log it, or persist it in plain text.
-
-```php
-$accessCode = (string) getenv('ASSINAFY_SIGNER_ACCESS_CODE');
-
-$profile = $public->signerSession()->self($accessCode);
-$public->signerSession()->acceptTerms($accessCode);
-$public->signerSession()->verifyCode(
-    $accessCode,
-    (string) getenv('ASSINAFY_VERIFICATION_CODE'),
-);
-
-$current = $public->signerSession()->currentDocument($accessCode);
-```
-
-For a virtual assignment, confirm the signer data and finalize with an empty field list:
-
-```php
-$public->signerSession()->confirmData($documentId, $accessCode, [
-    'full_name' => 'Example Signer',
-    'email' => 'signer@example.test',
-    'has_accepted_terms' => true,
-]);
-
-$public->signerSession()->sign(
-    documentId: $documentId,
-    assignmentId: $assignmentId,
-    accessCode: $accessCode,
-    fields: [],
-);
-```
-
-For a collect assignment, submit the requested field values returned by the current document:
-
-```php
-$public->signerSession()->sign(
-    documentId: $documentId,
-    assignmentId: $assignmentId,
-    accessCode: $accessCode,
-    fields: [[
-        'itemId' => 'assignment-item-id',
-        'fieldId' => 'field-id',
-        'pageId' => 'page-id',
-        'value' => 'Approved',
-    ]],
-);
-```
-
-Signers may upload a PNG or JPEG signature/initial, decline with a reason, list their documents,
-download permitted artifacts, or sign/decline multiple virtual documents:
-
-```php
-use Assinafy\SDK\Resources\SignerSessionResource;
-
-$signatureBytes = file_get_contents('/absolute/path/to/signature.png');
-if ($signatureBytes === false) {
-    throw new RuntimeException('Unable to read the signature image');
-}
-
-$public->signerSession()->uploadSignature(
-    accessCode: $accessCode,
-    type: SignerSessionResource::TYPE_SIGNATURE,
-    imageBytes: $signatureBytes,
-    mimeType: 'image/png',
-);
-
-$signerDocuments = $public->signerDocuments()->list($signerId, $accessCode);
-```
-
-### 7. Monitor progress
-
-Use the document as the source of truth and webhooks for prompt updates:
-
-```php
-$document = $client->documents()->get($documentId);
-$progress = $client->documents()->getSigningProgress($documentId);
-
-printf(
-    "%d of %d signed (%.2f%%)\n",
-    $progress['signed'],
-    $progress['total'],
-    $progress['percentage'],
-);
-
-if ($client->documents()->isFullySigned($documentId)) {
-    // Certification may still be finishing; poll get() for the desired artifact state.
-}
-
-$activity = $client->documents()->activities($documentId);
-```
-
-Document status constants live on `DocumentResource`. `ready`, `certificating`, and
-`certificated` indicate that every signer has completed; download availability still depends on
-the requested artifact. Paginated workspace views are available through `documents()->list()`,
-`documents()->search()`, and `assignments()->list()`.
-
-### 8. Download and verify
-
-Download methods return raw bytes. Persist them using the access controls and storage rules of
-your application:
-
-```php
-use Assinafy\SDK\Resources\DocumentResource;
-
-$pdf = $client->documents()->download(
-    $documentId,
-    DocumentResource::ARTIFACT_CERTIFICATED,
-);
-
-if (file_put_contents('/secure/output/agreement-signed.pdf', $pdf, LOCK_EX) === false) {
-    throw new RuntimeException('Unable to store the signed document');
-}
-```
-
-Available artifact names are `original`, `certificated`, `certificate-page`, `pades`, and
-`bundle`. `pades` applies to digital-certificate documents; `bundle` is a ZIP. Thumbnails and
-rendered pages also return binary image bytes.
-
-Document verification is public and uses the signature hash printed in the certificate data:
-
-```php
-$signatureHash = (string) getenv('ASSINAFY_DOCUMENT_SIGNATURE_HASH');
-if ($signatureHash === '') {
-    throw new RuntimeException('ASSINAFY_DOCUMENT_SIGNATURE_HASH is required');
-}
-
-$public = AssinafyClient::forAuth(Configuration::DEFAULT_BASE_URL);
-$verification = $public->documents()->verify($signatureHash);
-$publicDocument = $public->documents()->publicInfo($documentId);
-```
-
-## Organize documents with tags
-
-Tag names are attached to documents. Unknown names are created when they are appended or replace
-the current set:
-
-```php
-$client->documents()->appendTags($documentId, ['contracts', '2026']);
-$tags = $client->documents()->listTags($documentId);
-
-$client->documents()->detachTag($documentId, $tags[0]['id']);
-$client->documents()->replaceTags($documentId, ['completed']);
-```
-
-Use `tags()` to list, create, update, or delete workspace tags. Deleting a tag is distinct from
-detaching it from one document.
-
-## Reuse a template
-
-Template uploads use the same PDF validation and asynchronous processing as documents.
-
-> **Signing roles come from the web app.** A template uploaded through the API is given exactly
-> one role, and its `assignment_type` is `Editor` — an editing role, not a signing one. Binding a
-> signer to it makes `createFromTemplate()` fail with
-> `400 "Pelo menos um signatário deve ter uma função de assinatura."` Configure the signing roles
-> and field placements for a template in Assinafy before creating documents from it.
-> `create`, `get`, `update`, `delete`, `waitUntilReady`, `downloadPage`, and
-> `estimateCostFromTemplate` all work on an API-created template.
-
-```php
-$template = $client->templates()->create('/absolute/path/to/template.pdf');
-$template = $client->templates()->waitUntilReady($template['id']);
-$template = $client->templates()->get($template['id']);
-
-$roleId = $template['roles'][0]['id'];
-
-$estimate = $client->documents()->estimateCostFromTemplate($template['id'], [[
-    'role_id' => $roleId,
-    'verification_method' => AssignmentResource::VERIFICATION_EMAIL,
-    'notification_methods' => [AssignmentResource::NOTIFICATION_EMAIL],
-]]);
-
-$document = $client->documents()->createFromTemplate(
-    templateId: $template['id'],
-    signers: [[
-        'role_id' => $roleId,
-        'id' => $signerId,
-        'verification_method' => AssignmentResource::VERIFICATION_EMAIL,
-        'notification_methods' => [AssignmentResource::NOTIFICATION_EMAIL],
-    ]],
-    options: [
-        'name' => 'Agreement from template.pdf',
-        'message' => 'Please sign this agreement.',
-        'tags' => ['contracts'],
-    ],
-);
-```
-
-Template management also provides list, get, update, delete, and rendered-page download methods.
-
-## Receive webhooks
-
-Each workspace has one webhook subscription. Registering it creates or replaces that
-configuration:
-
-```php
-use Assinafy\SDK\Resources\WebhookResource;
-
-$subscription = $client->webhooks()->register(
-    url: 'https://hooks.example.test/assinafy/a-long-random-path',
-    email: 'ops@example.test',
-    events: WebhookResource::DEFAULT_EVENTS,
-);
-```
-
-Parse incoming JSON defensively and then re-fetch the referenced object with authenticated
-credentials:
-
-```php
-$payload = file_get_contents('php://input');
-if ($payload === false) {
-    http_response_code(400);
-    exit;
-}
-
-$event = $client->webhookEvents()->extractEvent($payload);
-
-if ($event === null) {
-    http_response_code(400);
-    exit;
-}
-
-// Deduplicate by event ID, then re-fetch the referenced Assinafy entity before acting.
-```
-
-The v1 webhook contract has no signing secret or signature header. Use HTTPS, an unguessable
-endpoint path, strict method/body limits, event-ID idempotency, and an authenticated re-fetch
-before consequential work. `deactivate()` pauses delivery without deleting the stored
-configuration; `activate()` re-enables it. Use `dispatches()` and `retryDispatch()` to inspect and
-retry deliveries.
-
-## Responses and pagination
-
-Single-object operations normally return the API envelope's `data` value. Paginated operations
-return the envelope and add pagination normalized from `X-Pagination-*` response headers:
-
-```php
-$result = $client->documents()->list(page: 1, perPage: 100);
-
-foreach ($result['data'] as $document) {
-    echo $document['id'];
-}
-
-$pagination = $result['pagination'];
-// current_page, page_count, per_page, total_count
-```
-
-Pages start at 1 and `perPage` accepts 1–100. Binary methods return raw bytes. JSON operations
-with an empty or 204 response return an empty array.
-
-## Errors, logging, and secrets
-
-```php
-use Assinafy\SDK\Exceptions\ApiException;
-use Assinafy\SDK\Exceptions\NetworkException;
-use Assinafy\SDK\Exceptions\ValidationException;
-
-try {
-    $document = $client->documents()->get($documentId);
-} catch (ValidationException $exception) {
-    // The SDK rejected local input before sending a request.
-} catch (ApiException $exception) {
-    $status = $exception->getStatusCode();
-    $details = $exception->getResponseData();
-} catch (NetworkException $exception) {
-    // Connection, timeout, malformed response, or transport failure.
-}
-```
-
-The default transport rejects unsuccessful HTTP responses and unsuccessful API envelopes.
-Redirect following is disabled so custom credentials are not forwarded to another origin.
-
-Inject any PSR-3 logger through the constructor or `setLogger()`. Logger changes propagate to
-resources that have already been created. The default transport redacts API keys, Bearer tokens,
-signer access codes, passwords, OTP values, and credentials embedded in response URLs. Avoid
-logging complete request/response payloads in application code because they may contain personal
-or signature data.
-
-## Resource map
-
-| Accessor | Purpose |
+| Artefato | Conteúdo |
 | --- | --- |
-| `accounts()` | Workspace profile, theme, logo, and document statistics |
-| `users()` | Authenticated user, notification preferences, and user statistics |
-| `documents()` | Upload, metadata, status, artifacts, public access, tags, and template documents |
-| `signers()` | Workspace signer CRUD and search |
-| `assignments()` | Cost estimates, signature requests, resend, expiration, and delivery history |
-| `templates()` | Template upload, metadata, lifecycle, and page rendering |
-| `tags()` | Workspace tag CRUD |
-| `fields()` | Field definitions, types, and value validation |
-| `webhooks()` | Subscription, event types, delivery history, and retries |
-| `auth()` | Login, social authentication, API-key lifecycle, password reset, and password change |
-| `signerSession()` | Signer identity, terms, verification, signature image, sign, and decline actions |
-| `signerDocuments()` | Signer document list, search, bulk actions, and downloads |
-| `webhookEvents()` | Incoming webhook payload parsing |
+| `original` | O PDF enviado, como recebido |
+| `certificated` | O documento assinado, com a certificação da plataforma |
+| `certificate-page` | Apenas a página de certificação |
+| `pades` | Assinaturas ICP-Brasil dos signatários + caixa de certificação — só existe em documentos que tiveram signatários por certificado digital |
+| `bundle` | Zip com `original`, `certificated` e `certificate-page`, mais o `pades` quando houver |
 
-## Sandbox and production differences
+A verificação pública confere um documento assinado pelo hash da assinatura, sem autenticação.
 
-The sandbox does not serve every production route. These three answer normally on
-`api.assinafy.com.br` but return `404 {"name":"Not Found","message":"Página não encontrada."}`
-on `sandbox.assinafy.com.br`:
+## Ambientes
 
-| SDK method | Endpoint |
+| | |
 | --- | --- |
-| `accounts()->stats()` | `GET /accounts/{account_id}/stats` |
-| `users()->stats()` | `GET /users/self/stats` |
-| `users()->notificationPreferences()` and `updateNotificationPreferences()` | `GET`/`PUT /users/self/notification-preferences` |
+| Produção | `Configuration::DEFAULT_BASE_URL` — `https://api.assinafy.com.br/v1` |
+| Sandbox | `Configuration::SANDBOX_BASE_URL` — `https://sandbox.assinafy.com.br/v1` |
 
-A 404 from the sandbox is therefore not evidence that a route is gone. To tell a missing route
-from a missing resource, read the error body rather than the status: a framework routing miss
-carries a `name` key (`{"name":"Not Found", …}`), while a real route reporting a missing resource
-returns the API envelope instead (`{"status":404,"data":null,"message":"Documento não
-encontrado."}`).
+O sandbox é gratuito e espelha a produção para testar a integração de ponta a ponta — com a exceção
+das rotas de certificado digital, que existem apenas em produção. As demais diferenças estão
+documentadas em [README.en.md](README.en.md#sandbox-and-production-differences).
 
-The same distinction works without credentials, because routing resolves before authentication:
-an unauthenticated request to a route that exists answers
-`401 {"status":401,"data":null,"message":"Credenciais inválidas."}`, and one to a route that does
-not exist answers the framework 404 above.
+## Documentação
 
-## Testing
+- **[README.en.md](README.en.md)** — guia completo do fluxo, em inglês
+- [docs/API_REFERENCE.md](docs/API_REFERENCE.md) — referência consolidada
+- [docs/INSTALLATION.md](docs/INSTALLATION.md) — instalação e desenvolvimento
+- [docs/EXAMPLES.md](docs/EXAMPLES.md) — exemplos focados
+- [Documentação da API](https://api.assinafy.com.br/v1/docs)
 
-Run all local quality checks:
+## Licença
 
-```bash
-composer check
-```
-
-The individual commands are:
-
-```bash
-composer test
-composer phpstan
-composer phpcs
-composer audit:dependencies
-composer validate --strict --no-check-lock
-```
-
-Live tests are opt-in and reject the production API URL. Enter secrets without placing them in
-shell history:
-
-```bash
-read -rs ASSINAFY_API_KEY
-export ASSINAFY_API_KEY
-export ASSINAFY_ACCOUNT_ID='sandbox-account-id'
-export ASSINAFY_BASE_URL='https://sandbox.assinafy.com.br/v1'
-export ASSINAFY_INTEGRATION=1
-vendor/bin/phpunit --testsuite=integration
-```
-
-That run covers the full document and assignment lifecycle — upload, estimate, assign, resend,
-reset expiration, progress, download, templates, tags, fields, webhooks, and accounts — with no
-further switches. Recipients are unique addresses in the reserved `example.com` domain, so the
-API accepts them and no mail is delivered.
-
-Only tests that must *read* a delivered message need real, operator-controlled inboxes:
-
-```bash
-export ASSINAFY_NOTIFICATION_TESTS=1
-export ASSINAFY_TEST_EMAIL='first-controlled-address@example.test'
-export ASSINAFY_TEST_EMAIL_ALT='second-controlled-address@example.test'
-```
-
-Signer-session checks additionally require a signer ID and the access code received through the
-controlled channel:
-
-```bash
-export ASSINAFY_SIGNER_ID='sandbox-signer-id'
-read -rs ASSINAFY_SIGNER_ACCESS_CODE
-export ASSINAFY_SIGNER_ACCESS_CODE
-```
-
-State-changing shared-account checks and permanent disposable-account deletion have separate
-switches:
-
-```bash
-export ASSINAFY_STATEFUL_TESTS=1
-export ASSINAFY_DESTRUCTIVE_TESTS=1
-```
-
-Enable only the category whose side effects are acceptable. The live suite never deletes the
-configured account or supplied API key. Login/reset completion, OTP completion, social-provider
-flows, password changes, and API-key deletion need the corresponding disposable credentials,
-inbox access, or provider token.
-
-GitLab CI is the canonical pipeline. The mirrored GitHub Actions pipeline runs the supported PHP
-matrix, dependency ranges, unit tests, static analysis, formatting checks, coverage, dependency
-security checks, and production-dependency smoke tests. Sandbox integration runs only through a
-manual workflow with explicit secrets and safety switches.
-
-## Upgrading and license
-
-See [UPGRADING.md](UPGRADING.md) for release migration guidance. Licensed under the
-[MIT License](LICENSE).
+Distribuído sob a licença [MIT](LICENSE).
