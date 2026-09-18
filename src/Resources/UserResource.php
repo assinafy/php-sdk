@@ -45,14 +45,14 @@ class UserResource extends AbstractResource
      *   'message' => '',
      *   'data'    => [
      *     'user' => [
-     *       'id' => 'md3j6p9w8b7y6qvqaoy5er42', 'name' => 'Jane Doe',
+     *       'id' => 'resource-id', 'name' => 'Jane Doe',
      *       'email' => 'user@example.com', 'telephone' => null, 'government_id' => '',
      *       'is_email_verified' => true, 'has_accepted_terms' => true,
      *       'is_password_set' => true, 'created_at' => '2026-05-12T18:05:11Z',
      *       'to_be_deleted_at' => null,
      *     ],
      *     'accounts' => [
-     *       ['id' => '64f000000000000000000001', 'name' => 'Acme Inc.',
+     *       ['id' => 'resource-id', 'name' => 'Acme Inc.',
      *        'roles' => ['owner'], 'is_delete_allowed' => true,
      *        'created_at' => '2026-05-12T18:05:11Z'],
      *     ],
@@ -65,18 +65,18 @@ class UserResource extends AbstractResource
      * Use {@see AccountResource::list()} for the workspace list rather than relying on the
      * `accounts` key, which the documented shape does not carry.
      *
-     * Response (what this method returns):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'id'                 => 'md3j6p9w8b7y6qvqaoy5er42',
-     *   'name'               => 'Jane Doe',
-     *   'email'              => 'user@example.com',
-     *   'telephone'          => null,
-     *   'government_id'      => '',
-     *   'is_email_verified'  => true,
-     *   'has_accepted_terms' => true,
-     *   'created_at'         => '2026-05-12T18:05:11Z',
-     *   'to_be_deleted_at'   => null,
+     *     'id' => 'auth-user-id',
+     *     'name' => 'John Smith',
+     *     'email' => 'person@example.com',
+     *     'telephone' => null,
+     *     'government_id' => null,
+     *     'is_email_verified' => false,
+     *     'has_accepted_terms' => true,
+     *     'created_at' => '2023-03-03T11:51:34Z',
+     *     'to_be_deleted_at' => null,
      * ]
      * ```
      *
@@ -116,29 +116,34 @@ class UserResource extends AbstractResource
      * Request (query string): `granularity=monthly|daily`, plus `month=YYYY-MM` which is
      * required for `daily` and optional for `monthly`.
      *
-     * Response (unwrapped `data` — one entry per period, zero-filled, no gaps):
+     * Example query (no request body):
+     * ```php
+     * ['granularity' => 'monthly', 'month' => '2026-09']
      * ```
+     *
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   [
-     *     'period'                                   => '2026-08',  // 'YYYY-MM-DD' when daily
-     *     'documents_uploaded'                       => 128,
-     *     'documents_sent'                           => 119,
-     *     'signature_requests'                       => 204,
-     *     'signature_requests_notification_email'    => 190,
-     *     'signature_requests_notification_whatsapp' => 14,
-     *     'signature_requests_notification_bypass'   => 0,
-     *     'signature_requests_verification_email'    => 186,
-     *     'signature_requests_verification_whatsapp' => 14,
-     *     'signature_requests_verification_bypass'   => 0,
-     *     'signature_requests_verification_digital_certificate' => 4,
-     *     'signature_requests_viewed'                => 181,
-     *     'signature_requests_completed'             => 167,
-     *     'documents_certified'                      => 167,
-     *   ],
+     *     [
+     *         'period' => '2026-09',
+     *         'documents_uploaded' => 0,
+     *         'documents_sent' => 0,
+     *         'signature_requests' => 0,
+     *         'signature_requests_notification_email' => 0,
+     *         'signature_requests_notification_whatsapp' => 0,
+     *         'signature_requests_notification_bypass' => 0,
+     *         'signature_requests_verification_email' => 0,
+     *         'signature_requests_verification_whatsapp' => 0,
+     *         'signature_requests_verification_bypass' => 0,
+     *         'signature_requests_verification_digital_certificate' => 0,
+     *         'signature_requests_viewed' => 0,
+     *         'signature_requests_completed' => 0,
+     *         'documents_certified' => 0,
+     *     ],
      * ]
      * ```
      *
-     * Available on production. The sandbox does not route this endpoint and answers 404.
+     * Available in production and sandbox; access depends on the authenticated account.
      *
      * @throws ValidationException on an unknown granularity, or on `daily` without a
      *     `YYYY-MM` month
@@ -182,22 +187,22 @@ class UserResource extends AbstractResource
      *
      * Request: no parameters.
      *
-     * Response (unwrapped `data`):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'DocumentCompleted'        => true,
-     *   'SignerDeclined'           => true,
-     *   'DocumentCancelled'        => true,
-     *   'DocumentAboutToExpire'    => true,
-     *   'DocumentExpired'          => true,
-     *   'DocumentExpirationReset'  => true,
-     *   'DocumentProcessingFailed' => true,
-     *   'TemplateProcessingFailed' => true,
-     *   'SignerWhatsappFailed'     => true,
+     *     'DocumentCompleted' => true,
+     *     'SignerDeclined' => true,
+     *     'DocumentCancelled' => true,
+     *     'DocumentAboutToExpire' => true,
+     *     'DocumentExpired' => true,
+     *     'DocumentExpirationReset' => true,
+     *     'DocumentProcessingFailed' => true,
+     *     'TemplateProcessingFailed' => true,
+     *     'SignerWhatsappFailed' => true,
      * ]
      * ```
      *
-     * Available on production. The sandbox does not route this endpoint and answers 404.
+     * Available in production and sandbox; access depends on the authenticated account.
      *
      * @throws ValidationException when called on a public client without an access token
      *
@@ -235,22 +240,22 @@ class UserResource extends AbstractResource
      * ['DocumentAboutToExpire' => false, 'SignerWhatsappFailed' => false]
      * ```
      *
-     * Response (unwrapped `data`) — the full nine-key map, not just what you changed:
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'DocumentCompleted'        => true,
-     *   'SignerDeclined'           => true,
-     *   'DocumentCancelled'        => true,
-     *   'DocumentAboutToExpire'    => false,
-     *   'DocumentExpired'          => true,
-     *   'DocumentExpirationReset'  => true,
-     *   'DocumentProcessingFailed' => true,
-     *   'TemplateProcessingFailed' => true,
-     *   'SignerWhatsappFailed'     => false,
+     *     'DocumentCompleted' => true,
+     *     'SignerDeclined' => true,
+     *     'DocumentCancelled' => true,
+     *     'DocumentAboutToExpire' => false,
+     *     'DocumentExpired' => true,
+     *     'DocumentExpirationReset' => true,
+     *     'DocumentProcessingFailed' => true,
+     *     'TemplateProcessingFailed' => true,
+     *     'SignerWhatsappFailed' => false,
      * ]
      * ```
      *
-     * Available on production. The sandbox does not route this endpoint and answers 404.
+     * Available in production and sandbox; access depends on the authenticated account.
      *
      * @throws ValidationException when `$preferences` is empty, a code is unknown, or a
      *     value is not a boolean

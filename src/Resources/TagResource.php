@@ -25,16 +25,22 @@ class TagResource extends AbstractResource
      *
      * Request (query string): `search`, sent only when supplied and non-empty.
      *
-     * Response (unwrapped `data`):
+     * Example query (no request body):
+     * ```php
+     * ['search' => 'contracts']
      * ```
+     *
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   [
-     *     'id'         => '103aa221874346e6b3de41688526',
-     *     'name'       => 'contracts',
-     *     'color'      => null,          // 6-char hex without '#', or null
-     *     'created_at' => '2026-07-18T19:03:45Z',
-     *     'updated_at' => '2026-07-18T19:03:45Z',
-     *   ],
+     *     [
+     *         'resource' => 'tag',
+     *         'id' => 'tag-id',
+     *         'name' => 'Example',
+     *         'color' => null,
+     *         'created_at' => '2026-09-01T12:00:00Z',
+     *         'updated_at' => '2026-09-01T12:00:00Z',
+     *     ],
      * ]
      * ```
      *
@@ -65,14 +71,15 @@ class TagResource extends AbstractResource
      * ['name' => 'contracts', 'color' => '2072b9']   // color optional; '#2072b9' also accepted
      * ```
      *
-     * Response (unwrapped `data`):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'id'         => '103aa221874346e6b3de41688526',
-     *   'name'       => 'contracts',
-     *   'color'      => '2072b9',
-     *   'created_at' => '2026-07-18T19:03:45Z',
-     *   'updated_at' => '2026-07-18T19:03:45Z',
+     *     'resource' => 'tag',
+     *     'id' => 'tag-id',
+     *     'name' => 'contracts',
+     *     'color' => '2072b9',
+     *     'created_at' => '2026-09-01T12:00:00Z',
+     *     'updated_at' => '2026-09-01T12:00:00Z',
      * ]
      * ```
      *
@@ -114,14 +121,15 @@ class TagResource extends AbstractResource
      * ['name' => 'signed-contracts', 'color' => null]   // null clears the color
      * ```
      *
-     * Response (unwrapped `data`) — the tag after the change:
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'id'         => '103aa221874346e6b3de41688526',
-     *   'name'       => 'signed-contracts',
-     *   'color'      => null,
-     *   'created_at' => '2026-07-18T19:03:45Z',
-     *   'updated_at' => '2026-08-27T15:02:11Z',
+     *     'resource' => 'tag',
+     *     'id' => 'tag-id',
+     *     'name' => 'signed-contracts',
+     *     'color' => null,
+     *     'created_at' => '2026-09-01T12:00:00Z',
+     *     'updated_at' => '2026-09-01T12:00:00Z',
      * ]
      * ```
      *
@@ -171,9 +179,11 @@ class TagResource extends AbstractResource
      *
      * Request (query string): `force=true`, sent only when `$force` is set. No body.
      *
-     * Response (unwrapped `data`; empty on success):
-     * ```
-     * []
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
+     * [
+     *     'deleted' => true,
+     * ]
      * ```
      *
      * @param bool $force detach the tag from every document and template first

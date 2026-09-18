@@ -104,7 +104,7 @@ final class FieldResourceTest extends TestCase
 
         $values = [
             2 => ['field_id' => 'f1', 'value' => '1'],
-            7 => ['field_id' => 'f2', 'value' => 'a@b.com'],
+            7 => ['field_id' => 'f2', 'value' => 'a@example.com'],
         ];
         $this->fields->validateMultiple($values, 'CODE');
 

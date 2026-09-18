@@ -3,6 +3,13 @@
 .phpunit.cache
 .phpunit.result.cache
 .env
+.env.*
+.claude
+.codex
+.agents
+AGENTS.md
+CLAUDE.md
+.cache
 composer.lock
 coverage
 vendor

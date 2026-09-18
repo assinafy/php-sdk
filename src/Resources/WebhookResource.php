@@ -68,14 +68,14 @@ class WebhookResource extends AbstractResource
      * ]
      * ```
      *
-     * Response (unwrapped `data`):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'events'     => ['document_ready', 'signer_signed_document'],
-     *   'is_active'  => true,
-     *   'url'        => 'https://example.com/hooks/assinafy',
-     *   'email'      => 'ops@example.com',
-     *   'updated_at' => '2026-08-27T17:55:12Z',
+     *     'events' => ['document_ready', 'signer_signed_document'],
+     *     'is_active' => true,
+     *     'url' => 'https://example.com/hooks/assinafy',
+     *     'email' => 'ops@example.com',
+     *     'updated_at' => '2023-05-10T14:58:24Z',
      * ]
      * ```
      *
@@ -140,14 +140,14 @@ class WebhookResource extends AbstractResource
      *
      * Request: no parameters.
      *
-     * Response (unwrapped `data`):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'events'     => ['document_ready', 'signer_signed_document', 'signer_rejected_document'],
-     *   'is_active'  => false,
-     *   'url'        => 'https://example.com/hooks/assinafy',
-     *   'email'      => 'ops@example.com',
-     *   'updated_at' => '2026-08-27T17:55:12Z',
+     *     'events' => ['document_ready', 'document_prepared'],
+     *     'is_active' => true,
+     *     'url' => 'https://example.com/hooks/assinafy',
+     *     'email' => 'person@example.com',
+     *     'updated_at' => '2023-05-10T14:58:24Z',
      * ]
      * ```
      *
@@ -175,14 +175,14 @@ class WebhookResource extends AbstractResource
      *
      * Request: no body.
      *
-     * Response (unwrapped `data`) — the subscription with `is_active` flipped:
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'events'     => ['document_ready', 'signer_signed_document'],
-     *   'is_active'  => false,
-     *   'url'        => 'https://example.com/hooks/assinafy',
-     *   'email'      => 'ops@example.com',
-     *   'updated_at' => '2026-08-27T17:55:12Z',
+     *     'events' => ['document_ready', 'document_prepared'],
+     *     'is_active' => true,
+     *     'url' => 'https://example.com/hooks/assinafy',
+     *     'email' => 'person@example.com',
+     *     'updated_at' => '2023-05-10T14:58:24Z',
      * ]
      * ```
      *
@@ -246,18 +246,72 @@ class WebhookResource extends AbstractResource
      *
      * Request: no parameters.
      *
-     * Response (unwrapped `data`):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   ['id' => 'document_uploaded',
-     *    'description' => 'Triggered when the User has uploaded a Document'],
-     *   ['id' => 'document_metadata_ready',
-     *    'description' => 'Triggered when the document is ready to be prepared…'],
-     *   ['id' => 'assignment_created',
-     *    'description' => 'Triggered when the User created an assignment for a Document…'],
-     *   ['id' => 'document_ready',
-     *    'description' => 'Triggered when the last Signer of the assignment signs…'],
-     *   // …one entry per EVENT_* constant on this class
+     *     [
+     *         'id' => 'document_uploaded',
+     *         'description' => 'Triggered when the User has uploaded a Document',
+     *     ],
+     *     [
+     *         'id' => 'document_metadata_ready',
+     *         'description' => 'Triggered when the document is ready to be prepared. The the document has been'
+     *             . ' normalized to PDF and its pages are available.',
+     *     ],
+     *     [
+     *         'id' => 'document_prepared',
+     *         'description' => 'Triggered when the User as subject prepares a Document.',
+     *     ],
+     *     [
+     *         'id' => 'assignment_created',
+     *         'description' => 'Triggered when the User created an assignment for a Document. Includes a'
+     *             . ' snapshot of the creator profile (name, email, telephone) and origin IP/user-agent.',
+     *     ],
+     *     [
+     *         'id' => 'signature_requested',
+     *         'description' => 'Triggered when the User requested signature of a Document',
+     *     ],
+     *     [
+     *         'id' => 'document_ready',
+     *         'description' => 'Triggered when the last Signer of the assignment signs the Document, as a'
+     *             . ' result, the document status becomes ready.',
+     *     ],
+     *     [
+     *         'id' => 'signer_created',
+     *         'description' => 'Triggered when the User created a Signer',
+     *     ],
+     *     [
+     *         'id' => 'signer_email_verified',
+     *         'description' => 'Triggered when Signer\'s email has been verified by a verification code linked to a Document',
+     *     ],
+     *     [
+     *         'id' => 'signer_whatsapp_verified',
+     *         'description' => 'Triggered when Signer\'s WhatsApp phone number has been verified by a verification code linked to a Document',
+     *     ],
+     *     [
+     *         'id' => 'signer_data_confirmed',
+     *         'description' => 'Triggered when Signer\'s data has been confirmed',
+     *     ],
+     *     [
+     *         'id' => 'signer_signed_document',
+     *         'description' => 'Triggered when the Signer signed a Document',
+     *     ],
+     *     [
+     *         'id' => 'signer_viewed_document',
+     *         'description' => 'Triggered when the Signer viewed a Document for the first time',
+     *     ],
+     *     [
+     *         'id' => 'signer_rejected_document',
+     *         'description' => 'Triggered when the Signer rejected signing a Document',
+     *     ],
+     *     [
+     *         'id' => 'user_rejected_document',
+     *         'description' => 'Triggered when document has been cancelled.',
+     *     ],
+     *     [
+     *         'id' => 'document_processing_failed',
+     *         'description' => 'Unprocessable document, either invalid or the system couldn\'t process it',
+     *     ],
      * ]
      * ```
      *
@@ -281,33 +335,41 @@ class WebhookResource extends AbstractResource
      * Request (query string): `event`, `delivered` (`true`/`false`), `from` and `to` (Unix
      * timestamps), `page`, `per-page`.
      *
-     * Response (full envelope — pagination lifted from the `X-Pagination-*` headers):
-     * ```
+     * Example query (no request body):
+     * ```php
      * [
-     *   'status'  => 200,
-     *   'message' => '',
-     *   'data'    => [
-     *     [
-     *       'id'          => '10413df9999b0bbd9e53220370c0',
-     *       'event'       => 'signature_requested',
-     *       'activity_id' => 22970,
-     *       'endpoint'    => 'https://example.com/hooks/assinafy',
-     *       'payload'     => [
-     *         'id' => 22970, 'event' => 'signature_requested',
-     *         'account_id' => '64f000000000000000000001',
-     *         'object'  => ['id' => '1041…', 'type' => 'Document',
-     *                       'status' => 'pending_signature', 'assignment' => [ … ]],
-     *         'payload' => [ … ],
-     *       ],
-     *       'delivered'     => false,
-     *       'http_status'   => 404,
-     *       'response_body' => '{"success":false,"error":{"message":"…"}}',
-     *       'error'         => 'Client error: `POST https://example.com/hooks/assinafy` …',
-     *       'created_at'    => '2026-08-20T15:31:08Z',
-     *       'updated_at'    => '2026-08-20T15:31:08Z',
+     *     'event' => 'document_ready', 'delivered' => 'false',
+     *     'from' => 1788220800, 'to' => 1790812800, 'page' => 1, 'per-page' => 20,
+     * ]
+     * ```
+     *
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
+     * [
+     *     'status' => 200,
+     *     'message' => '',
+     *     'data' => [
+     *         [
+     *             'resource' => 'activity_dispatching_history',
+     *             'id' => 'webhook-dispatch-id',
+     *             'event' => 'document_ready',
+     *             'activity_id' => 'activity-id',
+     *             'endpoint' => 'https://example.com/webhook',
+     *             'payload' => null,
+     *             'delivered' => true,
+     *             'http_status' => 200,
+     *             'response_body' => 'OK',
+     *             'error' => null,
+     *             'created_at' => '2026-09-01T10:30:00Z',
+     *             'updated_at' => '2026-09-01T10:30:00Z',
+     *         ],
      *     ],
-     *   ],
-     *   'pagination' => ['current_page' => 1, 'page_count' => 4, 'per_page' => 20, 'total_count' => 76],
+     *     'pagination' => [
+     *         'current_page' => 1,
+     *         'page_count' => 1,
+     *         'per_page' => 20,
+     *         'total_count' => 1,
+     *     ],
      * ]
      * ```
      *
@@ -351,21 +413,21 @@ class WebhookResource extends AbstractResource
      *
      * Request: no body.
      *
-     * Response (unwrapped `data`) — the newly created dispatch entry, in the same shape
-     * {@see self::dispatches()} returns:
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'id'            => '10413dfa1187c2ad0f7745e19b32',
-     *   'event'         => 'signature_requested',
-     *   'activity_id'   => 22970,
-     *   'endpoint'      => 'https://example.com/hooks/assinafy',
-     *   'payload'       => [ … the original payload, unchanged … ],
-     *   'delivered'     => true,
-     *   'http_status'   => 200,
-     *   'response_body' => '',
-     *   'error'         => '',
-     *   'created_at'    => '2026-08-27T18:10:31Z',
-     *   'updated_at'    => '2026-08-27T18:10:31Z',
+     *     'resource' => 'activity_dispatching_history',
+     *     'id' => 'webhook-dispatch-id',
+     *     'event' => 'document_ready',
+     *     'activity_id' => 'activity-id',
+     *     'endpoint' => 'https://example.com/webhook',
+     *     'payload' => null,
+     *     'delivered' => true,
+     *     'http_status' => 200,
+     *     'response_body' => 'OK',
+     *     'error' => null,
+     *     'created_at' => '2026-09-01T10:30:00Z',
+     *     'updated_at' => '2026-09-01T10:30:00Z',
      * ]
      * ```
      *

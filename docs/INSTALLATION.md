@@ -29,14 +29,14 @@ That resolves to the current 2.1 line. Pin the constraint explicitly if you pref
 composer require assinafy/php-sdk:^2.1
 ```
 
-To install one exact release:
+To install the version described by this documentation:
 
 ```bash
-composer require assinafy/php-sdk:2.1.3
+composer require assinafy/php-sdk:2.1.4
 ```
 
-The documentation on the repository's current `main` describes the `v2.1.3` release. Use the
-documentation shipped with a tag when installing that tag.
+The repository's `main` can include unreleased changes. Use the documentation shipped with the
+installed tag.
 
 Optional PSR-3 logging integrations, such as Monolog, can be installed separately:
 
@@ -115,11 +115,13 @@ In Laravel, credentials can be exposed through `config/services.php` and injecte
 where the client is constructed:
 
 ```php
-'assinafy' => [
-    'api_key' => env('ASSINAFY_API_KEY'),
-    'account_id' => env('ASSINAFY_ACCOUNT_ID'),
-    'base_url' => env('ASSINAFY_BASE_URL', 'https://api.assinafy.com.br/v1'),
-],
+return [
+    'assinafy' => [
+        'api_key' => env('ASSINAFY_API_KEY'),
+        'account_id' => env('ASSINAFY_ACCOUNT_ID'),
+        'base_url' => env('ASSINAFY_BASE_URL', 'https://api.assinafy.com.br/v1'),
+    ],
+];
 ```
 
 In Symfony, declare environment-backed parameters or service arguments:
@@ -173,6 +175,16 @@ database dependency.
 
 ## Live sandbox tests
 
+For read-only connectivity checks, set `ASSINAFY_API_KEY` and `ASSINAFY_ACCOUNT_ID`, then run:
+
+```bash
+php docs/quickstart.php
+```
+
+The script uses sandbox and prints counts and status messages. Optional `ASSINAFY_TEST_SEARCH_TERM`
+sets its search text; `ASSINAFY_TEST_TEMPLATE_ID` enables template readiness checks;
+`ASSINAFY_TEST_SIGNER_ID` plus `ASSINAFY_TEST_SIGNER_ACCESS_CODE` enable signer-document search.
+
 Live tests create and modify sandbox resources and can consume sandbox credits.
 Run them only with dedicated sandbox credentials and force the sandbox URL:
 
@@ -185,23 +197,14 @@ export ASSINAFY_INTEGRATION=1
 vendor/bin/phpunit --testsuite=integration
 ```
 
-GitHub Actions provides the manual **Sandbox integration** workflow. Create the `sandbox`
-environment before the first dispatch, require reviewers, prevent self-review, restrict allowed
-deployment refs, and configure these environment-scoped secrets:
+GitHub Actions runs offline SDK tests and code-quality checks; it does not call the sandbox or
+need Assinafy credentials. Run the full live suite explicitly from a developer environment.
 
-- `ASSINAFY_API_KEY`
-- `ASSINAFY_ACCOUNT_ID`
-- `ASSINAFY_SANDBOX_TEST_EMAIL` (required only for notification tests)
-- `ASSINAFY_SANDBOX_TEST_EMAIL_ALT` (required only for notification tests)
-- `ASSINAFY_SANDBOX_SIGNER_ID` (optional; set together with the access code)
-- `ASSINAFY_SANDBOX_SIGNER_ACCESS_CODE` (optional; enables signer-read checks)
-
-Do not rely on the workflow to create the environment: GitHub auto-created environments have no
-protection rules or secrets. The workflow hard-codes and verifies the sandbox hostname;
-credentials are never stored in the repository. Notification, shared-state, and disposable-account
-deletion tests are disabled by default and require explicit workflow-dispatch options. In GitLab,
-set `RUN_ASSINAFY_NOTIFICATION_TESTS=1`, `RUN_ASSINAFY_STATEFUL_TESTS=1`, or
-`RUN_ASSINAFY_DESTRUCTIVE_TESTS=1` when starting the protected sandbox job.
+GitLab retains an optional protected `sandbox` job. Configure its API key and account ID as masked,
+protected CI/CD variables, never in YAML. `RUN_ASSINAFY_SANDBOX_TESTS=1` selects the live job;
+`RUN_ASSINAFY_NOTIFICATION_TESTS=1`, `RUN_ASSINAFY_STATEFUL_TESTS=1`, and
+`RUN_ASSINAFY_DESTRUCTIVE_TESTS=1` enable the corresponding additional side effects. The job fixes
+the sandbox hostname, serializes runs, and disables automatic cancellation so cleanup can finish.
 
 ## Troubleshooting
 

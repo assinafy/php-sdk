@@ -65,7 +65,7 @@ final class SignerSessionResourceTest extends TestCase
     {
         $this->http->queueJson(200, []);
         $this->session->confirmData('doc1', 'CODE WITH SPACE', [
-            'email' => 'a@b.com',
+            'email' => 'a@example.com',
             'government_id' => '12345678900',
             'has_accepted_terms' => true,
         ]);
@@ -75,7 +75,7 @@ final class SignerSessionResourceTest extends TestCase
         $this->assertSame('documents/doc1/signers/confirm-data', $call['uri']);
         $this->assertSame(['signer-access-code' => 'CODE WITH SPACE'], $call['query']);
         $this->assertSame([
-            'email' => 'a@b.com',
+            'email' => 'a@example.com',
             'government_id' => '12345678900',
             'has_accepted_terms' => true,
         ], $call['body']);

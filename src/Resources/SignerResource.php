@@ -38,15 +38,16 @@ class SignerResource extends AbstractResource
      * ]
      * ```
      *
-     * Response (unwrapped `data`):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'resource'              => 'signer',
-     *   'id'                    => '19e6b92e7895332ed9708535d8c',
-     *   'full_name'             => 'Jane Doe',
-     *   'email'                 => 'jane@example.com',
-     *   'whatsapp_phone_number' => '+5548999990000',
-     *   'has_accepted_terms'    => false,
+     *     'resource' => 'signer',
+     *     'id' => 'signer-id',
+     *     'full_name' => 'Jane Doe',
+     *     'email' => 'jane@example.com',
+     *     'whatsapp_phone_number' => '+5548999990000',
+     *     'government_id' => null,
+     *     'has_accepted_terms' => false,
      * ]
      * ```
      *
@@ -91,15 +92,16 @@ class SignerResource extends AbstractResource
      *
      * Request: no parameters.
      *
-     * Response (unwrapped `data`):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'resource'              => 'signer',
-     *   'id'                    => '19e6b92e7895332ed9708535d8c',
-     *   'full_name'             => 'Jane Doe',
-     *   'email'                 => 'jane@example.com',
-     *   'whatsapp_phone_number' => null,
-     *   'has_accepted_terms'    => true,
+     *     'resource' => 'signer',
+     *     'id' => 'signer-id',
+     *     'full_name' => 'Example Signer',
+     *     'email' => 'person@example.com',
+     *     'whatsapp_phone_number' => null,
+     *     'government_id' => null,
+     *     'has_accepted_terms' => false,
      * ]
      * ```
      *
@@ -124,21 +126,32 @@ class SignerResource extends AbstractResource
      *
      * Request (query string): `page`, `per-page`, and `search` when supplied.
      *
-     * Response (full envelope — pagination lifted from the `X-Pagination-*` headers):
+     * Example query (no request body):
+     * ```php
+     * ['page' => 1, 'per-page' => 20, 'search' => 'Jane']
      * ```
+     *
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'status'  => 200,
-     *   'message' => '',
-     *   'data'    => [
-     *     [
-     *       'id'                    => '19e6b92e7895332ed9708535d8c',
-     *       'full_name'             => 'Jane Doe',
-     *       'email'                 => 'jane@example.com',
-     *       'whatsapp_phone_number' => null,
-     *       'has_accepted_terms'    => true,
+     *     'status' => 200,
+     *     'message' => '',
+     *     'data' => [
+     *         [
+     *             'id' => 'signer-id',
+     *             'full_name' => 'Example Signer',
+     *             'email' => 'person@example.com',
+     *             'whatsapp_phone_number' => null,
+     *             'government_id' => null,
+     *             'has_accepted_terms' => false,
+     *         ],
      *     ],
-     *   ],
-     *   'pagination' => ['current_page' => 1, 'page_count' => 3, 'per_page' => 20, 'total_count' => 47],
+     *     'pagination' => [
+     *         'current_page' => 1,
+     *         'page_count' => 1,
+     *         'per_page' => 20,
+     *         'total_count' => 1,
+     *     ],
      * ]
      * ```
      *
@@ -182,17 +195,20 @@ class SignerResource extends AbstractResource
      * ]
      * ```
      *
-     * Response (unwrapped `data`) — the signer after the change:
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'resource'              => 'signer',
-     *   'id'                    => '19e6b92e7895332ed9708535d8c',
-     *   'full_name'             => 'Jane A. Doe',
-     *   'email'                 => 'jane@example.com',
-     *   'whatsapp_phone_number' => '+5548999990000',
-     *   'has_accepted_terms'    => true,
+     *     'resource' => 'signer',
+     *     'id' => 'signer-id',
+     *     'full_name' => 'Jane A. Doe',
+     *     'email' => 'jane@example.com',
+     *     'whatsapp_phone_number' => '+5548999990000',
+     *     'government_id' => null,
+     *     'has_accepted_terms' => false,
      * ]
      * ```
+     *
+     * `government_id` may be omitted or masked in the response.
      *
      * @param array<string, mixed> $data subset of { full_name, email, whatsapp_phone_number,
      *     government_id }
@@ -243,13 +259,17 @@ class SignerResource extends AbstractResource
      * `DELETE /accounts/{account_id}/signers/{signer_id}`
      *
      * Removes the signer from the workspace directory. Documents they have already signed
-     * keep their record of the signature — the audit trail is not rewritten.
+     * keep their record of the signature — the recorded signature history is preserved.
      *
      * Request: no body.
      *
-     * Response (full envelope; `data` is empty because the resource is gone):
-     * ```
-     * ['status' => 200, 'message' => '', 'data' => []]
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
+     * [
+     *     'status' => 200,
+     *     'message' => '',
+     *     'data' => [],
+     * ]
      * ```
      *
      * @return array<array-key, mixed> the raw envelope
@@ -271,7 +291,7 @@ class SignerResource extends AbstractResource
      * Client-side helper over `GET /accounts/{account_id}/signers`, not a dedicated
      * endpoint. It pages through the `search` results 100 at a time and compares each
      * `email` exactly, because the API's `search` is a substring match and would otherwise
-     * return `jane@example.com.br` for `jane@example.com`.
+     * return `other-jane@example.com` for `jane@example.com`.
      *
      * Use it to keep {@see self::create()} idempotent:
      * ```php
@@ -281,14 +301,21 @@ class SignerResource extends AbstractResource
      *
      * Costs one request per 100 matches — usually one.
      *
-     * Response: the same entry shape as {@see self::list()}, or `null`:
+     * Example query (no request body):
+     * ```php
+     * ['search' => 'jane@example.com', 'page' => 1, 'per-page' => 100]
      * ```
+     *
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'id'                    => '19e6b92e7895332ed9708535d8c',
-     *   'full_name'             => 'Jane Doe',
-     *   'email'                 => 'jane@example.com',
-     *   'whatsapp_phone_number' => null,
-     *   'has_accepted_terms'    => true,
+     *     'resource' => 'signer',
+     *     'id' => 'signer-id',
+     *     'full_name' => 'Jane Doe',
+     *     'email' => 'jane@example.com',
+     *     'whatsapp_phone_number' => null,
+     *     'government_id' => null,
+     *     'has_accepted_terms' => false,
      * ]
      * ```
      *

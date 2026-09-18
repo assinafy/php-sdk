@@ -44,20 +44,24 @@ class AccountResource extends AbstractResource
      *
      * Request: no parameters.
      *
-     * Response (full envelope, not unwrapped):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'status'  => 200,
-     *   'message' => '',
-     *   'data'    => [
-     *     [
-     *       'id'                => '64f000000000000000000001',
-     *       'name'              => 'Acme Inc.',
-     *       'roles'             => ['owner'],
-     *       'is_delete_allowed' => true,
-     *       'created_at'        => '2026-05-12T18:05:11Z',
+     *     'status' => 200,
+     *     'message' => '',
+     *     'data' => [
+     *         [
+     *             'resource' => 'account',
+     *             'id' => 'account-id',
+     *             'name' => 'Acme Inc.',
+     *             'primary_color' => 'aabbcc',
+     *             'secondary_color' => '112233',
+     *             'notification_sender_type' => 'User',
+     *             'roles' => ['owner'],
+     *             'is_delete_allowed' => true,
+     *             'created_at' => '2026-06-03T03:54:16Z',
+     *         ],
      *     ],
-     *   ],
      * ]
      * ```
      *
@@ -76,14 +80,20 @@ class AccountResource extends AbstractResource
      * Retrieve the account this client is configured against.
      * `GET /accounts/{account_id}`
      *
-     * Response (unwrapped `data`):
-     * ```
+     * Request: path parameters shown above; no request body.
+     *
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'id'              => '64f000000000000000000001',
-     *   'name'            => 'Acme Inc.',
-     *   'primary_color'   => null,   // hex without '#', e.g. '2072b9'
-     *   'secondary_color' => null,
-     *   'created_at'      => '2026-05-12T18:05:11Z',
+     *     'resource' => 'account',
+     *     'id' => 'account-id',
+     *     'name' => 'Example workspace',
+     *     'primary_color' => null,
+     *     'secondary_color' => null,
+     *     'notification_sender_type' => 'User',
+     *     'roles' => ['owner'],
+     *     'is_delete_allowed' => true,
+     *     'created_at' => '2026-08-28T15:13:43Z',
      * ]
      * ```
      *
@@ -110,14 +120,18 @@ class AccountResource extends AbstractResource
      * ]
      * ```
      *
-     * Response (unwrapped `data`):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'id'              => '64f000000000000000000001',
-     *   'name'            => 'Acme Inc.',
-     *   'primary_color'   => null,
-     *   'secondary_color' => null,
-     *   'created_at'      => '2026-05-12T18:05:11Z',
+     *     'resource' => 'account',
+     *     'id' => 'account-id',
+     *     'name' => 'Acme Inc.',
+     *     'primary_color' => null,
+     *     'secondary_color' => null,
+     *     'notification_sender_type' => 'User',
+     *     'roles' => ['owner'],
+     *     'is_delete_allowed' => true,
+     *     'created_at' => '2026-08-28T15:13:43Z',
      * ]
      * ```
      *
@@ -162,14 +176,18 @@ class AccountResource extends AbstractResource
      * ['name' => 'Acme Holdings', 'notification_sender_type' => 'Account']
      * ```
      *
-     * Response (unwrapped `data`) — the account after the change:
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'id'              => '64f000000000000000000001',
-     *   'name'            => 'Acme Holdings',
-     *   'primary_color'   => null,
-     *   'secondary_color' => null,
-     *   'created_at'      => '2026-05-12T18:05:11Z',
+     *     'resource' => 'account',
+     *     'id' => 'account-id',
+     *     'name' => 'Acme Holdings',
+     *     'primary_color' => null,
+     *     'secondary_color' => null,
+     *     'notification_sender_type' => 'Account',
+     *     'roles' => ['owner'],
+     *     'is_delete_allowed' => true,
+     *     'created_at' => '2026-08-28T15:13:43Z',
      * ]
      * ```
      *
@@ -213,13 +231,16 @@ class AccountResource extends AbstractResource
      * Destructive and irreversible: removes the workspace and every document, signer, tag
      * and field in it.
      *
-     * Request body: `['force' => true]` when `$force` is set, otherwise no body. The
-     * lifecycle is live-tested only against a disposable sandbox workspace; the configured
-     * workspace is never used as the deletion target.
+     * Request body: `['force' => true]` when `$force` is set, otherwise no body.
+     * This removes the account configured on the client, including its contents.
      *
-     * Response (full envelope — `data` is an empty array, there is nothing left to return):
-     * ```
-     * ['status' => 200, 'message' => '', 'data' => []]
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
+     * [
+     *     'status' => 200,
+     *     'message' => '',
+     *     'data' => [],
+     * ]
      * ```
      *
      * On refusal the API answers `400` and this method raises an
@@ -254,13 +275,15 @@ class AccountResource extends AbstractResource
      * Retrieve the account's branding theme.
      * `GET /accounts/{account_id}/theme`
      *
-     * Response (unwrapped `data`):
-     * ```
+     * Request: path parameters shown above; no request body.
+     *
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'account_name'    => 'Acme Inc.',
-     *   'primary_color'   => '2072b9',   // hex, no leading '#'
-     *   'secondary_color' => 'ffffff',
-     *   'logo'            => 'https://cdn.example.test/logo.png',
+     *     'account_name' => 'Example workspace',
+     *     'primary_color' => '2072b9',
+     *     'secondary_color' => 'ffffff',
+     *     'logo' => null,
      * ]
      * ```
      *
@@ -288,29 +311,34 @@ class AccountResource extends AbstractResource
      * `*_notification_*` counters split them by the channel the signer was notified
      * through, the `*_verification_*` counters by how the signer proved identity.
      *
-     * Response (unwrapped `data` — one entry per period):
+     * Example query (no request body):
+     * ```php
+     * ['granularity' => 'monthly', 'month' => '2026-09']
      * ```
+     *
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   [
-     *     'period'                                   => '2026-08',  // 'YYYY-MM-DD' when daily
-     *     'documents_uploaded'                       => 42,
-     *     'documents_sent'                           => 37,
-     *     'signature_requests'                       => 51,
-     *     'signature_requests_notification_email'    => 48,
-     *     'signature_requests_notification_whatsapp' => 3,
-     *     'signature_requests_notification_bypass'   => 0,
-     *     'signature_requests_verification_email'    => 45,
-     *     'signature_requests_verification_whatsapp' => 3,
-     *     'signature_requests_verification_bypass'   => 0,
-     *     'signature_requests_verification_digital_certificate' => 3,
-     *     'signature_requests_viewed'                => 44,
-     *     'signature_requests_completed'             => 39,
-     *     'documents_certified'                      => 39,
-     *   ],
+     *     [
+     *         'period' => '2026-09',
+     *         'documents_uploaded' => 0,
+     *         'documents_sent' => 0,
+     *         'signature_requests' => 0,
+     *         'signature_requests_notification_email' => 0,
+     *         'signature_requests_notification_whatsapp' => 0,
+     *         'signature_requests_notification_bypass' => 0,
+     *         'signature_requests_verification_email' => 0,
+     *         'signature_requests_verification_whatsapp' => 0,
+     *         'signature_requests_verification_bypass' => 0,
+     *         'signature_requests_verification_digital_certificate' => 0,
+     *         'signature_requests_viewed' => 0,
+     *         'signature_requests_completed' => 0,
+     *         'documents_certified' => 0,
+     *     ],
      * ]
      * ```
      *
-     * Available on production. The sandbox does not route this endpoint and answers 404.
+     * Available in production and sandbox; access depends on the authenticated account.
      *
      * @throws \Assinafy\SDK\Exceptions\ValidationException on an unknown granularity, or on
      *     `daily` without a `YYYY-MM` month
@@ -367,11 +395,12 @@ class AccountResource extends AbstractResource
      * Request: `multipart/form-data` with the image under the field name `file`.
      * Replaces any logo already stored — there is no separate update route.
      *
-     * Response: the envelope carries no `data` for this operation, so the unwrapped
-     * result is an empty array. Call {@see self::theme()} afterwards to read back the
-     * public `logo` URL:
-     * ```
-     * ['status' => 200, 'message' => '']
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
+     * [
+     *     'status' => 200,
+     *     'message' => '',
+     * ]
      * ```
      *
      * @return array<string, mixed> empty on success
@@ -392,9 +421,12 @@ class AccountResource extends AbstractResource
      *
      * Request: no body. Succeeds even when no logo is currently set.
      *
-     * Response (full envelope, no `data` key for this operation):
-     * ```
-     * ['status' => 200, 'message' => '']
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
+     * [
+     *     'status' => 200,
+     *     'message' => '',
+     * ]
      * ```
      *
      * @return array<string, mixed> the raw envelope

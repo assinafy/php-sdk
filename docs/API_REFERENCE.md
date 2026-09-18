@@ -5,23 +5,19 @@ This reference maps every public resource method in this SDK to the Assinafy API
 - <https://api.assinafy.com.br/v1/docs>
 - <https://api.assinafy.com.br/v1/docs/openapi.json>
 
-It describes the `v2.1.3` release and current repository `main`, installable with
-`composer require assinafy/php-sdk`. See [INSTALLATION.md](INSTALLATION.md) for version
-constraints and development setup.
+This reference describes SDK version 2.1.4. Install published releases with
+`composer require assinafy/php-sdk` and use the documentation shipped with the selected tag.
+See [INSTALLATION.md](INSTALLATION.md) for setup.
 
-The contract uses OpenAPI 3.0.0, API version 1.0.0, and contains 89 operations on 67 paths. All
-89 operations have SDK mappings. Production and sandbox use the same versioned paths:
+Resource classes map 89 workspace, document, signer and authentication operations. The current
+production OpenAPI adds four OAuth/discovery operations, documented under
+[Marketplace OAuth](#marketplace-oauth); use the existing public HTTP transport for these calls.
+Five working template-management routes and two legacy social URL builders are outside OpenAPI.
 
-```text
-https://api.assinafy.com.br/v1
-https://sandbox.assinafy.com.br/v1
-```
-
-Seven SDK method/path pairs are outside OpenAPI: five template-management routes and two legacy
-OAuth URL builders. The OAuth redirects are not operational with the current upstream
-configuration. Sandbox deployments may also return route-not-deployed errors for the statistics
-and notification-preference operations. The operational notes below give the wire shapes and
-availability rules used by the SDK.
+Production: `https://api.assinafy.com.br/v1`; sandbox: `https://sandbox.assinafy.com.br/v1`.
+Statistics and notification preferences work in sandbox. OAuth deployment and plan-gated features
+can differ between environments. Origin-level discovery uses a separate public client without
+the `/v1` prefix.
 
 ## Conventions
 
@@ -38,6 +34,7 @@ The introductory documentation also says a user access token may be sent as `?ac
 ### Content types
 
 - JSON requests use `Content-Type: application/json`.
+- OAuth token and revocation examples use `application/x-www-form-urlencoded` through `postRaw()`.
 - Document and logo uploads use `multipart/form-data` with a part named `file`.
 - Signature uploads use a raw `image/png` body in the published contract.
 - Download operations return raw PDF, ZIP (`bundle`), or image bytes, not a JSON envelope.
@@ -91,7 +88,7 @@ Every operation in the current OpenAPI document declares `200` success. The comp
 below put the success code first. For example, `200; 400, 401, 404, 500` means success is `200`
 and the documented errors are `400`, `401`, `404`, and `500`.
 
-The introduction additionally lists `403`, `415`, and `429` as possible global errors, but no individual operation declares them. In particular, callers should still handle `429` and respect `Retry-After` if present.
+The introduction additionally lists `403`, `415`, and `429` as possible global errors, and OAuth userinfo declares 403 for insufficient scope. In particular, callers should still handle `429` and respect `Retry-After` if present.
 
 ## Operational notes
 
@@ -99,18 +96,18 @@ The introduction additionally lists `403`, `415`, and `429` as possible global e
 |---|---|
 | Document tags | `replaceTags()` and `appendTags()` send tag **names**, despite an OpenAPI property description that calls the strings tag IDs. Missing names are created automatically. All four document-tag methods map to OpenAPI operations. |
 | Authenticated-user payload | `GET /users/self` may return `data: {user: AuthUser, accounts: AuthAccount[]}` instead of `data: AuthUser`. `UserResource::get()` accepts both shapes and returns `AuthUser`. Use `AccountResource::list()` for account discovery. |
-| Statistics availability | `GET /accounts/{accountId}/stats` and `GET /users/self/stats` may return an application-level `404` route-not-deployed response in sandbox. Both SDK methods map to OpenAPI operations and return `DocumentStatsRow[]` when available. |
+| Statistics availability | Account and user statistics return `DocumentStatsRow[]` in sandbox and production. |
 | Public send-token body | The service expects `{ "recipient": "...", "channel": "email" }`; OpenAPI shows `{ "email": "..." }`. The SDK sends the service shape. The recipient must identify a signer assigned to the document. |
 | Assignment account context | `GET /assignments` requires the camelCase `accountId` query parameter in addition to the documented pagination parameters. The SDK supplies it from `Configuration`. |
 | Signer access-code name | The SDK sends the OpenAPI query name `signer-access-code`; generated endpoint Markdown calls it `access_code`. |
 | Signer access-code acquisition | The one-time code is delivered to the assigned signer's inbox through `sendToken()`. Assignment `signing_urls` contain no access-code field and must not be parsed as one. |
-| Notification preferences | GET and PUT `/users/self/notification-preferences` may return an application-level `404` route-not-deployed response in sandbox. The SDK retains both OpenAPI mappings. |
+| Notification preferences | GET and PUT `/users/self/notification-preferences` return the complete boolean map in both environments. |
 | Ordinary assignment notifications | At most one notification method is allowed. For Email/WhatsApp verification, a non-empty notification must match; supplying only one side infers the other, omitting both defaults to Email, and an explicit empty list remains empty. `DigitalCertificate` is exempt from channel equality. |
 | Template assignment notifications | Template endpoints accept notification arrays without the ordinary-assignment max-one/coupling checks. The SDK preserves the supplied array. |
 | Digital-certificate assignment | `DigitalCertificate` requires the account feature, a signer `government_id`, and an isolated signing step. Availability depends on the account and environment. The ordinary sign endpoint cannot complete it, and OpenAPI contains no certificate start/complete operation. |
 | Digital-certificate signer gate | Call `confirmData()` with `has_accepted_terms: true` before `GET /sign`. OpenAPI prose requires this property although the `confirm-data` schema omits it; the SDK forwards it. |
 | Template management | `TemplateResource::create()`, `get()`, `update()`, `delete()`, and `downloadPage()` use service routes absent from OpenAPI. They are marked **undocumented** below and may change independently of the specification. |
-| OAuth start/callback | `GET /auth/authenticate` and `GET /login-callback` are absent from OpenAPI. The SDK retains URL builders for compatibility, but the current upstream redirect configuration is not operational. |
+| OAuth start/callback | `GET /auth/authenticate` and `GET /login-callback` are absent from OpenAPI. The SDK retains URL builders for legacy social authentication. Marketplace OAuth uses the authorization server described below. |
 | Signer document download | The SDK requires and sends a signer access code even though OpenAPI marks the operation public. |
 
 ## Core, transport, and support API catalog
@@ -197,7 +194,8 @@ URL owns the `/v1` prefix shown in the operation tables, and requests cannot esc
 injected one. It disables redirects, applies configured timeouts/headers, redacts diagnostics,
 wraps network failures in `NetworkException`, and converts non-2xx HTTP responses or non-2xx
 application-envelope statuses to `ApiException`.
-An injected concrete Guzzle client must not carry default `Authorization` or `X-Api-Key` headers:
+An injected concrete Guzzle client must not carry default `Authorization` or `X-Api-Key` headers
+or a default HTTP `auth` option:
 the SDK owns per-request authentication routing and rejects defaults that could leak a workspace
 credential into a public or signer-scoped call. Its `base_uri` must also match the validated
 `Configuration` base URL.
@@ -269,7 +267,7 @@ Workspace-authenticated operations accept either API-key or Bearer authenticatio
 | `downloadLogo()` | [`GET /v1/accounts/{accountId}/logo`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Flogo) | Workspace | No body. | Raw image bytes (`image/*`). | `200; 401, 404, 500` |
 | `uploadLogo($filePath)` | [`POST /v1/accounts/{accountId}/logo`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Flogo) | Workspace | Required multipart `file` binary part. | Success envelope fields (`status`, `message`). | `200; 400, 401, 500` |
 | `deleteLogo()` | [`DELETE /v1/accounts/{accountId}/logo`](https://api.assinafy.com.br/v1/docs/markdown?method=delete&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Flogo) | Workspace | No body. | Success envelope fields. | `200; 401, 500` |
-| `stats($granularity, $month)` | [`GET /v1/accounts/{accountId}/stats`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fstats) | Workspace | Optional `granularity: monthly\|daily`; `month: YYYY-MM` is required by the SDK for daily. The route may be unavailable in sandbox. | Unwrapped `DocumentStatsRow[]`. | `200; 400, 401, 500`; sandbox may return application-level `404`. |
+| `stats($granularity, $month)` | [`GET /v1/accounts/{accountId}/stats`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fstats) | Workspace | Optional `granularity: monthly\|daily`; `month: YYYY-MM` is required by the SDK for daily. | Unwrapped `DocumentStatsRow[]`. | `200; 400, 401, 500`. |
 
 `stats()` returns the last 12 months in monthly mode or every zero-filled day of the selected
 month in daily mode when the route is available.
@@ -329,7 +327,7 @@ signer-session limitation below.
 | `list($page, $perPage, $filters)` | [`GET /v1/assignments`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fassignments) | Workspace | Published: `page`, `per-page`. Runtime-required: `accountId`. | Envelope with `data: Assignment[]` and normalized `pagination`. | `200; 401, 500` |
 | `estimateCost($documentId, $signers, $method, $options)` | [`POST /v1/documents/{documentId}/assignments/estimate-cost`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fassignments%2Festimate-cost) | Workspace | Published JSON properties are optional `method: virtual\|collect`, `signers: [{verification_method?, notification_methods?}]`, and `entries: object[]`; signer IDs are not part of estimate entries. The SDK requires signers for virtual or entries for collect. DigitalCertificate adds two credits per signer. | Unwrapped `CostEstimate`. | `200; 400, 401, 500` |
 | `resend($documentId, $assignmentId, $signerId)` | [`PUT /v1/documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/resend`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fassignments%2F%7BassignmentId%7D%2Fsigners%2F%7BsignerId%7D%2Fresend) | Workspace | Path parameters only. | Unwrapped `{is_sent, document_id, signer_id}`. | `200; 401, 500` |
-| `estimateResendCost($documentId, $assignmentId, $signerId)` | [`POST /v1/documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/estimate-resend-cost`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fassignments%2F%7BassignmentId%7D%2Fsigners%2F%7BsignerId%7D%2Festimate-resend-cost) | Workspace | Path parameters only. | Unwrapped `CostEstimate`. | `200; 401, 500` |
+| `estimateResendCost($documentId, $assignmentId, $signerId)` | [`POST /v1/documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/estimate-resend-cost`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fassignments%2F%7BassignmentId%7D%2Fsigners%2F%7BsignerId%7D%2Festimate-resend-cost) | Workspace | Path parameters only. | Unwrapped `ResendCostEstimate`. | `200; 401, 500` |
 | `resetExpiration($documentId, $assignmentId, $expiresAt)` | [`PUT /v1/documents/{documentId}/assignments/{assignmentId}/reset-expiration`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fassignments%2F%7BassignmentId%7D%2Freset-expiration) | Workspace | Required JSON body with `expires_at` ISO-8601 date-time. The property is not marked required in OpenAPI, although the endpoint's purpose implies it. | Unwrapped `Assignment`. | `200; 400, 401, 404, 500` |
 | `whatsappNotifications($documentId, $assignmentId)` | [`GET /v1/documents/{documentId}/assignments/{assignmentId}/whatsapp-notifications`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fassignments%2F%7BassignmentId%7D%2Fwhatsapp-notifications) | Workspace | Path parameters only. | Unwrapped `WhatsappNotification[]`. Sandbox messages are simulated and may expose test signing codes in button URLs. | `200; 401, 500` |
 
@@ -342,8 +340,8 @@ Use `AssinafyClient::forAuth()` for public bootstrap operations and pass the log
 | `login($email, $password)` | [`POST /v1/login`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Flogin) | Public | Required JSON `{email, password}`. | Unwrapped `AuthSession`. | `200; 400, 500` |
 | `socialLogin($provider, $token, $hasAcceptedTerms)` | [`POST /v1/authentication/social-login`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Fauthentication%2Fsocial-login) | Public | Required JSON `{provider: "google", token, has_accepted_terms}`. | Unwrapped `AuthSession`. | `200; 400, 500` |
 | `linkSocialLogin($provider, $token, $accessToken)` | [`POST /v1/auth/link-social-login`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Fauth%2Flink-social-login) | Workspace | Required JSON `{provider: "google", token}`; optional Bearer token, otherwise configured API key. | Success envelope fields. | `200; 400, 401, 500` |
-| `socialLoginUrl($provider)` | Runtime-only `GET /v1/auth/authenticate` | Public | Builds `?authclient={provider}`; it does not request the redirect. Route is outside OpenAPI. | Absolute URL string only. Current upstream redirect configuration is invalid; not an operational flow. | Outside OpenAPI. |
-| `socialLoginCallbackUrl()` | Runtime-only `GET /v1/login-callback` | Public | Builds rather than requests the callback URL. Route is outside OpenAPI. | Absolute URL string only. | Outside OpenAPI; not operational with the current start redirect. |
+| `socialLoginUrl($provider)` | Runtime-only `GET /v1/auth/authenticate` | Public | Builds `?authclient={provider}`; it does not request the redirect. Route is outside OpenAPI. | Absolute URL string only. Compatibility URL builder; distinct from marketplace OAuth. | Outside OpenAPI. |
+| `socialLoginCallbackUrl()` | Runtime-only `GET /v1/login-callback` | Public | Builds rather than requests the callback URL. Route is outside OpenAPI. | Absolute URL string only. | Outside OpenAPI; returns a URL without making a request. |
 | `generateApiKey(?string $accessToken, string $password)` | [`POST /v1/users/api-keys`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Fusers%2Fapi-keys) | Workspace | Required JSON `{password}`. A non-null token overrides configured auth; `null` uses it. The nullable token has no default because it precedes required `$password`. | Unwrapped `ApiKey`. The full key is shown only when generated. | `200; 401, 500` |
 | `getApiKey(?string $accessToken = null)` | [`GET /v1/users/api-keys`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fusers%2Fapi-keys) | Workspace | No body. A non-null token overrides configured auth; `null` uses it. | Unwrapped `ApiKey`; `api_key` may be null and is otherwise masked. | `200; 401, 500` |
 | `deleteApiKey(?string $accessToken = null)` | [`DELETE /v1/users/api-keys`](https://api.assinafy.com.br/v1/docs/markdown?method=delete&path=%2Fv1%2Fusers%2Fapi-keys) | Workspace | No body. A non-null token overrides configured auth; `null` uses it. | Envelope with `data: []`. | `200; 401, 500` |
@@ -351,18 +349,35 @@ Use `AssinafyClient::forAuth()` for public bootstrap operations and pass the log
 | `requestPasswordReset($email)` | [`PUT /v1/authentication/request-password-reset`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Fauthentication%2Frequest-password-reset) | Public | Required JSON `{email}`. | Unwrapped `{email}`. | `200; 500` |
 | `resetPassword($email, $token, $newPassword)` | [`PUT /v1/authentication/reset-password`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Fauthentication%2Freset-password) | Public | Required body; schema requires `email` and `new_password`, while `token` is documented but not marked required. The SDK requires all three. | Unwrapped `{email}`. | `200; 400, 500` |
 
-The two browser-facing GET routes are retained only as compatibility URL builders. They are
-outside the 89 OpenAPI operations and should not be used until Assinafy publishes a working
-environment-specific OAuth configuration.
+The two browser-facing GET routes are compatibility URL builders. They do not perform OAuth
+consent or exchange tokens. Use the marketplace integration described below for customer connections.
+
+## Marketplace OAuth
+
+These operations use flat OAuth/OIDC success bodies. They are not methods on `AuthResource`.
+The complete request/response examples, scope rules, PKCE flow and renewal requirements are in
+[OAUTH.md](OAUTH.md).
+
+| Operation | Existing SDK transport call | Authentication and request | Success response |
+| --- | --- | --- | --- |
+| `POST /v1/oauth/token` | `forAuth()->getHttpClient()->postRaw('oauth/token', $form, 'application/x-www-form-urlencoded')` | Code exchange: `grant_type=authorization_code`, `code`, `redirect_uri`, `client_id`, `code_verifier`, recommended `resource=https://api.assinafy.com.br`, and `client_secret` for confidential clients. Refresh: `grant_type=refresh_token`, `refresh_token`, `client_id`, optional client secret. | Flat `{access_token, token_type, expires_in, scope, refresh_token?, id_token?}`. |
+| `POST /v1/oauth/revoke` | `forAuth()->getHttpClient()->postRaw('oauth/revoke', $form, 'application/x-www-form-urlencoded')` | `token`, `client_id`, confidential `client_secret`, optional `token_type_hint: access_token\|refresh_token`. No workspace key. | HTTP 200 with no token data; client authentication failure is 401. |
+| `GET /v1/oauth/userinfo` | `forAuth()->getHttpClient()->get('oauth/userinfo', [], ['Authorization' => 'Bearer ' . $token])` | OAuth token with `openid`; `profile` and `email` enable optional claims. | Flat `{sub, name?, email?, email_verified?}`. |
+| `GET /.well-known/oauth-protected-resource` | Origin-level public client, `getHttpClient()->get('.well-known/oauth-protected-resource')` | No authentication, query or body. The base URL is the API origin without `/v1`. | Flat `{resource, authorization_servers, scopes_supported, bearer_methods_supported}`. |
+
+Read flat bodies with `Response::getData()`. A successful transport call does not validate an OIDC
+ID token: verify its signature, issuer, audience, expiration and nonce with an OIDC implementation.
+Persist refreshed credentials atomically under a per-connection lock. Resource calls then use
+`AssinafyClient::forBearer($accessToken, $authorizedAccountId)`.
 
 ## Authenticated user (`UserResource`)
 
 | SDK method | Official operation | Auth | Request | SDK success return | Statuses |
 |---|---|---|---|---|---|
 | `get(?string $accessToken = null)` | [`GET /v1/users/self`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fusers%2Fself) | Workspace | No parameters; optional Bearer override, otherwise configured API-key or global-Bearer authentication. | Unwrapped `AuthUser`. OpenAPI sends it directly in `data`; sandbox nests it at `data.user` beside `data.accounts`. The SDK normalizes both. | `200; 401, 500` |
-| `stats(string $granularity = "monthly", ?string $month = null, ?string $accessToken = null)` | [`GET /v1/users/self/stats`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fusers%2Fself%2Fstats) | Workspace | Optional `granularity: monthly\|daily`; SDK requires valid `month: YYYY-MM` for daily; optional Bearer override. The route may be unavailable in sandbox. | Unwrapped `DocumentStatsRow[]`, summed across the user's accounts. | `200; 400, 401, 500`; sandbox may return application-level `404`. |
-| `notificationPreferences(?string $accessToken = null)` | [`GET /v1/users/self/notification-preferences`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fusers%2Fself%2Fnotification-preferences) | Workspace | No parameters; optional Bearer override. The route may be unavailable in sandbox. | Full unwrapped map `{DocumentCompleted, SignerDeclined, DocumentCancelled, DocumentAboutToExpire, DocumentExpired, DocumentExpirationReset, DocumentProcessingFailed, TemplateProcessingFailed, SignerWhatsappFailed}`, all boolean. | `200; 401, 500`; sandbox may return application-level `404`. |
-| `updateNotificationPreferences(array $preferences, ?string $accessToken = null)` | [`PUT /v1/users/self/notification-preferences`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Fusers%2Fself%2Fnotification-preferences) | Workspace | Non-empty partial JSON map containing any of the nine documented keys with boolean values; omitted keys remain unchanged. The route may be unavailable in sandbox. | Full unwrapped nine-key boolean map. | `200; 400, 401, 500`; sandbox may return application-level `404`. |
+| `stats(string $granularity = "monthly", ?string $month = null, ?string $accessToken = null)` | [`GET /v1/users/self/stats`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fusers%2Fself%2Fstats) | Workspace | Optional `granularity: monthly\|daily`; SDK requires valid `month: YYYY-MM` for daily; optional Bearer override. | Unwrapped `DocumentStatsRow[]`, summed across the user's accounts. | `200; 400, 401, 500`. |
+| `notificationPreferences(?string $accessToken = null)` | [`GET /v1/users/self/notification-preferences`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fusers%2Fself%2Fnotification-preferences) | Workspace | No parameters; optional Bearer override. | Full unwrapped map `{DocumentCompleted, SignerDeclined, DocumentCancelled, DocumentAboutToExpire, DocumentExpired, DocumentExpirationReset, DocumentProcessingFailed, TemplateProcessingFailed, SignerWhatsappFailed}`, all boolean. | `200; 401, 500`. |
+| `updateNotificationPreferences(array $preferences, ?string $accessToken = null)` | [`PUT /v1/users/self/notification-preferences`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Fusers%2Fself%2Fnotification-preferences) | Workspace | Non-empty partial JSON map containing any of the nine documented keys with boolean values; omitted keys remain unchanged. | Full unwrapped nine-key boolean map. | `200; 400, 401, 500`. |
 
 All nine preferences default to `true`. They control owner-facing document email only; welcome,
 password-reset, invitation, account-deletion, and other account/security emails are not
@@ -407,8 +422,8 @@ file fails locally. The API still performs authoritative PDF parsing and enforce
 | `activities($documentId)` | [`GET /v1/documents/{documentId}/activities`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Factivities) | Workspace | Path ID only. | Unwrapped `DocumentActivity[]`. | `200; 401, 500` |
 | `statuses()` | [`GET /v1/documents/statuses`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fdocuments%2Fstatuses) | Workspace | No parameters. | Unwrapped `DocumentStatus[]`. | `200; 401, 500` |
 | `verify($signatureHash)` | [`GET /v1/documents/{documentSignatureHash}/verify`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fdocuments%2F%7BdocumentSignatureHash%7D%2Fverify) | Public | Signature hash path value. | Unwrapped `DocumentVerification`. | `200; 500` |
-| `publicInfo($documentId)` | [`GET /v1/public/documents/{documentId}`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fpublic%2Fdocuments%2F%7BdocumentId%7D) | Public | Document path ID. | Unwrapped `Document`. | `200; 404, 500` |
-| `sendToken($documentId, $recipient, $channel)` | [`PUT /v1/public/documents/{documentId}/send-token`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Fpublic%2Fdocuments%2F%7BdocumentId%7D%2Fsend-token) | Public | Service JSON `{recipient, channel: "email"}`. `recipient` must belong to a signer already assigned to this document. | Success envelope fields. | `200; 500` in spec; service validation may return `400`, missing document `404`. |
+| `publicInfo($documentId)` | [`GET /v1/public/documents/{documentId}`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fpublic%2Fdocuments%2F%7BdocumentId%7D) | Public | Document path ID. | Unwrapped `{resource, id, name, page_count, created_by}` public projection. | `200; 404, 500` |
+| `sendToken($documentId, $recipient, $channel)` | [`PUT /v1/public/documents/{documentId}/send-token`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Fpublic%2Fdocuments%2F%7BdocumentId%7D%2Fsend-token) | Public | Service JSON `{recipient, channel: "email"}`. `recipient` must belong to a signer already assigned to this document. | Unwrapped `{document: {resource, id, name, page_count, created_by}, channel, recipient}`. | `200; 500` in spec; service validation may return `400`, missing document `404`. |
 | `listTags($documentId)` | [`GET /v1/accounts/{accountId}/documents/{documentId}/tags`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fdocuments%2F%7BdocumentId%7D%2Ftags) | Workspace | Account/document path IDs. | Unwrapped `Tag[]`. | `200; 401, 500` |
 | `replaceTags($documentId, $tagNames)` | [`PUT /v1/accounts/{accountId}/documents/{documentId}/tags`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fdocuments%2F%7BdocumentId%7D%2Ftags) | Workspace | Required JSON `{tags: string[]}`. Despite an upstream description saying IDs, runtime values are names and missing names are auto-created. Empty replaces the set with none. | Unwrapped `Tag[]`. | `200; 401, 500` |
 | `appendTags($documentId, $tagNames)` | [`POST /v1/accounts/{accountId}/documents/{documentId}/tags`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fdocuments%2F%7BdocumentId%7D%2Ftags) | Workspace | Required JSON `{tags: string[]}` using names; missing names are auto-created. SDK rejects an empty list. | Unwrapped `Tag[]`. | `200; 401, 500` |
@@ -480,7 +495,7 @@ These are account-owner operations, not signer-session operations.
 | `list($page, $perPage, $search)` | [`GET /v1/accounts/{accountId}/signers`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fsigners) | Workspace | Query `search`, `page`, `per-page`. | Envelope with `data: Signer[]` and normalized `pagination`. | `200; 401, 500` |
 | `create($fullName, $email, $whatsappPhoneNumber)` | [`POST /v1/accounts/{accountId}/signers`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fsigners) | Workspace | Required `full_name`; optional `email`; optional `whatsapp_phone_number` normalized to E.164 and required to include `+` plus country code. | Unwrapped `Signer`. | `200; 400, 401, 500` |
 | `get($signerId)` | [`GET /v1/accounts/{accountId}/signers/{signerId}`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fsigners%2F%7BsignerId%7D) | Workspace | Signer path ID. | Unwrapped `Signer`. | `200; 401, 404, 500` |
-| `update($signerId, $data)` | [`PUT /v1/accounts/{accountId}/signers/{signerId}`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fsigners%2F%7BsignerId%7D) | Workspace | Required JSON object containing any of `full_name`, `email`, `whatsapp_phone_number`, `government_id`. Formatted CPF/CNPJ input is accepted; the server saves it as digits only. | Unwrapped `Signer`. The response omits `government_id`; do not expect an echo. | `200; 400, 401, 404, 500` |
+| `update($signerId, $data)` | [`PUT /v1/accounts/{accountId}/signers/{signerId}`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fsigners%2F%7BsignerId%7D) | Workspace | Required JSON object containing any of `full_name`, `email`, `whatsapp_phone_number`, `government_id`. Formatted CPF/CNPJ input is accepted; the server saves it as digits only. | Unwrapped `Signer`. The response may omit or mask `government_id`; do not rely on an echo. | `200; 400, 401, 404, 500` |
 | `delete($signerId)` | [`DELETE /v1/accounts/{accountId}/signers/{signerId}`](https://api.assinafy.com.br/v1/docs/markdown?method=delete&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fsigners%2F%7BsignerId%7D) | Workspace | Signer path ID. | Envelope with `data: []`. | `200; 401, 404, 500` |
 | `findByEmail($email)` | Composite over [`GET /v1/accounts/{accountId}/signers`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fsigners) | Workspace | Sends exact email as `search` with `per-page=100`, follows every response page, then matches case-insensitively client-side. | First exact `Signer`, or null. | Same as signer list. |
 | `normalizePhoneNumber(string $phone)` | Local static helper | None | Requires an explicit leading `+` and country code; permits spaces, parentheses, periods, and hyphens; resulting number must contain 8–15 digits and start nonzero. | Canonical E.164-style `+{digits}` string. | Throws `ValidationException` locally on ambiguous/invalid input. |
@@ -591,7 +606,7 @@ Operations above refer to the shared response schemas below. `?` means nullable.
 |---|---|
 | `Account` | `resource`, `id`, `name`, `primary_color?`, `secondary_color?`, `notification_sender_type: "User"\|"Account"`, `roles: string[]`, `is_delete_allowed`, `created_at`. |
 | `AccountTheme` | `account_name`, `primary_color`, `secondary_color?`, `logo`. Colors omit the leading `#`; logo is a URL. |
-| `Signer` | `resource`, `id`, `full_name`, `email?`, `whatsapp_phone_number?`, `has_accepted_terms`. |
+| `Signer` | `resource`, `id`, `full_name`, `email?`, `whatsapp_phone_number?`, optional `government_id?`, `has_accepted_terms`. |
 | `SignerSelf` | Every `Signer` field plus `has_signature`, `has_initial`, `is_signature_reusable`. |
 | `Tag` | `resource`, `id`, `name`, `color?`, `created_at`, `updated_at`. Color is six-character hex without `#`. |
 
@@ -625,12 +640,27 @@ mutually exclusive and always sum to `signature_requests`.
 | `SigningUrl` | `signer_id`, `url`. It has no access-code field, and the URL must not be parsed as if one were present. |
 | `CostEstimate` | `documents: integer`, `credits: number`, `needs_extra_document`, `extra_document_cost: number`, `total_credits: number`, `breakdown: CostEstimateBreakdownItem[]`, `document_balance: number`, `credit_balance: number`, `has_sufficient_resources`, `blocking_reason?`, `message?`. |
 | `CostEstimateBreakdownItem` | `code`, `name`, `cost: number`, `quantity: integer`, `unit_cost: number`. |
+| `ResendCostEstimate` | `total: number`, `breakdown: {code, name, cost: number}[]`, `credit_balance: number`, `has_sufficient_credits: boolean`. |
 
 `CostEstimate.blocking_reason` is one of `PendingPayment`, `InsufficientDocuments`, or
 `InsufficientCredits`. Published pricing is one document per assignment, one credit for an extra
 document, zero credits for Email notification, 0.45 credits for WhatsApp notification, and two
 credits for each DigitalCertificate signer (breakdown code `SignatureDigitalCertificate`) in
 addition to notification cost.
+
+A resend estimate returns the following SDK value for Email notifications. Use
+`has_sufficient_credits` to decide whether to resend:
+
+```php
+[
+    'total' => 0,
+    'breakdown' => [
+        ['code' => 'NotificationEmailResend', 'name' => 'Email Notification Resend', 'cost' => 0],
+    ],
+    'credit_balance' => 0,
+    'has_sufficient_credits' => true,
+]
+```
 
 ### Field schemas
 
@@ -650,7 +680,7 @@ addition to notification cost.
 | `TemplateFieldPlacement` | `id`, `field_id`, `role_id`, `label`, `display_settings: object`, `created_at`, `updated_at`. |
 | `TemplateRole` | `id`, `name`, `assignment_type`, `created_at`, `updated_at`. |
 
-Template status is one of `uploading`, `uploaded`, `processing`, `ready`, or `failed`.
+Template status is one of `Uploading`, `Uploaded`, `Processing`, `Ready`, or `Failed`; readiness checks accept either casing.
 
 ### Webhook schemas
 
@@ -734,7 +764,7 @@ polymorphic objects without imposing a fixed resource shape.
 
 ## Named OpenAPI examples
 
-The current OpenAPI document defines six named examples, all on assignment creation:
+Assignment creation has six named examples:
 
 | Example | Purpose |
 |---|---|

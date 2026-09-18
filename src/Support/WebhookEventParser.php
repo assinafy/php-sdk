@@ -25,18 +25,26 @@ class WebhookEventParser
      *
      * Request (the delivery your endpoint receives): the raw POST body.
      *
-     * Response (the decoded envelope):
-     * ```
+     * Response (the decoded envelope, using the signer_created event):
+     * ```php
      * [
-     *   'id'         => 8629,
-     *   'event'      => 'signature_requested',
-     *   'message'    => 'Signature requested',
-     *   'subject'    => ['id' => 'user-id', 'type' => 'User', 'email' => 'sender@example.com'],
-     *   'origin'     => ['ip' => '203.0.113.10', 'user-agent' => 'Example/1.0'],
-     *   'account_id' => '64f000000000000000000001',
-     *   'created_at' => 1781044129,
-     *   'object'     => ['id' => '1032c…', 'type' => 'Document', 'status' => 'pending_signature', …],
-     *   'payload'    => [ … event-specific parameters … ],
+     *     'id' => 42,
+     *     'event' => 'signer_created',
+     *     'message' => 'Signer created',
+     *     'subject' => ['id' => 'user-id', 'type' => 'User', 'name' => 'Example User'],
+     *     'origin' => ['ip' => '203.0.113.10', 'user-agent' => 'Example/1.0'],
+     *     'account_id' => 'account-id',
+     *     'created_at' => 1788264000,
+     *     'object' => [
+     *         'id' => 'signer-id',
+     *         'type' => 'Signer',
+     *         'full_name' => 'Example Signer',
+     *         'email' => 'signer@example.com',
+     *         'whatsapp_phone_number' => null,
+     *         'government_id' => null,
+     *         'has_accepted_terms' => false,
+     *     ],
+     *     'payload' => ['signer_full_name' => 'Example Signer'],
      * ]
      * ```
      *
@@ -44,7 +52,8 @@ class WebhookEventParser
      * detail under `payload`. Returns `null` rather than throwing when the body is not
      * valid JSON, so a malformed delivery can be answered with a 400 instead of a 500:
      * ```php
-     * $event = $client->webhookEvents()->extractEvent(file_get_contents('php://input'));
+     * $raw = file_get_contents('php://input');
+     * $event = is_string($raw) ? $client->webhookEvents()->extractEvent($raw) : null;
      * if ($event === null) {
      *     http_response_code(400);
      *     return;
@@ -98,20 +107,17 @@ class WebhookEventParser
      *
      * Request: the decoded envelope from {@see self::extractEvent()}.
      *
-     * Response — the shape varies by `subject` (Document, Signer, Template, …); a Document
-     * object carries `id`, `name`, `status`, `artifacts`, `pages`, `tags` and friends:
-     * ```
+     * Response: the complete object as received. Its shape depends on `object.type`.
+     * Example for signer_created:
+     * ```php
      * [
-     *   'id'         => '10413df89e95e0097dcd8e2f9ea7',
-     *   'type'       => 'Document',
-     *   'name'       => 'contract.pdf',
-     *   'status'     => 'pending_signature',
-     *   'account_id' => '64f000000000000000000001',
-     *   'artifacts'  => ['original' => 'https://…', 'thumbnail' => 'https://…'],
-     *   'pages'      => [['id' => '1041…', 'number' => 1, 'width' => 1275, 'height' => 1651]],
-     *   'tags'       => [],
-     *   'is_closed'  => false,
-     *   'assignment' => ['id' => '1041…', 'items' => [ … ], 'signers' => [ … ]],
+     *     'id' => 'signer-id',
+     *     'type' => 'Signer',
+     *     'full_name' => 'Example Signer',
+     *     'email' => 'signer@example.com',
+     *     'whatsapp_phone_number' => null,
+     *     'government_id' => null,
+     *     'has_accepted_terms' => false,
      * ]
      * ```
      *
@@ -140,7 +146,7 @@ class WebhookEventParser
      * Response — for `signer_signed_document`, `object` is the Document while `payload`
      * names which signer signed:
      * ```
-     * ['signer_id' => '19e6b92e7895332ed9708535d8c', 'signed_at' => '2026-08-27T15:10:04Z']
+     * ['signer_full_name' => 'Example Signer']
      * ```
      *
      * Many events carry an empty `payload` — the entity alone is the news. Returns `[]`
@@ -164,7 +170,7 @@ class WebhookEventParser
      *
      * Response: the workspace ID, or `null` when absent or not a string.
      * ```php
-     * $accountId = $client->webhookEvents()->getAccountId($event);   // '64f000000000000000000001'
+     * $accountId = $client->webhookEvents()->getAccountId($event);   // 'account-id'
      * ```
      *
      * @param array<string, mixed>|null $event the decoded envelope

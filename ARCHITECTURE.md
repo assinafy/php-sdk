@@ -5,7 +5,7 @@
 The Assinafy PHP SDK is a small, synchronous client for the Assinafy v1 API. It uses a facade over focused resource classes, a project-specific HTTP abstraction, PSR-3 logging, strict PHP types, and explicit exception mapping.
 
 The package targets PHP 8.2 through 8.5, the complete supported CI matrix, and implements the
-published Assinafy v1 operation set. The endpoint mapping and operational notes are in
+workspace, document, signer, authentication and webhook operations. The endpoint mapping and operational notes are in
 [docs/API_REFERENCE.md](docs/API_REFERENCE.md).
 
 ## Directory structure
@@ -40,6 +40,7 @@ assinafy-php-sdk/
 │   │   ├── UserResource.php
 │   │   └── WebhookResource.php
 │   └── Support/
+│       ├── Iso8601.php
 │       ├── MutableLogger.php
 │       └── WebhookEventParser.php
 ├── tests/
@@ -49,6 +50,7 @@ assinafy-php-sdk/
 │   ├── API_REFERENCE.md
 │   ├── EXAMPLES.md
 │   ├── INSTALLATION.md
+│   ├── OAUTH.md
 │   ├── index.php
 │   └── quickstart.php
 ├── composer.json
@@ -90,9 +92,10 @@ bootstrap methods must receive the login token explicitly. Once an account ID is
 resource. Account-scoped methods reject public configuration instead of sending placeholder
 credentials.
 
-Two legacy OAuth URL builders remain on `AuthResource`, but their GET routes are outside the
-current OpenAPI document and upstream sandbox/production redirects are misconfigured. They are
-compatibility methods, not an operational authentication architecture.
+Marketplace OAuth uses the existing public transport for token, revocation, userinfo and discovery
+calls, then `forBearer()` for scoped resources. See [docs/OAUTH.md](docs/OAUTH.md). The application
+owns consent, PKCE transactions, encrypted token storage and per-connection refresh locking.
+The legacy social URL builders on `AuthResource` are separate compatibility methods.
 
 The high-level `uploadAndRequestSignatures()` workflow validates every signer description before
 uploading, uploads a PDF, optionally waits for document readiness, resolves or creates signers,
@@ -113,7 +116,7 @@ Each resource extends `AbstractResource`, which centralizes account paths, path-
 |---|---|
 | `accounts()` | Account discovery and management, branding, and account statistics |
 | `assignments()` | Signature requests, Email/WhatsApp/DigitalCertificate estimates, resend operations, expiration resets, and WhatsApp history |
-| `auth()` | Login, social login, password flows, API-key lifecycle, and legacy non-operational OAuth URL builders |
+| `auth()` | Login, social login, password flows, API-key lifecycle, and legacy social URL builders |
 | `documents()` | Document upload, retrieval, search, downloads (including `pades`), tags, verification, and template-driven creation |
 | `fields()` | Field definitions, validation, and the global field-type catalog |
 | `signers()` | Workspace signer CRUD (including `government_id` update), email lookup, and explicit-country-code E.164 normalization |
@@ -121,7 +124,7 @@ Each resource extends `AbstractResource`, which centralizes account paths, path-
 | `signerDocuments()` | End-signer document lookup, search, bulk actions, and downloads |
 | `tags()` | Account tag CRUD |
 | `templates()` | Template upload, polling, retrieval, update, deletion, and page downloads |
-| `users()` | Authenticated user profile plus published notification preferences and cross-account statistics; the latter routes are not currently sandbox-deployed |
+| `users()` | Authenticated user profile plus published notification preferences and cross-account statistics |
 | `webhooks()` | Subscription configuration, event types, delivery history, and retry |
 
 Workspace resources use either the configured `X-Api-Key` or the global Bearer header supplied by
@@ -184,7 +187,7 @@ AssinafyException
 ```
 
 - `ApiException` represents non-success API responses and retains the HTTP status and parsed response data.
-- `NetworkException` represents connection, DNS, TLS, and timeout failures.
+- `NetworkException` represents connection, DNS, TLS, timeout, and malformed-response failures.
 - `ValidationException` represents SDK validation failures that use structured validation errors.
 - Some local precondition failures intentionally use `InvalidArgumentException` or `RuntimeException`, as documented per method.
 
@@ -244,7 +247,9 @@ ASSINAFY_INTEGRATION=1 composer test:integration
 - Custom remote base URLs require HTTPS; HTTP is restricted to loopback development hosts.
 - Secrets belong in environment variables or a secret manager, not in code or committed fixtures.
 - Signer access codes are query credentials and must be handled like passwords.
-- SDK transport logs pass through `LogRedactor`.
+- SDK transport logs include metadata only; credential redaction covers OAuth codes and PKCE verifiers.
+- Exception causes retain only the Guzzle exception class and code, including when PHP records arguments.
+- Injected concrete Guzzle clients cannot carry default HTTP authentication or credential headers.
 - Incoming webhook data is parsed, not authenticated; re-fetch authoritative state before side effects.
 - Public clients cannot call account-scoped paths accidentally.
 

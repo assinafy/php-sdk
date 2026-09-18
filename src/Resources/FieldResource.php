@@ -40,19 +40,20 @@ class FieldResource extends AbstractResource
      * ]
      * ```
      *
-     * Response (unwrapped `data`):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'id'             => '102d25a48bec03ebcf3b5f651998',
-     *   'name'           => 'Job title',
-     *   'type'           => 'text',
-     *   'regex'          => '^[A-Z].*$',
-     *   'is_pre_defined' => false,   // true for fields the platform ships
-     *   'is_active'      => true,
-     *   'is_required'    => true,
-     *   'is_standard'    => false,   // true for signature/initial/signatureDate
-     *   'is_read_only'   => false,   // true when the platform fills it in
-     *   'is_visible'     => true,
+     *     'resource' => 'field_definition',
+     *     'id' => 'field-id',
+     *     'name' => 'Job title',
+     *     'type' => 'text',
+     *     'regex' => '^[A-Z].*$',
+     *     'is_pre_defined' => false,
+     *     'is_active' => true,
+     *     'is_required' => true,
+     *     'is_standard' => false,
+     *     'is_read_only' => false,
+     *     'is_visible' => true,
      * ]
      * ```
      *
@@ -94,21 +95,27 @@ class FieldResource extends AbstractResource
      * Request (query string): `include_inactive=true`, `include_standard=true` — each sent
      * only when its flag is set.
      *
-     * Response (unwrapped `data`):
+     * Example query (no request body):
+     * ```php
+     * ['include_inactive' => 'true', 'include_standard' => 'true']
      * ```
+     *
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   [
-     *     'id'             => '102d25a48bcf142065f2b06cf821',
-     *     'name'           => 'Assinatura',
-     *     'type'           => 'signature',
-     *     'regex'          => null,
-     *     'is_pre_defined' => true,
-     *     'is_active'      => true,
-     *     'is_required'    => true,
-     *     'is_standard'    => true,
-     *     'is_read_only'   => false,
-     *     'is_visible'     => true,
-     *   ],
+     *     [
+     *         'resource' => 'field_definition',
+     *         'id' => 'field-id',
+     *         'name' => 'Example',
+     *         'type' => 'text',
+     *         'regex' => null,
+     *         'is_pre_defined' => false,
+     *         'is_active' => true,
+     *         'is_required' => true,
+     *         'is_standard' => false,
+     *         'is_read_only' => false,
+     *         'is_visible' => true,
+     *     ],
      * ]
      * ```
      *
@@ -137,19 +144,20 @@ class FieldResource extends AbstractResource
      *
      * Request: no parameters.
      *
-     * Response (unwrapped `data`):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'id'             => '102d25a48bec03ebcf3b5f651998',
-     *   'name'           => 'CPF',
-     *   'type'           => 'cpf',
-     *   'regex'          => null,
-     *   'is_pre_defined' => true,
-     *   'is_active'      => true,
-     *   'is_required'    => false,
-     *   'is_standard'    => false,
-     *   'is_read_only'   => false,
-     *   'is_visible'     => true,
+     *     'resource' => 'field_definition',
+     *     'id' => 'field-id',
+     *     'name' => 'Example',
+     *     'type' => 'text',
+     *     'regex' => null,
+     *     'is_pre_defined' => false,
+     *     'is_active' => true,
+     *     'is_required' => true,
+     *     'is_standard' => false,
+     *     'is_read_only' => false,
+     *     'is_visible' => true,
      * ]
      * ```
      *
@@ -178,17 +186,20 @@ class FieldResource extends AbstractResource
      * ['name' => 'Job title', 'regex' => null, 'is_active' => false]
      * ```
      *
-     * Response (unwrapped `data`) — the field after the change:
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'id'          => '102d25a48bec03ebcf3b5f651998',
-     *   'name'        => 'Job title',
-     *   'type'        => 'text',
-     *   'regex'       => null,
-     *   'is_active'   => false,
-     *   'is_required' => true,
-     *   'is_standard' => false,
-     *   'is_visible'  => true,
+     *     'resource' => 'field_definition',
+     *     'id' => 'field-id',
+     *     'name' => 'Job title',
+     *     'type' => 'text',
+     *     'regex' => null,
+     *     'is_pre_defined' => false,
+     *     'is_active' => false,
+     *     'is_required' => true,
+     *     'is_standard' => false,
+     *     'is_read_only' => false,
+     *     'is_visible' => true,
      * ]
      * ```
      *
@@ -217,8 +228,8 @@ class FieldResource extends AbstractResource
      *
      * Request: no body.
      *
-     * Response (unwrapped `data`; empty on success):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * []
      * ```
      *
@@ -250,9 +261,13 @@ class FieldResource extends AbstractResource
      * ['value' => '111.444.777-35']
      * ```
      *
-     * Response (unwrapped `data`) — valid:
-     * ```
-     * ['type' => 'cpf', 'success' => true, 'error_message' => '']
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
+     * [
+     *     'type' => 'text',
+     *     'success' => true,
+     *     'error_message' => '',
+     * ]
      * ```
      * …and invalid:
      * ```
@@ -295,18 +310,20 @@ class FieldResource extends AbstractResource
      * Request body:
      * ```
      * [
-     *   ['field_id' => '102d25a48bf5816b9029b0ca6043', 'value' => '111.444.777-35'],
-     *   ['field_id' => '102d25a48bf5816b9029b0ca6043', 'value' => '123'],
+     *   ['field_id' => 'field-id', 'value' => '111.444.777-35'],
+     *   ['field_id' => 'field-id', 'value' => '123'],
      * ]
      * ```
      *
-     * Response (unwrapped `data`):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   ['field_id' => '102d25a48bf5816b9029b0ca6043', 'type' => 'cpf',
-     *    'success' => true,  'error_message' => ''],
-     *   ['field_id' => '102d25a48bf5816b9029b0ca6043', 'type' => 'cpf',
-     *    'success' => false, 'error_message' => 'CPF inválido.'],
+     *     [
+     *         'field_id' => 'field-id',
+     *         'type' => 'cpf',
+     *         'success' => false,
+     *         'error_message' => 'Invalid CPF.',
+     *     ],
      * ]
      * ```
      *
@@ -343,19 +360,53 @@ class FieldResource extends AbstractResource
      *
      * Request: no parameters.
      *
-     * Response (unwrapped `data`, verbatim from the API):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   ['type' => 'personName',  'name' => 'Nome'],
-     *   ['type' => 'cpf',         'name' => 'CPF'],
-     *   ['type' => 'phoneNumber', 'name' => 'Número de Telefone'],
-     *   ['type' => 'postalCode',  'name' => 'CEP'],
-     *   ['type' => 'email',       'name' => 'E-mail'],
-     *   ['type' => 'cnpj',        'name' => 'CNPJ'],
-     *   ['type' => 'companyName', 'name' => 'Nome da empresa'],
-     *   ['type' => 'text',        'name' => 'Texto'],
-     *   ['type' => 'number',      'name' => 'Número'],
-     *   ['type' => 'date',        'name' => 'Data'],
+     *     [
+     *         'type' => 'personName',
+     *         'name' => 'Nome',
+     *     ],
+     *     [
+     *         'type' => 'cpf',
+     *         'name' => 'CPF',
+     *     ],
+     *     [
+     *         'type' => 'phoneNumber',
+     *         'name' => 'Número de Telefone',
+     *     ],
+     *     [
+     *         'type' => 'postalCode',
+     *         'name' => 'CEP',
+     *     ],
+     *     [
+     *         'type' => 'email',
+     *         'name' => 'E-mail',
+     *     ],
+     *     [
+     *         'type' => 'cnpj',
+     *         'name' => 'CNPJ',
+     *     ],
+     *     [
+     *         'type' => 'companyName',
+     *         'name' => 'Nome da empresa',
+     *     ],
+     *     [
+     *         'type' => 'email',
+     *         'name' => 'E-mail',
+     *     ],
+     *     [
+     *         'type' => 'text',
+     *         'name' => 'Texto',
+     *     ],
+     *     [
+     *         'type' => 'number',
+     *         'name' => 'Número',
+     *     ],
+     *     [
+     *         'type' => 'date',
+     *         'name' => 'Data',
+     *     ],
      * ]
      * ```
      *

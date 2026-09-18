@@ -214,12 +214,12 @@ final class DocumentResourceTest extends TestCase
         $this->assertSame('public/documents/doc1', $this->http->lastCall()['uri']);
 
         $this->http->queueJson(200, ['channel' => 'email']);
-        $this->documents->sendToken('doc1', 'a@b.com');
+        $this->documents->sendToken('doc1', 'a@example.com');
 
         $call = $this->http->lastCall();
         $this->assertSame('PUT', $call['method']);
         $this->assertSame('public/documents/doc1/send-token', $call['uri']);
-        $this->assertSame(['recipient' => 'a@b.com', 'channel' => 'email'], $call['body']);
+        $this->assertSame(['recipient' => 'a@example.com', 'channel' => 'email'], $call['body']);
     }
 
     /**
@@ -236,7 +236,7 @@ final class DocumentResourceTest extends TestCase
     public function testSendTokenRejectsUnsupportedChannel(string $channel): void
     {
         $this->expectException(ValidationException::class);
-        $this->documents->sendToken('doc1', 'a@b.com', $channel);
+        $this->documents->sendToken('doc1', 'a@example.com', $channel);
     }
 
     /** @return array<string, array{0: string}> */

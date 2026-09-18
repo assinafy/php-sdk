@@ -138,7 +138,7 @@ final class AssignmentResourceTest extends TestCase
     public function testCreateRejectsSignerWithoutId(): void
     {
         $this->expectException(ValidationException::class);
-        $this->assignments->create('doc1', [['email' => 'x@y.com']]);
+        $this->assignments->create('doc1', [['email' => 'x@example.com']]);
     }
 
     public function testCreateRejectsWhitespaceSignerAndCopyReceiverIds(): void
@@ -175,8 +175,16 @@ final class AssignmentResourceTest extends TestCase
 
     public function testEstimateResendCost(): void
     {
-        $this->http->queueJson(200, ['total' => 0.2]);
-        $this->assignments->estimateResendCost('doc1', 'a1', 's1');
+        $estimate = [
+            'total' => 0,
+            'breakdown' => [
+                ['code' => 'NotificationEmailResend', 'name' => 'Email Notification Resend', 'cost' => 0],
+            ],
+            'credit_balance' => 0,
+            'has_sufficient_credits' => true,
+        ];
+        $this->http->queueJson(200, $estimate);
+        $this->assertSame($estimate, $this->assignments->estimateResendCost('doc1', 'a1', 's1'));
 
         $this->assertSame(
             'documents/doc1/assignments/a1/signers/s1/estimate-resend-cost',

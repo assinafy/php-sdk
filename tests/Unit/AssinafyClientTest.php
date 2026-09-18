@@ -103,7 +103,7 @@ final class AssinafyClientTest extends TestCase
         // 3) signer 1: findByEmail returns no match
         $http->queueJson(200, []);
         // 4) signer 1: create
-        $http->queueJson(201, ['id' => 's1', 'full_name' => 'Alice', 'email' => 'a@b.com']);
+        $http->queueJson(201, ['id' => 's1', 'full_name' => 'Alice', 'email' => 'a@example.com']);
         // 5) signer 2 is already an ID string — no API call. Then assignment create:
         $http->queueJson(201, [
             'id' => 'a1',
@@ -115,7 +115,7 @@ final class AssinafyClientTest extends TestCase
             $result = $client->uploadAndRequestSignatures(
                 $pdf,
                 [
-                    ['full_name' => 'Alice', 'email' => 'a@b.com'],
+                    ['full_name' => 'Alice', 'email' => 'a@example.com'],
                     's2',
                 ],
                 'Please sign',

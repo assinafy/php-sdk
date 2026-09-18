@@ -32,24 +32,28 @@ class TemplateResource extends AbstractResource
      *
      * Request: `multipart/form-data` with the PDF under the field name `file`.
      *
-     * Response (unwrapped `data`):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'resource'      => 'template',
-     *   'id'            => '10414160b9d1a5ff705effd35c43',
-     *   'name'          => 'service-agreement.pdf',
-     *   'document_name' => 'service-agreement.pdf',
-     *   'message'       => null,
-     *   'status'        => 'Uploaded',   // PascalCase here, unlike document statuses
-     *   'pages'         => [],           // populated once rendering finishes
-     *   'roles'         => [
-     *     ['id' => '10414160d1669a27520ea6d385cf', 'name' => 'TemplateEditor',
-     *      'assignment_type' => 'Editor', 'created_at' => '2026-08-20T17:06:18Z',
-     *      'updated_at' => '2026-08-20T17:06:18Z'],
-     *   ],
-     *   'tags'       => [],
-     *   'created_at' => '2026-08-20T17:06:17Z',
-     *   'updated_at' => '2026-08-20T17:06:17Z',
+     *     'resource' => 'template',
+     *     'id' => 'template-id',
+     *     'name' => 'agreement.pdf',
+     *     'document_name' => 'agreement.pdf',
+     *     'message' => null,
+     *     'status' => 'Uploaded',
+     *     'pages' => [],
+     *     'roles' => [
+     *         [
+     *             'id' => 'role-id',
+     *             'name' => 'TemplateEditor',
+     *             'assignment_type' => 'Editor',
+     *             'created_at' => '2026-09-01T12:00:00Z',
+     *             'updated_at' => '2026-09-01T12:00:00Z',
+     *         ],
+     *     ],
+     *     'tags' => [],
+     *     'created_at' => '2026-09-01T12:00:00Z',
+     *     'updated_at' => '2026-09-01T12:00:00Z',
      * ]
      * ```
      *
@@ -78,37 +82,53 @@ class TemplateResource extends AbstractResource
      *
      * Request (query string): `page`, `per-page`, plus any `$filters` merged over them.
      *
-     * Response (full envelope — pagination lifted from the `X-Pagination-*` headers). List
-     * entries carry `pages` and `roles` but omit `default_document_tags`, which only
-     * {@see self::get()} returns:
+     * Example query (no request body):
+     * ```php
+     * ['page' => 1, 'per-page' => 20, 'search' => 'agreement']
      * ```
+     *
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'status'  => 200,
-     *   'message' => '',
-     *   'data'    => [
-     *     [
-     *       'id'            => '10414160b9d1a5ff705effd35c43',
-     *       'name'          => 'service-agreement.pdf',
-     *       'document_name' => 'service-agreement.pdf',
-     *       'message'       => null,
-     *       'status'        => 'Ready',
-     *       'pages'         => [
-     *         ['id' => '104141610fe1037c1b4a9a9ca62c', 'number' => 1,
-     *          'width' => 1275, 'height' => 1651,
-     *          'download_url' => 'https://…/templates/1041…/pages/1041…/download',
-     *          'fields' => []],
-     *       ],
-     *       'roles' => [
-     *         ['id' => '10414160d1669a27520ea6d385cf', 'name' => 'TemplateEditor',
-     *          'assignment_type' => 'Editor', 'created_at' => '2026-08-20T17:06:18Z',
-     *          'updated_at' => '2026-08-20T17:06:18Z'],
-     *       ],
-     *       'tags'       => [],
-     *       'created_at' => '2026-08-20T17:06:17Z',
-     *       'updated_at' => '2026-08-20T17:06:21Z',
+     *     'status' => 200,
+     *     'message' => '',
+     *     'data' => [
+     *         [
+     *             'id' => 'template-id',
+     *             'name' => 'agreement.pdf',
+     *             'document_name' => 'agreement.pdf',
+     *             'message' => null,
+     *             'status' => 'Ready',
+     *             'pages' => [
+     *                 [
+     *                     'id' => 'page-id',
+     *                     'number' => 1,
+     *                     'height' => 1651,
+     *                     'width' => 1275,
+     *                     'download_url' => 'https://sandbox.assinafy.com.br/v1/accounts/account-id/templates/template-id/pages/page-id/download',
+     *                     'fields' => [],
+     *                 ],
+     *             ],
+     *             'roles' => [
+     *                 [
+     *                     'id' => 'role-id',
+     *                     'name' => 'TemplateEditor',
+     *                     'assignment_type' => 'Editor',
+     *                     'created_at' => '2026-09-01T12:00:00Z',
+     *                     'updated_at' => '2026-09-01T12:00:00Z',
+     *                 ],
+     *             ],
+     *             'tags' => [],
+     *             'created_at' => '2026-09-01T12:00:00Z',
+     *             'updated_at' => '2026-09-01T12:00:00Z',
+     *         ],
      *     ],
-     *   ],
-     *   'pagination' => ['current_page' => 1, 'page_count' => 2, 'per_page' => 20, 'total_count' => 24],
+     *     'pagination' => [
+     *         'current_page' => 1,
+     *         'page_count' => 1,
+     *         'per_page' => 20,
+     *         'total_count' => 1,
+     *     ],
      * ]
      * ```
      *
@@ -136,32 +156,38 @@ class TemplateResource extends AbstractResource
      *
      * Request: no parameters.
      *
-     * Response (unwrapped `data`):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'resource'      => 'template',
-     *   'id'            => '10414160b9d1a5ff705effd35c43',
-     *   'name'          => 'service-agreement.pdf',
-     *   'document_name' => 'service-agreement.pdf',
-     *   'message'       => null,
-     *   'status'        => 'Ready',      // 'Uploaded' | 'Processing' | 'Ready' | 'Failed'
-     *   'pages'         => [
-     *     [
-     *       'id' => '104141610fe1037c1b4a9a9ca62c', 'number' => 1,
-     *       'width' => 1275, 'height' => 1651,
-     *       'download_url' => 'https://…/templates/1041…/pages/1041…/download',
-     *       'fields' => [],   // field placements configured in the web app
+     *     'resource' => 'template',
+     *     'id' => 'template-id',
+     *     'name' => 'agreement.pdf',
+     *     'document_name' => 'agreement.pdf',
+     *     'message' => null,
+     *     'status' => 'Ready',
+     *     'pages' => [
+     *         [
+     *             'id' => 'page-id',
+     *             'number' => 1,
+     *             'height' => 1651,
+     *             'width' => 1275,
+     *             'download_url' => 'https://sandbox.assinafy.com.br/v1/accounts/account-id/templates/template-id/pages/page-id/download',
+     *             'fields' => [],
+     *         ],
      *     ],
-     *   ],
-     *   'roles' => [
-     *     ['id' => '10414160d1669a27520ea6d385cf', 'name' => 'TemplateEditor',
-     *      'assignment_type' => 'Editor', 'created_at' => '2026-08-20T17:06:18Z',
-     *      'updated_at' => '2026-08-20T17:06:18Z'],
-     *   ],
-     *   'tags'                  => [],
-     *   'default_document_tags' => [],
-     *   'created_at'            => '2026-08-20T17:06:17Z',
-     *   'updated_at'            => '2026-08-20T17:06:21Z',
+     *     'roles' => [
+     *         [
+     *             'id' => 'role-id',
+     *             'name' => 'TemplateEditor',
+     *             'assignment_type' => 'Editor',
+     *             'created_at' => '2026-09-01T12:00:00Z',
+     *             'updated_at' => '2026-09-01T12:00:00Z',
+     *         ],
+     *     ],
+     *     'tags' => [],
+     *     'created_at' => '2026-09-01T12:00:00Z',
+     *     'updated_at' => '2026-09-01T12:00:00Z',
+     *     'default_document_tags' => [],
      * ]
      * ```
      *
@@ -199,19 +225,38 @@ class TemplateResource extends AbstractResource
      * ]
      * ```
      *
-     * Response (unwrapped `data`) — the template after the change, same shape as
-     * {@see self::get()}:
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'resource'      => 'template',
-     *   'id'            => '10414160b9d1a5ff705effd35c43',
-     *   'name'          => 'Service agreement (2026)',
-     *   'document_name' => 'Acme — service agreement',
-     *   'message'       => 'Please sign this contract',
-     *   'status'        => 'Ready',
-     *   'pages'         => [ … ],
-     *   'roles'         => [ … ],
-     *   'updated_at'    => '2026-08-27T15:02:11Z',
+     *     'resource' => 'template',
+     *     'id' => 'template-id',
+     *     'name' => 'Service agreement (2026)',
+     *     'document_name' => 'Acme — service agreement',
+     *     'message' => 'Please sign this contract',
+     *     'status' => 'Ready',
+     *     'pages' => [
+     *         [
+     *             'id' => 'page-id',
+     *             'number' => 1,
+     *             'height' => 1651,
+     *             'width' => 1275,
+     *             'download_url' => 'https://sandbox.assinafy.com.br/v1/accounts/account-id/templates/template-id/pages/page-id/download',
+     *             'fields' => [],
+     *         ],
+     *     ],
+     *     'roles' => [
+     *         [
+     *             'id' => 'role-id',
+     *             'name' => 'TemplateEditor',
+     *             'assignment_type' => 'Editor',
+     *             'created_at' => '2026-09-01T12:00:00Z',
+     *             'updated_at' => '2026-09-01T12:00:00Z',
+     *         ],
+     *     ],
+     *     'tags' => [],
+     *     'created_at' => '2026-09-01T12:00:00Z',
+     *     'updated_at' => '2026-09-01T12:00:00Z',
+     *     'default_document_tags' => [],
      * ]
      * ```
      *
@@ -242,8 +287,8 @@ class TemplateResource extends AbstractResource
      *
      * Request: no body.
      *
-     * Response (unwrapped `data`; empty on success):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * []
      * ```
      *
@@ -307,7 +352,40 @@ class TemplateResource extends AbstractResource
      * `processing_failed`, and otherwise sleeps and retries. The deadline is checked between
      * calls; an in-flight request is bounded separately by the configured transport timeout.
      *
-     * Response: the same payload as {@see self::get()}, once it is ready.
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
+     * [
+     *     'resource' => 'template',
+     *     'id' => 'template-id',
+     *     'name' => 'agreement.pdf',
+     *     'document_name' => 'agreement.pdf',
+     *     'message' => null,
+     *     'status' => 'Ready',
+     *     'pages' => [
+     *         [
+     *             'id' => 'page-id',
+     *             'number' => 1,
+     *             'height' => 1651,
+     *             'width' => 1275,
+     *             'download_url' => 'https://sandbox.assinafy.com.br/v1/accounts/account-id/templates/template-id/pages/page-id/download',
+     *             'fields' => [],
+     *         ],
+     *     ],
+     *     'roles' => [
+     *         [
+     *             'id' => 'role-id',
+     *             'name' => 'TemplateEditor',
+     *             'assignment_type' => 'Editor',
+     *             'created_at' => '2026-09-01T12:00:00Z',
+     *             'updated_at' => '2026-09-01T12:00:00Z',
+     *         ],
+     *     ],
+     *     'tags' => [],
+     *     'created_at' => '2026-09-01T12:00:00Z',
+     *     'updated_at' => '2026-09-01T12:00:00Z',
+     *     'default_document_tags' => [],
+     * ]
+     * ```
      *
      * @param int $maxWaitSeconds      total budget before giving up
      * @param int $pollIntervalSeconds delay between polls; the last sleep is trimmed so the

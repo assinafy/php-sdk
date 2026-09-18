@@ -51,20 +51,32 @@ class AssignmentResource extends AbstractResource
      *   'method'  => 'virtual',                       // 'virtual' | 'collect'
      *   'signers' => [
      *     [
-     *       'id'                   => '19e6b92e7895332ed9708535d8c',   // required
+     *       'id'                   => 'signer-id',   // required
      *       'verification_method'  => 'Email',        // Email | Whatsapp | DigitalCertificate
      *       'notification_methods' => ['Email'],      // exactly one: Email | Whatsapp
      *       'step'                 => 1,              // 1-based signing order
      *     ],
      *   ],
-     *   // 'collect' only — where each field is stamped on the page:
+     *   'message'        => 'Please sign this contract',
+     *   'expires_at'     => '2026-12-31T23:59:59Z',   // ISO 8601, must carry Z or ±HH:MM
+     *   'copy_receivers' => [],  // signer IDs CC'd on completion
+     * ]
+     * ```
+     *
+     * A collect request uses the same options and adds page fields:
+     * ```php
+     * [
+     *   'method' => 'collect',
+     *   'signers' => [
+     *     ['id' => 'signer-id', 'verification_method' => 'Email', 'notification_methods' => ['Email']],
+     *   ],
      *   'entries' => [
      *     [
-     *       'page_id' => '1a0439be3231e685cee68093a12',
+     *       'page_id' => 'page-id',
      *       'fields'  => [
      *         [
-     *           'signer_id'        => '19e6b92e7895332ed9708535d8c',
-     *           'field_id'         => '102d25a48bec03ebcf3b5f651998',
+     *           'signer_id'        => 'signer-id',
+     *           'field_id'         => 'field-id',
      *           'display_settings' => [
      *             'left' => 120.0, 'top' => 400.0, 'width' => 180.0, 'height' => 32.0,
      *             'fontSize' => 12.0, 'fontFamily' => 'Helvetica',
@@ -74,42 +86,94 @@ class AssignmentResource extends AbstractResource
      *       ],
      *     ],
      *   ],
-     *   'message'        => 'Please sign this contract',
-     *   'expires_at'     => '2026-12-31T23:59:59Z',   // ISO 8601, must carry Z or ±HH:MM
-     *   'copy_receivers' => ['103033c9cd9426bbbb78eccd2c79'],  // signer IDs CC'd on completion
      * ]
      * ```
      *
-     * Response (unwrapped `data`):
-     * ```
+     * Example response for the virtual request (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'id'           => '103033c9d2cec233bf65eea04999',
-     *   'sender_email' => 'sender@example.com',
-     *   'method'       => 'virtual',
-     *   'expires_at'   => null,
-     *   'message'      => 'Please sign this contract',
-     *   'signers'      => [
-     *     [
-     *       'id' => '19e6b92e7895332ed9708535d8c', 'full_name' => 'Jane Doe',
-     *       'email' => 'jane@example.com', 'whatsapp_phone_number' => null,
-     *       'has_accepted_terms' => false, 'completed' => false, 'notified' => true,
-     *       'verification_method' => 'Email', 'notification_methods' => ['Email'],
-     *       'step' => 1, 'notification_history' => [],
+     *     'resource' => 'assignment',
+     *     'id' => 'assignment-id',
+     *     'sender_email' => 'person@example.com',
+     *     'method' => 'virtual',
+     *     'expires_at' => '2026-12-31T23:59:59Z',
+     *     'message' => 'Please sign this contract',
+     *     'signers' => [
+     *         [
+     *             'id' => 'signer-id',
+     *             'full_name' => 'Example Signer',
+     *             'email' => 'person@example.com',
+     *             'whatsapp_phone_number' => null,
+     *             'government_id' => null,
+     *             'has_accepted_terms' => false,
+     *             'completed' => false,
+     *             'notification_history' => [
+     *                 [
+     *                     'event' => 'signature_request',
+     *                     'status' => 'sent',
+     *                     'error_code' => null,
+     *                     'error_message' => null,
+     *                     'sent_at' => '2026-09-01T12:00:00Z',
+     *                     'failed_at' => null,
+     *                 ],
+     *             ],
+     *             'verification_method' => 'Email',
+     *             'notification_methods' => ['Email'],
+     *             'step' => 1,
+     *             'notified' => true,
+     *         ],
      *     ],
-     *   ],
-     *   'copy_receivers' => [],
-     *   'items'          => [
-     *     [
-     *       'id' => '103033c9d33326458deb74fc3052', 'page' => null, 'value' => null,
-     *       'completed' => false, 'display_settings' => [],
-     *       'signer' => ['id' => '19e6…', 'full_name' => 'Jane Doe', 'email' => 'jane@example.com'],
-     *       'field'  => ['id' => '102d…', 'name' => 'Virtual', 'type' => 'virtual'],
+     *     'copy_receivers' => [],
+     *     'items' => [
+     *         [
+     *             'id' => 'assignment-item-id',
+     *             'page' => null,
+     *             'signer' => [
+     *                 'id' => 'signer-id',
+     *                 'full_name' => 'Example Signer',
+     *                 'email' => 'person@example.com',
+     *                 'whatsapp_phone_number' => null,
+     *                 'government_id' => null,
+     *                 'has_accepted_terms' => false,
+     *             ],
+     *             'field' => [
+     *                 'id' => 'field-id',
+     *                 'name' => 'Virtual',
+     *                 'type' => 'virtual',
+     *                 'regex' => null,
+     *                 'is_pre_defined' => true,
+     *                 'is_active' => true,
+     *                 'is_required' => false,
+     *                 'is_standard' => false,
+     *                 'is_read_only' => false,
+     *                 'is_visible' => true,
+     *             ],
+     *             'display_settings' => [],
+     *             'value' => null,
+     *             'completed' => false,
+     *         ],
      *     ],
-     *   ],
-     *   'summary'      => [],
-     *   'signing_urls' => [
-     *     ['signer_id' => '19e6b92e7895332ed9708535d8c', 'url' => 'https://app…/sign/…'],
-     *   ],
+     *     'summary' => [
+     *         'signer_count' => 1,
+     *         'completed_count' => 0,
+     *         'signers' => [
+     *             [
+     *                 'id' => 'signer-id',
+     *                 'full_name' => 'Example Signer',
+     *                 'email' => 'person@example.com',
+     *                 'whatsapp_phone_number' => null,
+     *                 'government_id' => null,
+     *                 'has_accepted_terms' => false,
+     *                 'completed' => false,
+     *             ],
+     *         ],
+     *     ],
+     *     'signing_urls' => [
+     *         [
+     *             'signer_id' => 'signer-id',
+     *             'url' => 'https://app-sandbox.assinafy.com.br/sign/signing-token?email=signer%40example.com',
+     *         ],
+     *     ],
      * ]
      * ```
      *
@@ -172,34 +236,107 @@ class AssignmentResource extends AbstractResource
      * it from {@see \Assinafy\SDK\Configuration}. Note the camelCase spelling — `account-id`
      * and `account_id` are both rejected.
      *
-     * Response (full envelope + `pagination` lifted from the `X-Pagination-*` headers):
+     * Example query (no request body):
+     * ```php
+     * ['page' => 1, 'per-page' => 20, 'accountId' => 'account-id']
      * ```
+     *
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'status'  => 200,
-     *   'message' => '',
-     *   'data'    => [
-     *     [
-     *       'id'           => '103033c9d2cec233bf65eea04999',
-     *       'sender_email' => 'sender@example.com',
-     *       'method'       => 'virtual',
-     *       'expires_at'   => null,
-     *       'message'      => 'Please sign this contract',
-     *       'signers'      => [
+     *     'status' => 200,
+     *     'message' => '',
+     *     'data' => [
      *         [
-     *           'id' => '19e6b92e7895332ed9708535d8c', 'full_name' => 'Jane Doe',
-     *           'email' => 'jane@example.com', 'whatsapp_phone_number' => null,
-     *           'has_accepted_terms' => false, 'completed' => false,
-     *           'verification_method' => 'Email', 'notification_methods' => ['Email'],
-     *           'step' => 1, 'notified' => true, 'notification_history' => [],
+     *             'id' => 'assignment-id',
+     *             'sender_email' => 'person@example.com',
+     *             'method' => 'virtual',
+     *             'expires_at' => null,
+     *             'message' => null,
+     *             'signers' => [
+     *                 [
+     *                     'id' => 'signer-id',
+     *                     'full_name' => 'Example Signer',
+     *                     'email' => 'person@example.com',
+     *                     'whatsapp_phone_number' => null,
+     *                     'government_id' => null,
+     *                     'has_accepted_terms' => false,
+     *                     'completed' => false,
+     *                     'notification_history' => [
+     *                         [
+     *                             'event' => 'signature_request',
+     *                             'status' => 'sent',
+     *                             'error_code' => null,
+     *                             'error_message' => null,
+     *                             'sent_at' => '2026-09-01T12:00:00Z',
+     *                             'failed_at' => null,
+     *                         ],
+     *                     ],
+     *                     'verification_method' => 'Email',
+     *                     'notification_methods' => ['Email'],
+     *                     'step' => 1,
+     *                     'notified' => true,
+     *                 ],
+     *             ],
+     *             'copy_receivers' => [],
+     *             'items' => [
+     *                 [
+     *                     'id' => 'assignment-item-id',
+     *                     'page' => null,
+     *                     'signer' => [
+     *                         'id' => 'signer-id',
+     *                         'full_name' => 'Example Signer',
+     *                         'email' => 'person@example.com',
+     *                         'whatsapp_phone_number' => null,
+     *                         'government_id' => null,
+     *                         'has_accepted_terms' => false,
+     *                     ],
+     *                     'field' => [
+     *                         'id' => 'field-id',
+     *                         'name' => 'Virtual',
+     *                         'type' => 'virtual',
+     *                         'regex' => null,
+     *                         'is_pre_defined' => true,
+     *                         'is_active' => true,
+     *                         'is_required' => false,
+     *                         'is_standard' => false,
+     *                         'is_read_only' => false,
+     *                         'is_visible' => true,
+     *                     ],
+     *                     'display_settings' => [],
+     *                     'value' => null,
+     *                     'completed' => false,
+     *                 ],
+     *             ],
+     *             'summary' => [
+     *                 'signer_count' => 1,
+     *                 'completed_count' => 0,
+     *                 'signers' => [
+     *                     [
+     *                         'id' => 'signer-id',
+     *                         'full_name' => 'Example Signer',
+     *                         'email' => 'person@example.com',
+     *                         'whatsapp_phone_number' => null,
+     *                         'government_id' => null,
+     *                         'has_accepted_terms' => false,
+     *                         'completed' => false,
+     *                     ],
+     *                 ],
+     *             ],
+     *             'signing_urls' => [
+     *                 [
+     *                     'signer_id' => 'signer-id',
+     *                     'url' => 'https://app-sandbox.assinafy.com.br/sign/signing-token?email=signer%40example.com',
+     *                 ],
+     *             ],
      *         ],
-     *       ],
-     *       'copy_receivers' => [],
-     *       'items'          => [],
-     *       'summary'        => [],
-     *       'signing_urls'   => [['signer_id' => '19e6…', 'url' => 'https://app…/sign/…?email=…']],
      *     ],
-     *   ],
-     *   'pagination' => ['current_page' => 1, 'page_count' => 3, 'per_page' => 20, 'total_count' => 47],
+     *     'pagination' => [
+     *         'current_page' => 1,
+     *         'page_count' => 1,
+     *         'per_page' => 20,
+     *         'total_count' => 1,
+     *     ],
      * ]
      * ```
      *
@@ -230,23 +367,32 @@ class AssignmentResource extends AbstractResource
      * ]);
      * ```
      *
+     * Request body for that call:
+     * ```php
+     * [
+     *     'method' => 'virtual',
+     *     'signers' => [['verification_method' => 'Email', 'notification_methods' => ['Email']]],
+     * ]
+     * ```
+     * For `collect`, supply field placements in `entries` as documented by {@see self::create()}.
+     *
      * The document must not have started signing yet; otherwise the API answers
      * `400 "A atribuição não pode ser criada para um documento com status '…'"`.
      *
-     * Response (unwrapped `data`):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'documents'                => 1,
-     *   'credits'                  => 0,
-     *   'needs_extra_document'     => false,
-     *   'extra_document_cost'      => 0,
-     *   'total_credits'            => 0,
-     *   'breakdown'                => [],
-     *   'document_balance'         => 100,
-     *   'credit_balance'           => 0,
-     *   'has_sufficient_resources' => true,
-     *   'blocking_reason'          => null,
-     *   'message'                  => null,
+     *     'documents' => 1,
+     *     'credits' => 0,
+     *     'needs_extra_document' => false,
+     *     'extra_document_cost' => 0,
+     *     'total_credits' => 0,
+     *     'breakdown' => [],
+     *     'document_balance' => 67,
+     *     'credit_balance' => 0,
+     *     'has_sufficient_resources' => true,
+     *     'blocking_reason' => null,
+     *     'message' => null,
      * ]
      * ```
      *
@@ -296,22 +442,12 @@ class AssignmentResource extends AbstractResource
      *
      * Request: no body; everything is addressed through the path.
      *
-     * Response (unwrapped `data` — the refreshed signer entry, in the same shape the
-     * assignment's `signers` array uses, with the delivery recorded in
-     * `notification_history`):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'id'                    => '19e6b92e7895332ed9708535d8c',
-     *   'full_name'             => 'Jane Doe',
-     *   'email'                 => 'jane@example.com',
-     *   'whatsapp_phone_number' => null,
-     *   'has_accepted_terms'    => false,
-     *   'completed'             => false,
-     *   'notified'              => true,
-     *   'verification_method'   => 'Email',
-     *   'notification_methods'  => ['Email'],
-     *   'step'                  => 1,
-     *   'notification_history'  => [ … one entry per delivery attempt … ],
+     *     'is_sent' => true,
+     *     'document_id' => 'document-id',
+     *     'signer_id' => 'signer-id',
      * ]
      * ```
      *
@@ -336,30 +472,24 @@ class AssignmentResource extends AbstractResource
      * `POST /documents/{document_id}/assignments/{assignment_id}/signers/{signer_id}/estimate-resend-cost`
      *
      * Read-only — nothing is sent to the signer and no credits are spent. Check
-     * `has_sufficient_resources` before calling {@see self::resend()}.
+     * `has_sufficient_credits` before calling {@see self::resend()}.
      *
      * Request: no body; everything is addressed through the path.
      *
-     * Response (unwrapped `data`) — the same estimate shape as {@see self::estimateCost()}:
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'documents'                => 0,
-     *   'credits'                  => 1,
-     *   'needs_extra_document'     => false,
-     *   'extra_document_cost'      => 0,
-     *   'total_credits'            => 1,
-     *   'breakdown'                => [],
-     *   'document_balance'         => 100,
-     *   'credit_balance'           => 25,
-     *   'has_sufficient_resources' => true,
-     *   'blocking_reason'          => null,
-     *   'message'                  => null,
+     *     'total' => 0,
+     *     'breakdown' => [
+     *         ['code' => 'NotificationEmailResend', 'name' => 'Email Notification Resend', 'cost' => 0],
+     *     ],
+     *     'credit_balance' => 0,
+     *     'has_sufficient_credits' => true,
      * ]
      * ```
      *
-     * When the workspace cannot afford it, `has_sufficient_resources` is false and
-     * `blocking_reason` carries a machine-readable code (e.g. `'InsufficientDocuments'`)
-     * alongside a localised `message`.
+     * The live-verified resend response uses `total` and `has_sufficient_credits`;
+     * the published `CostEstimate` schema describes assignment creation instead.
      *
      * @return array<string, mixed>
      * @throws ValidationException when any identifier is empty
@@ -389,14 +519,91 @@ class AssignmentResource extends AbstractResource
      * ['expires_at' => '2026-12-31T23:59:59Z']  // ISO 8601; a Z or ±HH:MM offset is mandatory
      * ```
      *
-     * Response (unwrapped `data` — the assignment with its new deadline):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'id'         => '103033c9d2cec233bf65eea04999',
-     *   'method'     => 'virtual',
-     *   'expires_at' => '2026-12-31T23:59:59Z',
-     *   'message'    => 'Please sign this contract',
-     *   'signers'    => [ … ],
+     *     'resource' => 'assignment',
+     *     'id' => 'assignment-id',
+     *     'sender_email' => 'person@example.com',
+     *     'method' => 'virtual',
+     *     'expires_at' => '2026-12-31T23:59:59Z',
+     *     'message' => null,
+     *     'signers' => [
+     *         [
+     *             'id' => 'signer-id',
+     *             'full_name' => 'Example Signer',
+     *             'email' => 'person@example.com',
+     *             'whatsapp_phone_number' => null,
+     *             'government_id' => null,
+     *             'has_accepted_terms' => false,
+     *             'completed' => false,
+     *             'notification_history' => [
+     *                 [
+     *                     'event' => 'signature_request',
+     *                     'status' => 'sent',
+     *                     'error_code' => null,
+     *                     'error_message' => null,
+     *                     'sent_at' => '2026-09-01T12:00:00Z',
+     *                     'failed_at' => null,
+     *                 ],
+     *             ],
+     *             'verification_method' => 'Email',
+     *             'notification_methods' => ['Email'],
+     *             'step' => 1,
+     *             'notified' => true,
+     *         ],
+     *     ],
+     *     'copy_receivers' => [],
+     *     'items' => [
+     *         [
+     *             'id' => 'assignment-item-id',
+     *             'page' => null,
+     *             'signer' => [
+     *                 'id' => 'signer-id',
+     *                 'full_name' => 'Example Signer',
+     *                 'email' => 'person@example.com',
+     *                 'whatsapp_phone_number' => null,
+     *                 'government_id' => null,
+     *                 'has_accepted_terms' => false,
+     *             ],
+     *             'field' => [
+     *                 'id' => 'field-id',
+     *                 'name' => 'Virtual',
+     *                 'type' => 'virtual',
+     *                 'regex' => null,
+     *                 'is_pre_defined' => true,
+     *                 'is_active' => true,
+     *                 'is_required' => false,
+     *                 'is_standard' => false,
+     *                 'is_read_only' => false,
+     *                 'is_visible' => true,
+     *             ],
+     *             'display_settings' => [],
+     *             'value' => null,
+     *             'completed' => false,
+     *         ],
+     *     ],
+     *     'summary' => [
+     *         'signer_count' => 1,
+     *         'completed_count' => 0,
+     *         'signers' => [
+     *             [
+     *                 'id' => 'signer-id',
+     *                 'full_name' => 'Example Signer',
+     *                 'email' => 'person@example.com',
+     *                 'whatsapp_phone_number' => null,
+     *                 'government_id' => null,
+     *                 'has_accepted_terms' => false,
+     *                 'completed' => false,
+     *             ],
+     *         ],
+     *     ],
+     *     'signing_urls' => [
+     *         [
+     *             'signer_id' => 'signer-id',
+     *             'url' => 'https://app-sandbox.assinafy.com.br/sign/signing-token?email=signer%40example.com',
+     *         ],
+     *     ],
      * ]
      * ```
      *
@@ -427,11 +634,23 @@ class AssignmentResource extends AbstractResource
      *
      * Request: no parameters.
      *
-     * Response (unwrapped `data`) — a list with one entry per message sent, each carrying the
-     * delivery state plus the rendered `header`, `body`, and `buttons` as the signer sees
-     * them. WhatsApp availability is plan-dependent: on a workspace without it, creating such
-     * an assignment is refused with `403 "A notificação via WhatsApp não está disponível para
-     * o seu plano atual."`, so this list stays empty.
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
+     * [
+     *     [
+     *         'sent_at' => 1710000000,
+     *         'header' => 'Documento para assinatura: Contrato de Servico',
+     *         'body' => 'example',
+     *         'buttons' => [
+     *             [
+     *                 'text' => 'Abrir documento',
+     *             ],
+     *         ],
+     *         'phone_number' => '+5511999990001',
+     *         'signer_id' => 'signer-id',
+     *     ],
+     * ]
+     * ```
      *
      * @return array<int, array<string, mixed>> empty when nothing was sent over WhatsApp
      * @throws ValidationException when any identifier is empty

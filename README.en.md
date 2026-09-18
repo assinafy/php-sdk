@@ -104,7 +104,7 @@ $client = new AssinafyClient($configuration, logger: $logger);
 ```
 
 The bundled transport enforces `User-Agent: Assinafy-PHP-SDK/v{SDK_VERSION}` on every request—for
-example, version 2.1.3 sends `Assinafy-PHP-SDK/v2.1.3`. This applies to authenticated, public,
+example, version 2.1.4 sends `Assinafy-PHP-SDK/v2.1.4`. This applies to authenticated, public,
 signer, JSON, multipart-upload, raw-body, and binary-download requests.
 `Configuration::SDK_VERSION` is the single source for the header version.
 Applications that replace the bundled `HttpClientInterface` transport must send the same exact
@@ -138,6 +138,11 @@ $bearerClient = AssinafyClient::forBearer(
     baseUrl: Configuration::DEFAULT_BASE_URL,
 );
 ```
+
+For marketplace connections, follow the [OAuth guide](docs/OAUTH.md): PKCE, consent, scopes,
+per-workspace storage, token rotation, and revocation. Token, refresh, revocation, userinfo and
+discovery calls use the public HTTP transport. There is no `oauth()` resource or automatic renewal;
+the application owns authorization callbacks and token persistence.
 
 API keys, Bearer tokens, and signer access codes are separate credentials. A public client sends
 neither `X-Api-Key` nor `Authorization`; calling an account-scoped resource on it fails locally.
@@ -288,7 +293,7 @@ $resendEstimate = $client->assignments()->estimateResendCost(
     $signerId,
 );
 
-if ($resendEstimate['has_sufficient_resources'] ?? false) {
+if ($resendEstimate['has_sufficient_credits'] ?? false) {
     $client->assignments()->resend($documentId, $assignmentId, $signerId);
 }
 ```
@@ -319,8 +324,8 @@ $signerIds = $result['signer_ids'];
 ```
 
 The helper validates all signer descriptions before upload. Remote objects created before a later
-API failure are not automatically rolled back; record the returned or logged IDs and apply your
-application's cleanup policy.
+API failure are not automatically rolled back. Use the separate calls when you need to persist
+each ID and control recovery; SDK logs do not contain response IDs.
 
 ### 6. Complete the signer flow
 
@@ -349,7 +354,6 @@ $public->signerSession()->verifyCode(
     (string) getenv('ASSINAFY_VERIFICATION_CODE'),
 );
 
-$current = $public->signerSession()->currentDocument($accessCode);
 ```
 
 For a virtual assignment, confirm the signer data and finalize with an empty field list:
@@ -360,6 +364,8 @@ $public->signerSession()->confirmData($documentId, $accessCode, [
     'email' => 'signer@example.test',
     'has_accepted_terms' => true,
 ]);
+
+$current = $public->signerSession()->currentDocument($accessCode);
 
 $public->signerSession()->sign(
     documentId: $documentId,
@@ -497,11 +503,16 @@ Template uploads use the same PDF validation and asynchronous processing as docu
 > `estimateCostFromTemplate` all work on an API-created template.
 
 ```php
-$template = $client->templates()->create('/absolute/path/to/template.pdf');
-$template = $client->templates()->waitUntilReady($template['id']);
-$template = $client->templates()->get($template['id']);
-
-$roleId = $template['roles'][0]['id'];
+$templateId = (string) getenv('ASSINAFY_TEMPLATE_ID');
+$template = $client->templates()->get($templateId);
+$signingRoles = array_values(array_filter(
+    $template['roles'],
+    static fn (array $role): bool => $role['assignment_type'] !== 'Editor',
+));
+if ($signingRoles === []) {
+    throw new RuntimeException('Configure a signing role in the Assinafy template editor');
+}
+$roleId = $signingRoles[0]['id'];
 
 $estimate = $client->documents()->estimateCostFromTemplate($template['id'], [[
     'role_id' => $roleId,
@@ -526,6 +537,9 @@ $document = $client->documents()->createFromTemplate(
 ```
 
 Template management also provides list, get, update, delete, and rendered-page download methods.
+
+This example assumes one signing role and no required editor fields. For other templates, provide
+one signer binding per required role and include every required editor-field value.
 
 ## Receive webhooks
 
@@ -635,26 +649,17 @@ or signature data.
 
 ## Sandbox and production differences
 
-The sandbox does not serve every production route. These three answer normally on
-`api.assinafy.com.br` but return `404 {"name":"Not Found","message":"Página não encontrada."}`
-on `sandbox.assinafy.com.br`:
+Account/user statistics and notification preferences are available in the sandbox. Features such
+as WhatsApp notification and digital-certificate signing still depend on the account plan and
+server deployment. A 403 can indicate a plan restriction; inspect the response message before
+changing the request.
 
-| SDK method | Endpoint |
-| --- | --- |
-| `accounts()->stats()` | `GET /accounts/{account_id}/stats` |
-| `users()->stats()` | `GET /users/self/stats` |
-| `users()->notificationPreferences()` and `updateNotificationPreferences()` | `GET`/`PUT /users/self/notification-preferences` |
+Production publishes marketplace OAuth endpoints that may be absent from sandbox. Use the
+[OAuth integration guide](docs/OAUTH.md) and the discovery metadata for the intended environment.
+A workspace API key cannot replace OAuth application credentials or a signer's access code.
 
-A 404 from the sandbox is therefore not evidence that a route is gone. To tell a missing route
-from a missing resource, read the error body rather than the status: a framework routing miss
-carries a `name` key (`{"name":"Not Found", …}`), while a real route reporting a missing resource
-returns the API envelope instead (`{"status":404,"data":null,"message":"Documento não
-encontrado."}`).
-
-The same distinction works without credentials, because routing resolves before authentication:
-an unauthenticated request to a route that exists answers
-`401 {"status":401,"data":null,"message":"Credenciais inválidas."}`, and one to a route that does
-not exist answers the framework 404 above.
+A framework routing 404 (`name: Not Found`) is different from a resource-not-found API envelope.
+Keep supported resource methods when an environment has not deployed a route yet.
 
 ## Testing
 
@@ -674,7 +679,7 @@ composer audit:dependencies
 composer validate --strict --no-check-lock
 ```
 
-Live tests are opt-in and reject the production API URL. Enter secrets without placing them in
+Live tests are opt-in and reject the production API URL unless explicitly overridden. Enter secrets without placing them in
 shell history:
 
 ```bash
@@ -686,12 +691,12 @@ export ASSINAFY_INTEGRATION=1
 vendor/bin/phpunit --testsuite=integration
 ```
 
-That run covers the full document and assignment lifecycle — upload, estimate, assign, resend,
+That run covers document preparation and assignment management — upload, estimate, assign, resend,
 reset expiration, progress, download, templates, tags, fields, webhooks, and accounts — with no
 further switches. Recipients are unique addresses in the reserved `example.com` domain, so the
-API accepts them and no mail is delivered.
+API accepts them without delivering to a real inbox. It does not prove email delivery or signature completion.
 
-Only tests that must *read* a delivered message need real, operator-controlled inboxes:
+To send notifications to operator-controlled inboxes instead of reserved recipients:
 
 ```bash
 export ASSINAFY_NOTIFICATION_TESTS=1
@@ -723,8 +728,8 @@ inbox access, or provider token.
 
 GitLab CI is the canonical pipeline. The mirrored GitHub Actions pipeline runs the supported PHP
 matrix, dependency ranges, unit tests, static analysis, formatting checks, coverage, dependency
-security checks, and production-dependency smoke tests. Sandbox integration runs only through a
-manual workflow with explicit secrets and safety switches.
+security checks, and production-dependency smoke tests. GitHub does not run sandbox tests. Live integration is an explicit local command or an optional
+protected GitLab job.
 
 ## Upgrading and license
 

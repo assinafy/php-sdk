@@ -14,6 +14,7 @@ use Psr\Log\LoggerInterface;
  */
 final class MutableLogger extends AbstractLogger
 {
+    /** Store the application logger; construction does not emit a log message. */
     public function __construct(private LoggerInterface $logger)
     {
     }

@@ -515,7 +515,10 @@ final class LiveApiTest extends TestCase
             $assignmentId,
             $signer['id']
         );
-        $this->assertIsArray($resendEstimate);
+        $this->assertArrayHasKey('total', $resendEstimate);
+        $this->assertIsArray($resendEstimate['breakdown']);
+        $this->assertArrayHasKey('credit_balance', $resendEstimate);
+        $this->assertTrue($resendEstimate['has_sufficient_credits']);
 
         // 4. Resend to the controlled recipient.
         $resend = $this->client->assignments()->resend($doc['id'], $assignmentId, $signer['id']);
@@ -544,10 +547,57 @@ final class LiveApiTest extends TestCase
         $this->assertFalse($this->client->documents()->isFullySigned($doc['id']));
     }
 
+    public function testCollectAssignmentWithSignaturePlacement(): void
+    {
+        $document = $this->client->documents()->upload($this->makePdfFixture());
+        $this->createdDocuments[] = $document['id'];
+        $document = $this->client->documents()->waitUntilReady($document['id']);
+        $signer = $this->controlledSigner($this->reservedEmail('sdk-collect'), 'SDK collect');
+        $signatureFields = array_values(array_filter(
+            $this->client->fields()->list(false, true),
+            static fn (array $field): bool => $field['type'] === 'signature'
+        ));
+        $this->assertNotEmpty($signatureFields);
+        $entries = [[
+            'page_id' => $document['pages'][0]['id'],
+            'fields' => [[
+                'signer_id' => $signer['id'],
+                'field_id' => $signatureFields[0]['id'],
+                'display_settings' => ['left' => 10, 'top' => 10, 'width' => 240, 'height' => 60, 'fontSize' => 18],
+            ]],
+        ]];
+        $estimate = $this->client->assignments()->estimateCost(
+            $document['id'],
+            [$signer['id']],
+            AssignmentResource::METHOD_COLLECT,
+            ['entries' => $entries]
+        );
+        $this->assertTrue($estimate['has_sufficient_resources']);
+        $assignment = $this->client->assignments()->create(
+            $document['id'],
+            [$signer['id']],
+            AssignmentResource::METHOD_COLLECT,
+            ['entries' => $entries]
+        );
+        $this->assertSame('collect', $assignment['method']);
+        $this->assertSame($signer['id'], $assignment['items'][0]['signer']['id']);
+        $this->assertSame($signatureFields[0]['id'], $assignment['items'][0]['field']['id']);
+        $this->assertFalse($assignment['items'][0]['completed']);
+    }
+
+    public function testApiKeyMetadataCanBeReadWithoutRotation(): void
+    {
+        $key = $this->client->auth()->getApiKey();
+        $this->assertArrayHasKey('api_key', $key);
+        $this->assertIsString($key['api_key']);
+    }
+
     /** Exercises the high-level workflow and sends assignment/access-token emails. */
     public function testNotificationFlowForAssignedSigners(): void
     {
-        [$email, $alternateEmail] = $this->notificationEmails();
+        [$email, $alternateEmail] = getenv('ASSINAFY_NOTIFICATION_TESTS') === '1'
+            ? $this->notificationEmails()
+            : [$this->reservedEmail('sdk-workflow'), $this->reservedEmail('sdk-workflow-alt')];
         $emails = [$email];
         if (strcasecmp($alternateEmail, $email) !== 0) {
             $emails[] = $alternateEmail;
@@ -1071,6 +1121,39 @@ final class LiveApiTest extends TestCase
 
             $logoDeletion = $disposable->accounts()->deleteLogo();
             $this->assertIsArray($logoDeletion);
+
+            $webhooks = $disposable->webhooks();
+            $initialSubscription = $webhooks->get();
+            $this->assertEmpty($initialSubscription['url'] ?? null);
+            $target = 'https://sdk-integration.invalid/webhooks/' . uniqid();
+            $subscription = $webhooks->register(
+                $target,
+                $this->reservedEmail('sdk-webhooks'),
+                [WebhookResource::EVENT_SIGNER_CREATED]
+            );
+            $this->assertSame($target, $subscription['url']);
+            $this->assertTrue($webhooks->get()['is_active']);
+            $this->assertFalse($webhooks->deactivate()['is_active']);
+            $this->assertTrue($webhooks->activate()['is_active']);
+
+            $signer = $disposable->signers()->create('SDK webhook signer', $this->reservedEmail('sdk-webhook'));
+            try {
+                $deadline = time() + 30;
+                do {
+                    $dispatches = $webhooks->dispatches(['event' => WebhookResource::EVENT_SIGNER_CREATED]);
+                    if (($dispatches['data'] ?? []) !== []) {
+                        break;
+                    }
+                    sleep(2);
+                } while (time() < $deadline);
+                $this->assertNotEmpty($dispatches['data']);
+                $dispatch = $dispatches['data'][0];
+                $retry = $webhooks->retryDispatch((string) $dispatch['id']);
+                $this->assertNotEmpty($retry);
+            } finally {
+                $webhooks->deactivate();
+                $disposable->signers()->delete($signer['id']);
+            }
 
             $deletion = $disposable->accounts()->delete();
             $this->assertIsArray($deletion);

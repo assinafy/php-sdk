@@ -24,11 +24,11 @@ final class AuthResourceTest extends TestCase
     public function testLogin(): void
     {
         $this->http->queueJson(200, ['access_token' => 'tok', 'user' => ['id' => 'u1']]);
-        $result = $this->auth->login('a@b.com', 'secret');
+        $result = $this->auth->login('a@example.com', 'secret');
 
         $call = $this->http->lastCall();
         $this->assertSame('login', $call['uri']);
-        $this->assertSame(['email' => 'a@b.com', 'password' => 'secret'], $call['body']);
+        $this->assertSame(['email' => 'a@example.com', 'password' => 'secret'], $call['body']);
         $this->assertSame('tok', $result['access_token']);
     }
 
@@ -105,13 +105,13 @@ final class AuthResourceTest extends TestCase
     public function testChangePassword(): void
     {
         $this->http->queueJson(200, []);
-        $this->auth->changePassword('TOKEN', 'a@b.com', 'old', 'new');
+        $this->auth->changePassword('TOKEN', 'a@example.com', 'old', 'new');
 
         $call = $this->http->lastCall();
         $this->assertSame('PUT', $call['method']);
         $this->assertSame('authentication/change-password', $call['uri']);
         $this->assertSame([
-            'email' => 'a@b.com',
+            'email' => 'a@example.com',
             'password' => 'old',
             'new_password' => 'new',
         ], $call['body']);
@@ -132,22 +132,22 @@ final class AuthResourceTest extends TestCase
         $this->auth->deleteApiKey();
         $this->assertSame([], $this->http->lastCall()['headers']);
 
-        $this->http->queueJson(200, ['email' => 'a@b.com']);
-        $this->auth->changePassword(null, 'a@b.com', 'old', 'new');
+        $this->http->queueJson(200, ['email' => 'a@example.com']);
+        $this->auth->changePassword(null, 'a@example.com', 'old', 'new');
         $this->assertSame([], $this->http->lastCall()['headers']);
     }
 
     public function testRequestAndResetPassword(): void
     {
         $this->http->queueJson(200, []);
-        $this->auth->requestPasswordReset('a@b.com');
+        $this->auth->requestPasswordReset('a@example.com');
         $this->assertSame('authentication/request-password-reset', $this->http->lastCall()['uri']);
 
         $this->http->queueJson(200, []);
-        $this->auth->resetPassword('a@b.com', 'token', 'newpw');
+        $this->auth->resetPassword('a@example.com', 'token', 'newpw');
         $this->assertSame('authentication/reset-password', $this->http->lastCall()['uri']);
         $this->assertSame(
-            ['email' => 'a@b.com', 'token' => 'token', 'new_password' => 'newpw'],
+            ['email' => 'a@example.com', 'token' => 'token', 'new_password' => 'newpw'],
             $this->http->lastCall()['body']
         );
     }

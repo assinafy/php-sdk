@@ -30,9 +30,15 @@ class GuzzleHttpClient implements HttpClientInterface
     public function __construct(
         #[\SensitiveParameter] Configuration $config,
         ?LoggerInterface $logger = null,
-        ?ClientInterface $client = null
+        #[\SensitiveParameter] ?ClientInterface $client = null
     ) {
         if ($client instanceof Client) {
+            if ($client->getConfig('auth') !== null && $client->getConfig('auth') !== false) {
+                throw new \InvalidArgumentException(
+                    'Injected Guzzle clients cannot define default HTTP authentication'
+                );
+            }
+
             $headers = $client->getConfig('headers');
             if (
                 is_array($headers)
@@ -368,7 +374,7 @@ class GuzzleHttpClient implements HttpClientInterface
                 throw ApiException::fromResponse(
                     $statusCode,
                     is_array($data) ? $data : ['message' => 'HTTP request failed'],
-                    self::sanitizedPrevious($e),
+                    self::sanitizedPrevious($e::class, (int) $e->getCode()),
                     $response->getHeaders()
                 );
             }
@@ -380,7 +386,7 @@ class GuzzleHttpClient implements HttpClientInterface
             throw new NetworkException(
                 'Network error while calling the Assinafy API',
                 0,
-                self::sanitizedPrevious($e)
+                self::sanitizedPrevious($e::class, (int) $e->getCode())
             );
         }
     }
@@ -390,11 +396,11 @@ class GuzzleHttpClient implements HttpClientInterface
      * RequestException stores the complete URI, including signer credentials, so
      * attaching it directly can leak secrets through exception-chain logging.
      */
-    private static function sanitizedPrevious(\Throwable $exception): \RuntimeException
+    private static function sanitizedPrevious(string $exceptionType, int $code): \RuntimeException
     {
         return new \RuntimeException(
-            'Underlying HTTP transport error (' . get_debug_type($exception) . ')',
-            (int) $exception->getCode()
+            'Underlying HTTP transport error (' . $exceptionType . ')',
+            $code
         );
     }
 
@@ -487,6 +493,8 @@ class GuzzleHttpClient implements HttpClientInterface
         if (
             in_array($route, [
                 'POST login',
+                'POST oauth/token',
+                'POST oauth/revoke',
                 'POST authentication/social-login',
                 'PUT authentication/request-password-reset',
                 'PUT authentication/reset-password',

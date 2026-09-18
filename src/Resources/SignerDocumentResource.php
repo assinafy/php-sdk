@@ -30,20 +30,130 @@ class SignerDocumentResource extends AbstractResource
      *
      * Request (query string): `signer-access-code`.
      *
-     * Response (unwrapped `data`):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'resource'    => 'document',
-     *   'id'          => '1042a416aaa85fcf325679fecb97',
-     *   'account_id'  => '64f000000000000000000001',
-     *   'name'        => 'contract.pdf',
-     *   'status'      => 'pending_signature',
-     *   'artifacts'   => ['original' => 'https://…', 'thumbnail' => 'https://…'],
-     *   'is_closed'   => false,
-     *   'signing_url' => 'https://app…/sign/1042a416aaa85fcf325679fecb97',
-     *   'tags'        => [],
-     *   'created_at'  => '2026-08-27T14:24:43Z',
-     *   'updated_at'  => '2026-08-27T14:24:46Z',
+     *     'resource' => 'document',
+     *     'id' => 'document-id',
+     *     'account_id' => 'account-id',
+     *     'template_id' => null,
+     *     'name' => 'agreement.pdf',
+     *     'status' => 'pending_signature',
+     *     'artifacts' => [
+     *         'original' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/download/original',
+     *         'thumbnail' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/thumbnail',
+     *     ],
+     *     'is_closed' => false,
+     *     'signing_url' => 'https://app-sandbox.assinafy.com.br/sign/signing-token',
+     *     'decline_reason' => null,
+     *     'declined_by' => null,
+     *     'tags' => [],
+     *     'created_at' => '2026-09-01T12:00:00Z',
+     *     'updated_at' => '2026-09-01T12:00:00Z',
+     *     'assignment' => [
+     *         'id' => 'assignment-id',
+     *         'sender_email' => 'person@example.com',
+     *         'method' => 'collect',
+     *         'expires_at' => null,
+     *         'message' => null,
+     *         'signers' => [
+     *             [
+     *                 'id' => 'signer-id',
+     *                 'full_name' => 'Example Signer',
+     *                 'email' => 'person@example.com',
+     *                 'whatsapp_phone_number' => null,
+     *                 'government_id' => null,
+     *                 'has_accepted_terms' => false,
+     *                 'completed' => false,
+     *                 'notification_history' => [
+     *                     [
+     *                         'event' => 'signature_request',
+     *                         'status' => 'sent',
+     *                         'error_code' => null,
+     *                         'error_message' => null,
+     *                         'sent_at' => '2026-09-01T12:00:00Z',
+     *                         'failed_at' => null,
+     *                     ],
+     *                 ],
+     *                 'verification_method' => 'Email',
+     *                 'notification_methods' => ['Email'],
+     *                 'step' => 1,
+     *                 'notified' => true,
+     *             ],
+     *         ],
+     *         'copy_receivers' => [],
+     *         'items' => [
+     *             [
+     *                 'id' => 'assignment-item-id',
+     *                 'page' => [
+     *                     'id' => 'page-id',
+     *                     'number' => 1,
+     *                     'height' => 1651,
+     *                     'width' => 1275,
+     *                     'download_url' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/pages/page-id/download',
+     *                 ],
+     *                 'signer' => [
+     *                     'id' => 'signer-id',
+     *                     'full_name' => 'Example Signer',
+     *                     'email' => 'person@example.com',
+     *                     'whatsapp_phone_number' => null,
+     *                     'government_id' => null,
+     *                     'has_accepted_terms' => false,
+     *                 ],
+     *                 'field' => [
+     *                     'id' => 'field-id',
+     *                     'name' => 'Assinatura',
+     *                     'type' => 'signature',
+     *                     'regex' => null,
+     *                     'is_pre_defined' => true,
+     *                     'is_active' => true,
+     *                     'is_required' => true,
+     *                     'is_standard' => true,
+     *                     'is_read_only' => false,
+     *                     'is_visible' => true,
+     *                 ],
+     *                 'display_settings' => [
+     *                     'top' => 10,
+     *                     'left' => 10,
+     *                     'width' => 240,
+     *                     'height' => 60,
+     *                     'fontSize' => 18,
+     *                 ],
+     *                 'value' => null,
+     *                 'completed' => false,
+     *             ],
+     *         ],
+     *         'summary' => [
+     *             'signer_count' => 1,
+     *             'completed_count' => 0,
+     *             'signers' => [
+     *                 [
+     *                     'id' => 'signer-id',
+     *                     'full_name' => 'Example Signer',
+     *                     'email' => 'person@example.com',
+     *                     'whatsapp_phone_number' => null,
+     *                     'government_id' => null,
+     *                     'has_accepted_terms' => false,
+     *                     'completed' => false,
+     *                 ],
+     *             ],
+     *         ],
+     *         'signing_urls' => [
+     *             [
+     *                 'signer_id' => 'signer-id',
+     *                 'url' => 'https://app-sandbox.assinafy.com.br/sign/signing-token?email=signer%40example.com',
+     *             ],
+     *         ],
+     *     ],
+     *     'pages' => [
+     *         [
+     *             'id' => 'page-id',
+     *             'number' => 1,
+     *             'height' => 1651,
+     *             'width' => 1275,
+     *             'download_url' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/pages/page-id/download',
+     *         ],
+     *     ],
      * ]
      * ```
      *
@@ -72,28 +182,52 @@ class SignerDocumentResource extends AbstractResource
      *
      * Request (query string): `page`, `per-page`, `signer-access-code`.
      *
-     * Response (full envelope — pagination lifted from the `X-Pagination-*` headers):
+     * Example query (no request body):
+     * ```php
+     * ['page' => 1, 'per-page' => 20, 'signer-access-code' => '<access-code>']
      * ```
+     *
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'status'  => 200,
-     *   'message' => '',
-     *   'data'    => [
-     *     [
-     *       'resource'    => 'document',
-     *       'id'          => '1042a416aaa85fcf325679fecb97',
-     *       'account_id'  => '64f000000000000000000001',
-     *       'name'        => 'contract.pdf',
-     *       'status'      => 'pending_signature',
-     *       'artifacts'   => ['original' => 'https://…'],
-     *       'is_closed'   => false,
-     *       'signing_url' => 'https://app…/sign/1042a416aaa85fcf325679fecb97',
-     *       'tags'        => [],
-     *       'pages'       => [['id' => '1a04…', 'number' => 1, 'width' => 1275, 'height' => 1651]],
-     *       'created_at'  => '2026-08-27T14:24:43Z',
-     *       'updated_at'  => '2026-08-27T14:24:46Z',
+     *     'status' => 200,
+     *     'message' => '',
+     *     'data' => [
+     *         [
+     *             'id' => 'document-id',
+     *             'account_id' => 'account-id',
+     *             'template_id' => null,
+     *             'name' => 'agreement.pdf',
+     *             'status' => 'metadata_ready',
+     *             'artifacts' => [
+     *                 'original' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/download/original',
+     *                 'thumbnail' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/thumbnail',
+     *             ],
+     *             'is_closed' => false,
+     *             'signing_url' => 'https://app-sandbox.assinafy.com.br/sign/signing-token',
+     *             'decline_reason' => null,
+     *             'declined_by' => null,
+     *             'tags' => [],
+     *             'created_at' => '2026-09-01T12:00:00Z',
+     *             'updated_at' => '2026-09-01T12:00:00Z',
+     *             'assignment' => null,
+     *             'pages' => [
+     *                 [
+     *                     'id' => 'page-id',
+     *                     'number' => 1,
+     *                     'height' => 1651,
+     *                     'width' => 1275,
+     *                     'download_url' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/pages/page-id/download',
+     *                 ],
+     *             ],
+     *         ],
      *     ],
-     *   ],
-     *   'pagination' => ['current_page' => 1, 'page_count' => 2, 'per_page' => 20, 'total_count' => 23],
+     *     'pagination' => [
+     *         'current_page' => 1,
+     *         'page_count' => 1,
+     *         'per_page' => 20,
+     *         'total_count' => 1,
+     *     ],
      * ]
      * ```
      *
@@ -133,26 +267,47 @@ class SignerDocumentResource extends AbstractResource
      *
      * Request (query string): `search`, `signer-access-code`.
      *
-     * Response (unwrapped `data`):
+     * Example query (no request body):
+     * ```php
+     * ['search' => 'agreement', 'signer-access-code' => '<access-code>']
      * ```
+     *
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   [
-     *     'resource'    => 'document',
-     *     'id'          => '1042a416aaa85fcf325679fecb97',
-     *     'account_id'  => '64f000000000000000000001',
-     *     'template_id' => null,
-     *     'name'        => 'contract.pdf',
-     *     'status'      => 'metadata_ready',
-     *     'artifacts'   => ['original' => 'https://…'],
-     *     'is_closed'   => false,
-     *     'signing_url' => 'https://app…/sign/1042a416aaa85fcf325679fecb97',
-     *     'decline_reason' => null,
-     *     'declined_by'    => null,
-     *     'tags'           => [],
-     *     'pages'          => [['id' => '1a04…', 'number' => 1, 'width' => 1275, 'height' => 1651]],
-     *     'created_at'     => '2026-08-27T14:24:43Z',
-     *     'updated_at'     => '2026-08-27T14:24:46Z',
-     *   ],
+     *     [
+     *         'resource' => 'document',
+     *         'id' => 'document-id',
+     *         'account_id' => 'account-id',
+     *         'template_id' => null,
+     *         'name' => 'document.pdf',
+     *         'status' => 'metadata_ready',
+     *         'artifacts' => [
+     *             'original' => 'https://api.assinafy.com.br/v1/documents/doc1/download/original',
+     *         ],
+     *         'is_closed' => false,
+     *         'signing_url' => 'https://api.assinafy.com.br/v1/sign/document-id',
+     *         'decline_reason' => null,
+     *         'declined_by' => null,
+     *         'tags' => [
+     *             [
+     *                 'id' => 'document-id',
+     *                 'name' => 'Example',
+     *             ],
+     *         ],
+     *         'assignment' => null,
+     *         'pages' => [
+     *             [
+     *                 'id' => 'document-page-id',
+     *                 'number' => 1,
+     *                 'height' => 2100,
+     *                 'width' => 1275,
+     *                 'download_url' => 'https://api.assinafy.com.br/v1/documents/document-id/pages/1a/download',
+     *             ],
+     *         ],
+     *         'created_at' => '2026-06-03T03:54:16Z',
+     *         'updated_at' => '2026-06-03T03:54:16Z',
+     *     ],
      * ]
      * ```
      *
@@ -185,12 +340,13 @@ class SignerDocumentResource extends AbstractResource
      * Request:
      * ```
      * PUT /signers/documents/sign-multiple?signer-access-code=<access code>
-     * ['document_ids' => ['1042a416aaa85fcf325679fecb97', '1042866b7927874d7979d2861191']]
+     * ['document_ids' => ['first-document-id', 'second-document-id']]
      * ```
      *
-     * Response (unwrapped `data`) — a list reporting the outcome for each requested document.
-     * A document that cannot be signed does not necessarily fail the whole call, so inspect
-     * the returned entries rather than assuming a `200` signed everything.
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
+     * []
+     * ```
      *
      * @param array<int, string> $documentIds documents to sign; re-indexed so a filtered
      *     PHP array still encodes as a JSON list
@@ -224,14 +380,15 @@ class SignerDocumentResource extends AbstractResource
      * ```
      * PUT /signers/documents/decline-multiple?signer-access-code=<access code>
      * [
-     *   'document_ids'   => ['1042a416aaa85fcf325679fecb97'],
+     *   'document_ids'   => ['document-id'],
      *   'decline_reason' => 'The payment terms are wrong',
      * ]
      * ```
      *
-     * Response (unwrapped `data`) — a list reporting the outcome for each requested document,
-     * as with {@see self::signMultiple()}. Inspect the entries rather than assuming a `200`
-     * declined everything.
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
+     * []
+     * ```
      *
      * @param array<int, string> $documentIds documents to decline; re-indexed so a filtered
      *     PHP array still encodes as a JSON list

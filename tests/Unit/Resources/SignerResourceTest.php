@@ -27,17 +27,17 @@ final class SignerResourceTest extends TestCase
         $this->http->queueJson(201, [
             'id' => 's1',
             'full_name' => 'Alice',
-            'email' => 'a@b.com',
+            'email' => 'a@example.com',
             'whatsapp_phone_number' => '+5548999990000',
         ]);
 
-        $result = $this->signers->create('Alice', 'a@b.com', '+5548999990000');
+        $result = $this->signers->create('Alice', 'a@example.com', '+5548999990000');
 
         $call = $this->http->lastCall();
         $this->assertSame('POST', $call['method']);
         $this->assertSame('accounts/acc/signers', $call['uri']);
         $this->assertSame(
-            ['full_name' => 'Alice', 'email' => 'a@b.com', 'whatsapp_phone_number' => '+5548999990000'],
+            ['full_name' => 'Alice', 'email' => 'a@example.com', 'whatsapp_phone_number' => '+5548999990000'],
             $call['body']
         );
         $this->assertArrayNotHasKey('cpf', $call['body']);
@@ -137,18 +137,18 @@ final class SignerResourceTest extends TestCase
     public function testFindByEmailReturnsExactMatch(): void
     {
         $this->http->queueJson(200, [
-            ['id' => 's1', 'email' => 'OTHER@b.com'],
-            ['id' => 's2', 'email' => 'Wanted@B.com'],
+            ['id' => 's1', 'email' => 'OTHER@example.com'],
+            ['id' => 's2', 'email' => 'Wanted@example.com'],
         ]);
 
-        $hit = $this->signers->findByEmail('wanted@b.com');
+        $hit = $this->signers->findByEmail('wanted@example.com');
         $this->assertNotNull($hit);
         $this->assertSame('s2', $hit['id']);
     }
 
     public function testFindByEmailReturnsNullWhenNotFound(): void
     {
-        $this->http->queueJson(200, [['id' => 's1', 'email' => 'other@b.com']]);
-        $this->assertNull($this->signers->findByEmail('missing@b.com'));
+        $this->http->queueJson(200, [['id' => 's1', 'email' => 'other@example.com']]);
+        $this->assertNull($this->signers->findByEmail('missing@example.com'));
     }
 }

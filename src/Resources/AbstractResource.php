@@ -26,6 +26,10 @@ abstract class AbstractResource
     protected Configuration $config;
     protected LoggerInterface $logger;
 
+    /**
+     * Inject transport, immutable-by-interface configuration and an optional PSR-3 logger.
+     * No request is made. Consumers normally obtain resources from AssinafyClient.
+     */
     public function __construct(
         HttpClientInterface $httpClient,
         #[\SensitiveParameter] Configuration $config,
@@ -42,8 +46,8 @@ abstract class AbstractResource
      * JSON endpoints respond with `{ status, message, data }`; binary downloads return
      * raw bytes. Single-item methods
      * (`get`, `create`, `update`, …) call this helper and return just the inner `data`
-     * so callers can work with the resource directly. List endpoints intentionally do
-     * NOT unwrap — see {@see self::withPagination()}.
+     * so callers can work with the resource directly. Unpaginated lists also unwrap.
+     * Paginated lists retain their envelope — see {@see self::withPagination()}.
      *
      * Deliberately returns a bare `array`: `data` is a string-keyed object on single-item
      * endpoints and a list on collection ones, so each caller narrows it via its own

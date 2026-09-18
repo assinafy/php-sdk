@@ -136,6 +136,20 @@ final class GuzzleHttpClientTest extends TestCase
         $this->assertSame('key', $this->lastRequest()->getHeaderLine('X-Api-Key'));
     }
 
+    public function testOAuthTokenRequestsDoNotInheritWorkspaceCredentials(): void
+    {
+        $client = $this->client([
+            new GuzzleResponse(200, [], '{"access_token":"fixture-token","token_type":"Bearer"}'),
+            new GuzzleResponse(200, [], '{}'),
+        ]);
+
+        foreach (['oauth/token', 'oauth/revoke'] as $route) {
+            $client->postRaw($route, 'client_id=fixture-client', 'application/x-www-form-urlencoded');
+            $this->assertFalse($this->lastRequest()->hasHeader('X-Api-Key'));
+            $this->assertFalse($this->lastRequest()->hasHeader('Authorization'));
+        }
+    }
+
     public function testOwnerEstimateAndSignerSignWithSimilarPathsUseCorrectCredentials(): void
     {
         $client = $this->client([
@@ -277,6 +291,46 @@ final class GuzzleHttpClientTest extends TestCase
         $this->expectExceptionMessage('base URI must match');
 
         new GuzzleHttpClient(new Configuration('key', 'acc'), null, $guzzle);
+    }
+
+    public function testInjectedGuzzleClientCannotDefineDefaultHttpAuthentication(): void
+    {
+        $guzzle = new Client([
+            'base_uri' => 'https://api.example.com/v1/',
+            'auth' => ['user', 'fixture-password'],
+        ]);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('default HTTP authentication');
+
+        new GuzzleHttpClient(new Configuration('key', 'acc', 'https://api.example.com/v1'), null, $guzzle);
+    }
+
+    public function testSanitizedExceptionTracesDoNotRetainTransportExceptions(): void
+    {
+        $previousSetting = ini_set('zend.exception_ignore_args', '0');
+        try {
+            $failures = [
+                new GuzzleResponse(401, [], '{"message":"Invalid credentials"}'),
+                new ConnectException('Connection failed', new Request('GET', 'https://api.example.com/v1/signers/self')),
+            ];
+            foreach ($failures as $failure) {
+                try {
+                    $this->client([$failure])->get('signers/self', ['signer-access-code' => 'fixture-secret']);
+                    $this->fail('Expected a transport failure');
+                } catch (ApiException | NetworkException $exception) {
+                    $previous = $exception->getPrevious();
+                    $this->assertNotNull($previous);
+                    foreach ($previous->getTrace() as $frame) {
+                        foreach ($frame['args'] ?? [] as $argument) {
+                            $this->assertNotInstanceOf(\GuzzleHttp\Exception\GuzzleException::class, $argument);
+                        }
+                    }
+                }
+            }
+        } finally {
+            ini_set('zend.exception_ignore_args', (string) $previousSetting);
+        }
     }
 
     public function testInjectedGuzzleClientAcceptsEquivalentBaseUriCasing(): void

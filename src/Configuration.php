@@ -8,7 +8,7 @@ use Assinafy\SDK\Http\LogRedactor;
 
 class Configuration
 {
-    public const SDK_VERSION = '2.1.3';
+    public const SDK_VERSION = '2.1.4';
     public const DEFAULT_BASE_URL = 'https://api.assinafy.com.br/v1';
     public const SANDBOX_BASE_URL = 'https://sandbox.assinafy.com.br/v1';
 
@@ -26,6 +26,16 @@ class Configuration
     private int $timeout;
     private int $connectTimeout;
 
+    /**
+     * Validate and store connection settings without making a request.
+     *
+     * Supply a non-empty API key and account ID, or use forBearer()/forPublic().
+     * Remote URLs require HTTPS; timeout values are positive seconds. Configuration
+     * owns authentication and User-Agent headers. Example input:
+     * `new Configuration($apiKey, $accountId, self::SANDBOX_BASE_URL, 30, 10)`.
+     *
+     * @throws \InvalidArgumentException on invalid or conflicting configuration
+     */
     public function __construct(
         #[\SensitiveParameter] string $apiKey,
         string $accountId,

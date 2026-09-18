@@ -3,7 +3,7 @@
 These examples target the Assinafy v1 sandbox. Keep production and sandbox credentials separate, load secrets from environment variables or a secret manager, and use disposable sandbox entities for operations that create, update, sign, or delete data.
 
 The complete endpoint and response mapping is in [API_REFERENCE.md](API_REFERENCE.md).
-These examples target the `v2.1.3` release, installable with
+Published releases are installable with
 `composer require assinafy/php-sdk`. See [INSTALLATION.md](INSTALLATION.md) for version
 constraints and development setup.
 
@@ -122,6 +122,8 @@ when the timeout expires. Webhook processing can emit `ready`, which is exposed 
 ## Estimate assignment cost
 
 Signer IDs are optional for cost estimation because cost depends on delivery and verification methods.
+Use a prepared document that has no assignment yet. Run this estimate before the assignment-creation
+call in the document workflow.
 
 ```php
 $estimate = $client->assignments()->estimateCost(
@@ -146,10 +148,9 @@ and estimation. Each certificate signer costs two credits in addition to notific
 requires the account's Digital Certificate feature, must have a CPF/CNPJ in `government_id`, and
 must be alone in its signing step. Signer creation has no `government_id` field, so update an
 existing signer first. Formatted CPF/CNPJ input is accepted and normalized to digits by the
-server. The update response omits `government_id`, so its absence there does not indicate failure.
-Sandbox currently rejects certificate assignment creation with `400` (`Invalid method`). Run the
-following only after Assinafy confirms the feature and completion protocol are enabled in the
-target environment:
+server. The update response may omit or mask `government_id`; do not require it to echo the identifier.
+Run the following only when the feature and certificate completion flow are enabled for the
+target account and environment:
 
 ```php
 $certificateSignerId = requiredEnv('ASSINAFY_CERTIFICATE_SIGNER_ID');
@@ -214,8 +215,7 @@ foreach ($matches['data'] ?? [] as $match) {
 
 These methods implement the published contract: account statistics cover the configured
 workspace, and user statistics aggregate every account available to the authenticated user.
-These published routes are not currently available in sandbox. The following is the usage for a
-deployment where Assinafy has enabled them:
+Both statistics routes are available in sandbox and production:
 
 ```php
 use Assinafy\SDK\Resources\AccountResource;
@@ -233,7 +233,7 @@ $userMonthly = $client->users()->stats(UserResource::GRANULARITY_MONTHLY);
 
 Daily granularity requires a `YYYY-MM` month. `users()->get()` and `users()->stats()` also accept
 an optional Bearer token when used during authentication bootstrap. Keep production handling for
-API errors even after the statistics routes become available in your target environment.
+API errors and account permissions in the target environment.
 
 ## Download document artifacts
 
@@ -299,9 +299,19 @@ if (isset($template['pages'][0]['id'])) {
 ```
 
 Use `documents()->createFromTemplate()` only after roles and field placements have been configured in Assinafy. Bind each signer to a real `role_id` returned by the selected template rather than hard-coding an ID.
+The following example uses a configured template with one signing role and no required editor
+fields. Other templates need a signer binding for each required role and all required editor values.
 
 ```php
-$roleId = $template['roles'][0]['id'];
+$template = $client->templates()->get(requiredEnv('ASSINAFY_TEST_TEMPLATE_ID'));
+$signingRoles = array_values(array_filter(
+    $template['roles'],
+    static fn (array $role): bool => $role['assignment_type'] !== 'Editor',
+));
+if ($signingRoles === []) {
+    throw new RuntimeException('Configure signing roles in the Assinafy web app first');
+}
+$roleId = $signingRoles[0]['id'];
 
 $created = $client->documents()->createFromTemplate(
     templateId: $template['id'],
@@ -324,10 +334,8 @@ Use a public client before an API key exists:
 $publicClient = AssinafyClient::forAuth(Configuration::SANDBOX_BASE_URL);
 ```
 
-`socialLoginUrl()` and `socialLoginCallbackUrl()` remain as compatibility helpers, but both GET
-routes are outside the current OpenAPI document. Their upstream sandbox and production
-configurations do not currently produce usable redirects. They are not an operational OAuth
-integration and are intentionally omitted from executable examples.
+For marketplace connections, use the [OAuth guide](OAUTH.md). The legacy `socialLoginUrl()` and
+`socialLoginCallbackUrl()` URL builders are separate from authorization-code/PKCE integration.
 
 For password login, load both values from secret input and never commit them:
 
@@ -361,14 +369,12 @@ $maskedApiKey = $bearerClient->auth()->getApiKey();
 `{user: AuthUser, accounts: AuthAccount[]}` form, so `$authenticatedUser` is always the user
 object. Continue using `accounts()->list()` for account discovery.
 
-## Notification preferences (published; not deployed in sandbox)
+## Notification preferences
 
 The authenticated user's nine owner-facing document email preferences default to `true` and are
 always returned as a complete map. A non-empty update may contain any subset; omitted values stay
 unchanged. Account and security email such as welcome messages, password resets, invitations, and
-account deletion cannot be disabled here. These methods are in the current production OpenAPI but
-are not currently available in sandbox. The following is the published usage and response shape,
-not a runnable sandbox example:
+account deletion cannot be disabled here. Both methods are available in sandbox and production:
 
 ```php
 $preferences = $bearerClient->users()->notificationPreferences();
@@ -528,7 +534,8 @@ $client->documents()->appendTags($documentId, [$tag['name']]);
 $documentTags = $client->documents()->listTags($documentId);
 ```
 
-Document-tag list/replace/append/detach methods use names and auto-create missing names. Template
+Document-tag replace/append requests use names and auto-create missing names. List returns tag
+objects; detach takes a tag ID. Template
 create/get/update/delete and page download are separate runtime-supported compatibility methods
 outside the published OpenAPI path inventory.
 

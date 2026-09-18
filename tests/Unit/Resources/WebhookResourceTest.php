@@ -23,14 +23,14 @@ final class WebhookResourceTest extends TestCase
         [$http, $webhooks] = $this->build();
         $http->queueJson(200, ['url' => 'https://x', 'events' => WebhookResource::DEFAULT_EVENTS]);
 
-        $webhooks->register('https://x', 'a@b.com');
+        $webhooks->register('https://x', 'a@example.com');
 
         $call = $http->lastCall();
         $this->assertSame('PUT', $call['method']);
         $this->assertSame('accounts/a/webhooks/subscriptions', $call['uri']);
         $this->assertSame(WebhookResource::DEFAULT_EVENTS, $call['body']['events']);
         $this->assertSame('https://x', $call['body']['url']);
-        $this->assertSame('a@b.com', $call['body']['email']);
+        $this->assertSame('a@example.com', $call['body']['email']);
         $this->assertTrue(
             $call['body']['is_active'],
             'is_active is required by the live API even though it is not in the public docs'
@@ -42,7 +42,7 @@ final class WebhookResourceTest extends TestCase
         [$http, $webhooks] = $this->build();
         $http->queueJson(200, []);
 
-        $webhooks->register('https://x', 'a@b.com', [], false);
+        $webhooks->register('https://x', 'a@example.com', [], false);
 
         $this->assertFalse($http->lastCall()['body']['is_active']);
     }
@@ -52,7 +52,7 @@ final class WebhookResourceTest extends TestCase
         [$http, $webhooks] = $this->build();
         $http->queueJson(200, []);
 
-        $webhooks->register('https://x', 'a@b.com', [WebhookResource::EVENT_SIGNER_SIGNED]);
+        $webhooks->register('https://x', 'a@example.com', [WebhookResource::EVENT_SIGNER_SIGNED]);
 
         $this->assertSame(
             [WebhookResource::EVENT_SIGNER_SIGNED],
@@ -65,7 +65,7 @@ final class WebhookResourceTest extends TestCase
         [, $webhooks] = $this->build();
 
         $this->expectException(ValidationException::class);
-        $webhooks->register('https://x', 'a@b.com', ['   ']);
+        $webhooks->register('https://x', 'a@example.com', ['   ']);
     }
 
     public function testRegisterRejectsNonHttpWebhookUrl(): void
@@ -75,7 +75,7 @@ final class WebhookResourceTest extends TestCase
         $this->expectException(ValidationException::class);
         $this->expectExceptionMessage('absolute HTTP or HTTPS URL');
 
-        $webhooks->register('ftp://example.com/hook', 'a@b.com');
+        $webhooks->register('ftp://example.com/hook', 'a@example.com');
     }
 
     public function testRegisterAcceptsAbsoluteHttpUrlWithQuery(): void
@@ -102,7 +102,7 @@ final class WebhookResourceTest extends TestCase
         [$http, $webhooks] = $this->build();
         $http->queueJson(200, [
             'url' => 'https://x',
-            'email' => 'a@b.com',
+            'email' => 'a@example.com',
             'events' => [WebhookResource::EVENT_DOCUMENT_READY],
             'is_active' => false,
         ]);
@@ -120,7 +120,7 @@ final class WebhookResourceTest extends TestCase
         [$http, $webhooks] = $this->build();
         $http->queueJson(200, [
             'url' => 'https://x',
-            'email' => 'a@b.com',
+            'email' => 'a@example.com',
             'events' => WebhookResource::DEFAULT_EVENTS,
             'is_active' => false,
         ]);

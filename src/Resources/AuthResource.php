@@ -35,20 +35,30 @@ class AuthResource extends AbstractResource
      * ['email' => 'user@example.com', 'password' => 's3cret']
      * ```
      *
-     * Response (unwrapped `data`):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'access_token' => 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9…',
-     *   'user'     => [
-     *     'id' => 'bgjazeo5r9v2lq7l36dx48np', 'name' => 'Jane Doe',
-     *     'email' => 'user@example.com', 'telephone' => null, 'government_id' => '',
-     *     'is_email_verified' => true, 'has_accepted_terms' => true,
-     *     'created_at' => '2026-05-12T18:05:11Z', 'to_be_deleted_at' => null,
-     *   ],
-     *   'accounts' => [
-     *     ['id' => '64f000000000000000000001', 'name' => 'Acme Inc.', 'roles' => ['owner'],
-     *      'is_delete_allowed' => true, 'created_at' => '2026-05-12T18:05:11Z'],
-     *   ],
+     *     'access_token' => '<access-token>',
+     *     'user' => [
+     *         'id' => 'auth-user-id',
+     *         'name' => 'John Smith',
+     *         'email' => 'person@example.com',
+     *         'telephone' => null,
+     *         'government_id' => null,
+     *         'is_email_verified' => false,
+     *         'has_accepted_terms' => true,
+     *         'created_at' => '2023-03-03T11:51:34Z',
+     *         'to_be_deleted_at' => null,
+     *     ],
+     *     'accounts' => [
+     *         [
+     *             'id' => 'auth-account-id',
+     *             'name' => 'JS',
+     *             'roles' => ['owner'],
+     *             'is_delete_allowed' => true,
+     *             'created_at' => '2023-03-03T11:51:34Z',
+     *         ],
+     *     ],
      * ]
      * ```
      *
@@ -86,12 +96,30 @@ class AuthResource extends AbstractResource
      * ['provider' => 'google', 'token' => '<google id token>', 'has_accepted_terms' => true]
      * ```
      *
-     * Response (unwrapped `data`) — identical in shape to {@see self::login()}:
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'access_token' => 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9…',
-     *   'user'         => ['id' => 'bgjaz…', 'name' => 'Jane Doe', 'email' => 'user@example.com', …],
-     *   'accounts'     => [['id' => '64f0…', 'name' => 'Acme Inc.', 'roles' => ['owner'], …]],
+     *     'access_token' => '<access-token>',
+     *     'user' => [
+     *         'id' => 'auth-user-id',
+     *         'name' => 'John Smith',
+     *         'email' => 'person@example.com',
+     *         'telephone' => null,
+     *         'government_id' => null,
+     *         'is_email_verified' => false,
+     *         'has_accepted_terms' => true,
+     *         'created_at' => '2023-03-03T11:51:34Z',
+     *         'to_be_deleted_at' => null,
+     *     ],
+     *     'accounts' => [
+     *         [
+     *             'id' => 'auth-account-id',
+     *             'name' => 'JS',
+     *             'roles' => ['owner'],
+     *             'is_delete_allowed' => true,
+     *             'created_at' => '2023-03-03T11:51:34Z',
+     *         ],
+     *     ],
      * ]
      * ```
      *
@@ -129,9 +157,12 @@ class AuthResource extends AbstractResource
      * ['provider' => 'google', 'token' => '<google id token>']
      * ```
      *
-     * Response (unwrapped `data`; empty on success):
-     * ```
-     * []
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
+     * [
+     *     'status' => 200,
+     *     'message' => '',
+     * ]
      * ```
      *
      * @return array<string, mixed>
@@ -168,9 +199,9 @@ class AuthResource extends AbstractResource
      * https://api.assinafy.com.br/v1/auth/authenticate?authclient=google
      * ```
      *
-     * This legacy runtime route is not part of the current OpenAPI contract, and
-     * `GET /auth/authenticate` answers 404 when called directly as an API endpoint — it is
-     * meaningful only as a browser navigation target.
+     * This legacy social-login route is outside OpenAPI. The production route returns
+     * a redirect; this builder does not complete provider authentication. Marketplace
+     * OAuth uses the separate authorization server and PKCE flow in docs/OAUTH.md.
      *
      * @return string absolute URL
      * @throws ValidationException on an unsupported provider
@@ -222,9 +253,11 @@ class AuthResource extends AbstractResource
      * ['password' => 's3cret']
      * ```
      *
-     * Response (unwrapped `data`):
-     * ```
-     * ['api_key' => 'mIpe_zdJfKUpMK9Va3XuYgzPXMxz49fIaRCWXseVkpVAX608A9j3i_D67qU5qW3M']
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
+     * [
+     *     'api_key' => '<api-key>',
+     * ]
      * ```
      *
      * @param string|null $accessToken Bearer token, or null to use the configured credential
@@ -255,9 +288,11 @@ class AuthResource extends AbstractResource
      *
      * Request: no parameters.
      *
-     * Response (unwrapped `data`) — all but the final four characters replaced by `*`:
-     * ```
-     * ['api_key' => '************************************************************qW3M']
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
+     * [
+     *     'api_key' => '<masked-api-key>',
+     * ]
      * ```
      *
      * @return array<string, mixed> `{ api_key }` — masked
@@ -282,9 +317,13 @@ class AuthResource extends AbstractResource
      *
      * Request: no body.
      *
-     * Response (full envelope; no `data` payload):
-     * ```
-     * ['status' => 200, 'message' => '']
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
+     * [
+     *     'status' => 200,
+     *     'message' => '',
+     *     'data' => [],
+     * ]
      * ```
      *
      * @return array<array-key, mixed> the raw envelope
@@ -314,9 +353,11 @@ class AuthResource extends AbstractResource
      * ]
      * ```
      *
-     * Response (unwrapped `data`):
-     * ```
-     * ['email' => 'user@example.com']
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
+     * [
+     *     'email' => 'person@example.com',
+     * ]
      * ```
      *
      * @return array<string, mixed> `{ email }`
@@ -354,9 +395,11 @@ class AuthResource extends AbstractResource
      * ['email' => 'user@example.com']
      * ```
      *
-     * Response (unwrapped `data`):
-     * ```
-     * ['email' => 'user@example.com']
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
+     * [
+     *     'email' => 'person@example.com',
+     * ]
      * ```
      *
      * Answers 200 whether or not the address belongs to a user, so it cannot be used to
@@ -392,9 +435,11 @@ class AuthResource extends AbstractResource
      * ]
      * ```
      *
-     * Response (unwrapped `data`):
-     * ```
-     * ['email' => 'user@example.com']
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
+     * [
+     *     'email' => 'person@example.com',
+     * ]
      * ```
      *
      * @return array<string, mixed> `{ email }`

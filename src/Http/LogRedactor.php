@@ -34,6 +34,8 @@ final class LogRedactor
         'accesscode',
         'idtoken',
         'clientsecret',
+        'code',
+        'codeverifier',
         'webhooksecret',
         'secret',
     ];

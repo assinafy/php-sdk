@@ -45,6 +45,13 @@ class AssinafyClient
     private ?WebhookEventParser $webhookEvents = null;
     private ?UserResource $users = null;
 
+    /**
+     * Construct a client without making an HTTP request.
+     *
+     * Uses the supplied configuration, an optional replacement transport and an optional
+     * PSR-3 logger. Omitted dependencies become GuzzleHttpClient and NullLogger.
+     * Obtain typed resources through the accessors; they share this configuration.
+     */
     public function __construct(
         #[\SensitiveParameter] Configuration $config,
         ?HttpClientInterface $httpClient = null,
@@ -56,6 +63,13 @@ class AssinafyClient
         $this->httpClient = $httpClient ?? new GuzzleHttpClient($config, $this->loggerProxy);
     }
 
+    /**
+     * Create a workspace client using an API key; no network request is made.
+     *
+     * Example: `AssinafyClient::create($apiKey, $accountId, Configuration::SANDBOX_BASE_URL)`.
+     * Returns a configured client. Invalid credentials, account IDs or URLs throw
+     * InvalidArgumentException through Configuration validation.
+     */
     public static function create(
         #[\SensitiveParameter] string $apiKey,
         string $accountId,
@@ -65,6 +79,12 @@ class AssinafyClient
     }
 
     /**
+     * Build a client from the keys accepted by Configuration::fromArray(), without HTTP I/O.
+     *
+     * Input example: `['api_key' => '<api-key>', 'account_id' => 'account-id',
+     * 'base_url' => Configuration::SANDBOX_BASE_URL, 'timeout' => 30, 'connect_timeout' => 10]`.
+     * Returns a configured client; the configuration validates types and required values.
+     *
      * @param array<string, mixed> $config
      */
     public static function fromArray(#[\SensitiveParameter] array $config): self
@@ -306,6 +326,149 @@ class AssinafyClient
      * is supplied) are reused. DigitalCertificate entries must instead supply an existing
      * signer ID whose government_id was set first. Returns the created document, the assignment,
      * and the resolved signer IDs.
+     *
+     * SDK input (the helper composes multipart and JSON requests):
+     * ```php
+     * [
+     *     'filePath' => '/absolute/path/agreement.pdf',
+     *     'signers' => [
+     *         [
+     *             'full_name' => 'Example Signer',
+     *             'email' => 'person@example.com',
+     *             'verification_method' => 'Email',
+     *             'notification_methods' => ['Email'],
+     *             'step' => 1,
+     *         ],
+     *     ],
+     *     'message' => null,
+     *     'expiresAt' => null,
+     *     'waitForReady' => true,
+     * ]
+     * ```
+     *
+     * Full return example:
+     * ```php
+     * [
+     *     'document' => [
+     *         'resource' => 'document',
+     *         'id' => 'document-id',
+     *         'account_id' => 'account-id',
+     *         'template_id' => null,
+     *         'name' => 'agreement.pdf',
+     *         'status' => 'metadata_ready',
+     *         'artifacts' => [
+     *             'original' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/download/original',
+     *             'thumbnail' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/thumbnail',
+     *         ],
+     *         'is_closed' => false,
+     *         'signing_url' => 'https://app-sandbox.assinafy.com.br/sign/signing-token',
+     *         'decline_reason' => null,
+     *         'declined_by' => null,
+     *         'tags' => [],
+     *         'created_at' => '2026-09-01T12:00:00Z',
+     *         'updated_at' => '2026-09-01T12:00:00Z',
+     *         'assignment' => null,
+     *         'pages' => [
+     *             [
+     *                 'id' => 'page-id',
+     *                 'number' => 1,
+     *                 'height' => 1651,
+     *                 'width' => 1275,
+     *                 'download_url' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/pages/page-id/download',
+     *             ],
+     *         ],
+     *     ],
+     *     'assignment' => [
+     *         'resource' => 'assignment',
+     *         'id' => 'assignment-id',
+     *         'sender_email' => 'person@example.com',
+     *         'method' => 'virtual',
+     *         'expires_at' => null,
+     *         'message' => null,
+     *         'signers' => [
+     *             [
+     *                 'id' => 'signer-id',
+     *                 'full_name' => 'Example Signer',
+     *                 'email' => 'person@example.com',
+     *                 'whatsapp_phone_number' => null,
+     *                 'government_id' => null,
+     *                 'has_accepted_terms' => false,
+     *                 'completed' => false,
+     *                 'notification_history' => [
+     *                     [
+     *                         'event' => 'signature_request',
+     *                         'status' => 'sent',
+     *                         'error_code' => null,
+     *                         'error_message' => null,
+     *                         'sent_at' => '2026-09-01T12:00:00Z',
+     *                         'failed_at' => null,
+     *                     ],
+     *                 ],
+     *                 'verification_method' => 'Email',
+     *                 'notification_methods' => ['Email'],
+     *                 'step' => 1,
+     *                 'notified' => true,
+     *             ],
+     *         ],
+     *         'copy_receivers' => [],
+     *         'items' => [
+     *             [
+     *                 'id' => 'assignment-item-id',
+     *                 'page' => null,
+     *                 'signer' => [
+     *                     'id' => 'signer-id',
+     *                     'full_name' => 'Example Signer',
+     *                     'email' => 'person@example.com',
+     *                     'whatsapp_phone_number' => null,
+     *                     'government_id' => null,
+     *                     'has_accepted_terms' => false,
+     *                 ],
+     *                 'field' => [
+     *                     'id' => 'field-id',
+     *                     'name' => 'Virtual',
+     *                     'type' => 'virtual',
+     *                     'regex' => null,
+     *                     'is_pre_defined' => true,
+     *                     'is_active' => true,
+     *                     'is_required' => false,
+     *                     'is_standard' => false,
+     *                     'is_read_only' => false,
+     *                     'is_visible' => true,
+     *                 ],
+     *                 'display_settings' => [],
+     *                 'value' => null,
+     *                 'completed' => false,
+     *             ],
+     *         ],
+     *         'summary' => [
+     *             'signer_count' => 1,
+     *             'completed_count' => 0,
+     *             'signers' => [
+     *                 [
+     *                     'id' => 'signer-id',
+     *                     'full_name' => 'Example Signer',
+     *                     'email' => 'person@example.com',
+     *                     'whatsapp_phone_number' => null,
+     *                     'government_id' => null,
+     *                     'has_accepted_terms' => false,
+     *                     'completed' => false,
+     *                 ],
+     *             ],
+     *         ],
+     *         'signing_urls' => [
+     *             [
+     *                 'signer_id' => 'signer-id',
+     *                 'url' => 'https://app-sandbox.assinafy.com.br/sign/signing-token?email=signer%40example.com',
+     *             ],
+     *         ],
+     *     ],
+     *     'signer_ids' => ['signer-id'],
+     * ]
+     * ```
+     *
+     * The returned document is the preparation snapshot, before assignment creation.
+     * Fetch get() for its current signing state. A later failure does not roll back objects
+     * created by earlier steps; use separate calls when each ID must be saved for recovery.
      *
      * @param array<int, string|array<string, mixed>> $signers
      * @return array{document: array<string, mixed>, assignment: array<string, mixed>, signer_ids: array<int, string>}

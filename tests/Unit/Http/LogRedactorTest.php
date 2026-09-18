@@ -66,6 +66,18 @@ final class LogRedactorTest extends TestCase
         $this->assertSame('visible', $redacted['a']['b']['keep']);
     }
 
+    public function testRedactsOAuthCodeAndPkceVerifier(): void
+    {
+        $this->assertSame([
+            'code' => LogRedactor::PLACEHOLDER,
+            'code_verifier' => LogRedactor::PLACEHOLDER,
+        ], LogRedactor::redact(['code' => 'fixture-code', 'code_verifier' => 'fixture-verifier']));
+        $this->assertSame(
+            'https://example.com/callback?code=' . LogRedactor::PLACEHOLDER . '&state=state',
+            LogRedactor::redactText('https://example.com/callback?code=fixture-code&state=state')
+        );
+    }
+
     public function testASecretHoldingAnArrayIsMaskedWholesaleRatherThanWalked(): void
     {
         $redacted = LogRedactor::redact(['token' => ['nested' => 'still-secret']]);

@@ -80,20 +80,26 @@ class DocumentResource extends AbstractResource
      *
      * Request: `multipart/form-data` with the PDF under the field name `file`.
      *
-     * Response (unwrapped `data`):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'id'          => '1042a416aaa85fcf325679fecb97',
-     *   'account_id'  => '64f000000000000000000001',
-     *   'template_id' => null,
-     *   'name'        => 'contract.pdf',
-     *   'status'      => 'uploaded',        // see the STATUS_* constants
-     *   'artifacts'   => ['original' => 'https://…/download/original'],
-     *   'is_closed'   => false,
-     *   'signing_url' => 'https://app…/sign/1042a416aaa85fcf325679fecb97',
-     *   'tags'        => [],
-     *   'created_at'  => '2026-08-27T14:24:43Z',
-     *   'updated_at'  => '2026-08-27T14:24:43Z',
+     *     'resource' => 'document',
+     *     'id' => 'document-id',
+     *     'account_id' => 'account-id',
+     *     'template_id' => null,
+     *     'name' => 'agreement.pdf',
+     *     'status' => 'uploaded',
+     *     'artifacts' => [
+     *         'original' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/download/original',
+     *     ],
+     *     'is_closed' => false,
+     *     'signing_url' => 'https://app-sandbox.assinafy.com.br/sign/signing-token',
+     *     'decline_reason' => null,
+     *     'declined_by' => null,
+     *     'tags' => [],
+     *     'created_at' => '2026-09-01T12:00:00Z',
+     *     'updated_at' => '2026-09-01T12:00:00Z',
+     *     'pages' => [],
      * ]
      * ```
      *
@@ -126,33 +132,36 @@ class DocumentResource extends AbstractResource
      *
      * Request: no parameters.
      *
-     * Response (unwrapped `data`):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'id'          => '1042a416aaa85fcf325679fecb97',
-     *   'account_id'  => '64f000000000000000000001',
-     *   'template_id' => null,
-     *   'name'        => 'contract.pdf',
-     *   'status'      => 'pending_signature',
-     *   'artifacts'   => [
-     *     'original'  => 'https://…/documents/1042…/download/original',
-     *     'thumbnail' => 'https://…/documents/1042…/thumbnail',
-     *   ],
-     *   'is_closed'      => false,
-     *   'signing_url'    => 'https://app…/sign/1042a416aaa85fcf325679fecb97',
-     *   'decline_reason' => null,
-     *   'declined_by'    => null,
-     *   'tags'           => [],
-     *   'created_at'     => '2026-08-27T14:24:43Z',
-     *   'updated_at'     => '2026-08-27T14:24:46Z',
-     *   'assignment'     => ['id' => '1030…', 'method' => 'virtual', 'signers' => [ … ], 'items' => [ … ]],
-     *   'pages'          => [
-     *     [
-     *       'id' => '1a0439be3231e685cee68093a12', 'number' => 1,
-     *       'width' => 1275, 'height' => 1651,
-     *       'download_url' => 'https://…/documents/1042…/pages/1a04…/download',
+     *     'resource' => 'document',
+     *     'id' => 'document-id',
+     *     'account_id' => 'account-id',
+     *     'template_id' => null,
+     *     'name' => 'agreement.pdf',
+     *     'status' => 'metadata_ready',
+     *     'artifacts' => [
+     *         'original' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/download/original',
+     *         'thumbnail' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/thumbnail',
      *     ],
-     *   ],
+     *     'is_closed' => false,
+     *     'signing_url' => 'https://app-sandbox.assinafy.com.br/sign/signing-token',
+     *     'decline_reason' => null,
+     *     'declined_by' => null,
+     *     'tags' => [],
+     *     'created_at' => '2026-09-01T12:00:00Z',
+     *     'updated_at' => '2026-09-01T12:00:00Z',
+     *     'assignment' => null,
+     *     'pages' => [
+     *         [
+     *             'id' => 'page-id',
+     *             'number' => 1,
+     *             'height' => 1651,
+     *             'width' => 1275,
+     *             'download_url' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/pages/page-id/download',
+     *         ],
+     *     ],
      * ]
      * ```
      *
@@ -172,24 +181,52 @@ class DocumentResource extends AbstractResource
      * List documents in the workspace.
      * `GET /accounts/{account_id}/documents`
      *
-     * Response (full envelope — items under `data`, pagination lifted from the
-     * `X-Pagination-*` response headers):
+     * Example query (no request body):
+     * ```php
+     * ['page' => 1, 'per-page' => 20]
      * ```
+     *
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'status'  => 200,
-     *   'message' => '',
-     *   'data'    => [
-     *     [
-     *       'id'         => '1032c5537d351349a9a94ad01cbe',
-     *       'account_id' => '64f000000000000000000001',
-     *       'name'       => 'contract.pdf',
-     *       'status'     => 'pending_signature',   // see the STATUS_* constants
-     *       'artifacts'  => ['original' => 'https://…', 'thumbnail' => 'https://…'],
-     *       'tags'       => [],
-     *       'created_at' => '2026-06-09T17:08:49Z',
+     *     'status' => 200,
+     *     'message' => '',
+     *     'data' => [
+     *         [
+     *             'id' => 'document-id',
+     *             'account_id' => 'account-id',
+     *             'template_id' => null,
+     *             'name' => 'agreement.pdf',
+     *             'status' => 'metadata_ready',
+     *             'artifacts' => [
+     *                 'original' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/download/original',
+     *                 'thumbnail' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/thumbnail',
+     *             ],
+     *             'is_closed' => false,
+     *             'signing_url' => 'https://app-sandbox.assinafy.com.br/sign/signing-token',
+     *             'decline_reason' => null,
+     *             'declined_by' => null,
+     *             'tags' => [],
+     *             'created_at' => '2026-09-01T12:00:00Z',
+     *             'updated_at' => '2026-09-01T12:00:00Z',
+     *             'assignment' => null,
+     *             'pages' => [
+     *                 [
+     *                     'id' => 'page-id',
+     *                     'number' => 1,
+     *                     'height' => 1651,
+     *                     'width' => 1275,
+     *                     'download_url' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/pages/page-id/download',
+     *                 ],
+     *             ],
+     *         ],
      *     ],
-     *   ],
-     *   'pagination' => ['current_page' => 1, 'page_count' => 9, 'per_page' => 2, 'total_count' => 17],
+     *     'pagination' => [
+     *         'current_page' => 1,
+     *         'page_count' => 1,
+     *         'per_page' => 20,
+     *         'total_count' => 1,
+     *     ],
      * ]
      * ```
      *
@@ -215,29 +252,52 @@ class DocumentResource extends AbstractResource
      *
      * Request (query string): `search`, `page`, `per-page`, plus an optional `status` filter.
      *
-     * Response (full envelope — pagination lifted from the `X-Pagination-*` headers):
+     * Example query (no request body):
+     * ```php
+     * ['search' => 'agreement', 'page' => 1, 'per-page' => 20]
      * ```
+     *
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'status'  => 200,
-     *   'message' => '',
-     *   'data'    => [
-     *     [
-     *       'id'          => '1042a416aaa85fcf325679fecb97',
-     *       'account_id'  => '64f000000000000000000001',
-     *       'template_id' => null,
-     *       'name'        => 'contract.pdf',
-     *       'status'      => 'metadata_ready',
-     *       'artifacts'   => ['original' => 'https://…', 'thumbnail' => 'https://…'],
-     *       'is_closed'   => false,
-     *       'signing_url' => 'https://app…/sign/1042a416aaa85fcf325679fecb97',
-     *       'decline_reason' => null,
-     *       'declined_by'    => null,
-     *       'tags'           => [],
-     *       'created_at'     => '2026-08-27T14:24:43Z',
-     *       'updated_at'     => '2026-08-27T14:24:46Z',
+     *     'status' => 200,
+     *     'message' => '',
+     *     'data' => [
+     *         [
+     *             'id' => 'document-id',
+     *             'account_id' => 'account-id',
+     *             'template_id' => null,
+     *             'name' => 'agreement.pdf',
+     *             'status' => 'metadata_ready',
+     *             'artifacts' => [
+     *                 'original' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/download/original',
+     *                 'thumbnail' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/thumbnail',
+     *             ],
+     *             'is_closed' => false,
+     *             'signing_url' => 'https://app-sandbox.assinafy.com.br/sign/signing-token',
+     *             'decline_reason' => null,
+     *             'declined_by' => null,
+     *             'tags' => [],
+     *             'created_at' => '2026-09-01T12:00:00Z',
+     *             'updated_at' => '2026-09-01T12:00:00Z',
+     *             'assignment' => null,
+     *             'pages' => [
+     *                 [
+     *                     'id' => 'page-id',
+     *                     'number' => 1,
+     *                     'height' => 1651,
+     *                     'width' => 1275,
+     *                     'download_url' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/pages/page-id/download',
+     *                 ],
+     *             ],
+     *         ],
      *     ],
-     *   ],
-     *   'pagination' => ['current_page' => 1, 'page_count' => 9, 'per_page' => 2, 'total_count' => 17],
+     *     'pagination' => [
+     *         'current_page' => 1,
+     *         'page_count' => 1,
+     *         'per_page' => 20,
+     *         'total_count' => 1,
+     *     ],
      * ]
      * ```
      *
@@ -272,17 +332,36 @@ class DocumentResource extends AbstractResource
      * ['name' => 'Service agreement.pdf']
      * ```
      *
-     * Response (unwrapped `data` — note `name` reflects the server-side normalisation):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'id'         => '1042a416aaa85fcf325679fecb97',
-     *   'account_id' => '64f000000000000000000001',
-     *   'name'       => 'Service agreement.pdf',
-     *   'status'     => 'metadata_ready',
-     *   'artifacts'  => ['original' => 'https://…', 'thumbnail' => 'https://…'],
-     *   'tags'       => [],
-     *   'created_at' => '2026-08-27T14:24:43Z',
-     *   'updated_at' => '2026-08-27T15:02:11Z',
+     *     'resource' => 'document',
+     *     'id' => 'document-id',
+     *     'account_id' => 'account-id',
+     *     'template_id' => null,
+     *     'name' => 'Service agreement.pdf',
+     *     'status' => 'metadata_ready',
+     *     'artifacts' => [
+     *         'original' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/download/original',
+     *         'thumbnail' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/thumbnail',
+     *     ],
+     *     'is_closed' => false,
+     *     'signing_url' => 'https://app-sandbox.assinafy.com.br/sign/signing-token',
+     *     'decline_reason' => null,
+     *     'declined_by' => null,
+     *     'tags' => [],
+     *     'created_at' => '2026-09-01T12:00:00Z',
+     *     'updated_at' => '2026-09-01T12:00:00Z',
+     *     'assignment' => null,
+     *     'pages' => [
+     *         [
+     *             'id' => 'page-id',
+     *             'number' => 1,
+     *             'height' => 1651,
+     *             'width' => 1275,
+     *             'download_url' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/pages/page-id/download',
+     *         ],
+     *     ],
      * ]
      * ```
      *
@@ -322,9 +401,13 @@ class DocumentResource extends AbstractResource
      *
      * Request: no body.
      *
-     * Response (full envelope; `data` is empty because the resource is gone):
-     * ```
-     * ['status' => 200, 'message' => '', 'data' => []]
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
+     * [
+     *     'status' => 200,
+     *     'message' => '',
+     *     'data' => [],
+     * ]
      * ```
      *
      * @return array<array-key, mixed> the raw envelope
@@ -351,7 +434,7 @@ class DocumentResource extends AbstractResource
      * |------------------------------|--------------------|-------------------------------------------|
      * | `ARTIFACT_ORIGINAL`          | `original`         | The PDF exactly as uploaded               |
      * | `ARTIFACT_CERTIFICATED`      | `certificated`     | Signed PDF with the certificate page      |
-     * | `ARTIFACT_CERTIFICATE_PAGE`  | `certificate-page` | The audit/certificate page on its own     |
+     * | `ARTIFACT_CERTIFICATE_PAGE`  | `certificate-page` | The certificate page on its own     |
      * | `ARTIFACT_PADES`            | `pades`            | PAdES-conformant signed PDF               |
      * | `ARTIFACT_BUNDLE`           | `bundle`           | ZIP of every artifact above               |
      *
@@ -430,7 +513,7 @@ class DocumentResource extends AbstractResource
      * List activity events for a document.
      * `GET /documents/{document_id}/activities`
      *
-     * The audit trail: upload, preparation, each notification, each view, each signature,
+     * The activity history: upload, preparation, each notification, each view, each signature,
      * and certification — **newest first**. This is the record behind the certificate page.
      *
      * `event` uses the same vocabulary as the webhook event types
@@ -439,25 +522,28 @@ class DocumentResource extends AbstractResource
      *
      * Request: no parameters.
      *
-     * Response (unwrapped `data`):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   [
-     *     'id'         => 26166,                        // integer, not an opaque string ID
-     *     'event'      => 'document_metadata_ready',
-     *     'message'    => 'Documento processado.',      // localised, for display only
-     *     'payload'    => [],
-     *     'origin'     => null,
-     *     'created_at' => '2026-08-27T14:24:45Z',
-     *   ],
-     *   [
-     *     'id'         => 26165,
-     *     'event'      => 'document_uploaded',
-     *     'message'    => 'Documento criado.',
-     *     'payload'    => [],
-     *     'origin'     => ['ip' => '203.0.113.10', 'user-agent' => 'Acme/1.0'],
-     *     'created_at' => '2026-08-27T14:24:44Z',
-     *   ],
+     *     [
+     *         'id' => 31451,
+     *         'event' => 'document_metadata_ready',
+     *         'message' => 'Documento processado.',
+     *         'payload' => [],
+     *         'origin' => null,
+     *         'created_at' => '2026-09-01T12:00:00Z',
+     *     ],
+     *     [
+     *         'id' => 31450,
+     *         'event' => 'document_uploaded',
+     *         'message' => 'Documento criado.',
+     *         'payload' => [],
+     *         'origin' => [
+     *             'ip' => '<ip>',
+     *             'user-agent' => 'Assinafy-PHP-SDK/v2.1.4',
+     *         ],
+     *         'created_at' => '2026-09-01T12:00:00Z',
+     *     ],
      * ]
      * ```
      *
@@ -482,20 +568,53 @@ class DocumentResource extends AbstractResource
      *
      * Request: no parameters. Not account-scoped.
      *
-     * Response (unwrapped `data`, verbatim from the API):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   ['code' => 'uploading',           'deletable' => false],
-     *   ['code' => 'uploaded',            'deletable' => false],
-     *   ['code' => 'metadata_processing', 'deletable' => false],
-     *   ['code' => 'metadata_ready',      'deletable' => true],
-     *   ['code' => 'expired',             'deletable' => true],
-     *   ['code' => 'certificating',       'deletable' => false],
-     *   ['code' => 'certificated',        'deletable' => false],
-     *   ['code' => 'rejected_by_signer',  'deletable' => true],
-     *   ['code' => 'pending_signature',   'deletable' => true],
-     *   ['code' => 'rejected_by_user',    'deletable' => true],
-     *   ['code' => 'failed',              'deletable' => true],
+     *     [
+     *         'code' => 'uploading',
+     *         'deletable' => false,
+     *     ],
+     *     [
+     *         'code' => 'uploaded',
+     *         'deletable' => false,
+     *     ],
+     *     [
+     *         'code' => 'metadata_processing',
+     *         'deletable' => false,
+     *     ],
+     *     [
+     *         'code' => 'metadata_ready',
+     *         'deletable' => true,
+     *     ],
+     *     [
+     *         'code' => 'expired',
+     *         'deletable' => true,
+     *     ],
+     *     [
+     *         'code' => 'certificating',
+     *         'deletable' => false,
+     *     ],
+     *     [
+     *         'code' => 'certificated',
+     *         'deletable' => false,
+     *     ],
+     *     [
+     *         'code' => 'rejected_by_signer',
+     *         'deletable' => true,
+     *     ],
+     *     [
+     *         'code' => 'pending_signature',
+     *         'deletable' => true,
+     *     ],
+     *     [
+     *         'code' => 'rejected_by_user',
+     *         'deletable' => true,
+     *     ],
+     *     [
+     *         'code' => 'failed',
+     *         'deletable' => true,
+     *     ],
      * ]
      * ```
      *
@@ -518,26 +637,26 @@ class DocumentResource extends AbstractResource
      *
      * Request: no parameters — the hash is the path segment.
      *
-     * Response (unwrapped `data`):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'hash'            => 'c2f1a0…',
-     *   'id'              => '1042a416aaa85fcf325679fecb97',
-     *   'status'          => 'certificated',
-     *   'page_count'      => 3,
-     *   'signer_count'    => 2,
-     *   'completed_count' => 2,
-     *   'completed_at'    => '2026-08-27T15:11:22Z',
-     *   'verified_at'     => '2026-08-27T22:20:03Z',
-     *   'is_valid'        => true,
-     *   'message'         => '',
+     *     'hash' => 'FE32EDDADE7CBDDCBB934E7402047450B0E59C02',
+     *     'id' => 'document-verification-id',
+     *     'status' => 'certificated',
+     *     'page_count' => '1',
+     *     'signer_count' => '1',
+     *     'completed_count' => 1,
+     *     'completed_at' => '2023-01-27T19:27:44Z',
+     *     'verified_at' => '2023-01-27T19:27:46Z',
+     *     'is_valid' => true,
+     *     'message' => '',
      * ]
      * ```
      *
      * An unknown or unsigned hash answers **200, not 404** — always branch on `is_valid`:
      * ```
      * [
-     *   'hash' => '000000000000000000000000', 'id' => null, 'status' => null,
+     *   'hash' => 'resource-id', 'id' => null, 'status' => null,
      *   'page_count' => null, 'signer_count' => null, 'completed_count' => null,
      *   'completed_at' => null, 'verified_at' => '2026-08-27T22:20:03Z',
      *   'is_valid' => false, 'message' => 'Documento não assinado ou não encontrado.',
@@ -566,14 +685,14 @@ class DocumentResource extends AbstractResource
      *
      * Request: no parameters.
      *
-     * Response (unwrapped `data`):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'resource'   => 'document',
-     *   'id'         => '1042a416aaa85fcf325679fecb97',
-     *   'name'       => 'contract.pdf',
-     *   'page_count' => '1',            // note: the API sends this as a string
-     *   'created_by' => 'Jane Doe',
+     *     'resource' => 'document',
+     *     'id' => 'document-id',
+     *     'name' => 'agreement.pdf',
+     *     'page_count' => '1',
+     *     'created_by' => 'Example Signer',
      * ]
      * ```
      *
@@ -619,10 +738,19 @@ class DocumentResource extends AbstractResource
      * The document must be in `pending_signature`; otherwise the API answers
      * `400 "O documento não está com status de assinatura pendente."`
      *
-     * Response (full envelope; no `data` payload — the token goes to the recipient, never
-     * back over the wire):
-     * ```
-     * ['status' => 200, 'message' => '']
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
+     * [
+     *     'document' => [
+     *         'resource' => 'document',
+     *         'id' => 'document-id',
+     *         'name' => 'agreement.pdf',
+     *         'page_count' => '1',
+     *         'created_by' => 'Example Signer',
+     *     ],
+     *     'channel' => 'email',
+     *     'recipient' => 'jane@example.com',
+     * ]
      * ```
      *
      * @param string $recipient email address to receive the one-time token
@@ -662,16 +790,16 @@ class DocumentResource extends AbstractResource
      *
      * Request: no parameters.
      *
-     * Response (unwrapped `data`; `[]` when nothing is attached):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   [
-     *     'id'         => '103aa221874346e6b3de41688526',
-     *     'name'       => 'contracts',
-     *     'color'      => null,          // 6-char hex without '#', or null
-     *     'created_at' => '2026-07-18T19:03:45Z',
-     *     'updated_at' => '2026-07-18T19:03:45Z',
-     *   ],
+     *     [
+     *         'id' => 'resource-id',
+     *         'name' => 'Example',
+     *         'color' => null,
+     *         'created_at' => '2026-09-01T12:00:00Z',
+     *         'updated_at' => '2026-09-01T12:00:00Z',
+     *     ],
      * ]
      * ```
      *
@@ -694,20 +822,23 @@ class DocumentResource extends AbstractResource
      * (case-insensitive). An empty array detaches all tags — that is the difference from
      * {@see self::appendTags()}, which never removes anything.
      *
-     * Tags are addressed by **name**, not ID, in both directions of this call.
+     * The request addresses tags by **name**; the response contains the resulting tag objects.
      *
      * Request body:
      * ```
-     * ['tags' => ['contracts', 'q3-2026']]   // [] clears every tag
+     * ['tags' => ['contracts']]   // [] clears every tag
      * ```
      *
-     * Response (unwrapped `data` — the document's complete resulting tag set):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   ['id' => '103aa221874346e6b3de41688526', 'name' => 'contracts', 'color' => null,
-     *    'created_at' => '2026-07-18T19:03:45Z', 'updated_at' => '2026-07-18T19:03:45Z'],
-     *   ['id' => '104175c4b3e5e6905c2b509b3f85', 'name' => 'q3-2026', 'color' => null,
-     *    'created_at' => '2026-08-21T17:31:14Z', 'updated_at' => '2026-08-21T17:31:14Z'],
+     *     [
+     *         'id' => 'tag-id',
+     *         'name' => 'contracts',
+     *         'color' => null,
+     *         'created_at' => '2026-09-01T12:00:00Z',
+     *         'updated_at' => '2026-09-01T12:00:00Z',
+     *     ],
      * ]
      * ```
      *
@@ -739,13 +870,16 @@ class DocumentResource extends AbstractResource
      * ['tags' => ['urgent']]
      * ```
      *
-     * Response (unwrapped `data` — the full resulting tag set, not just the added ones):
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   ['id' => '103aa221874346e6b3de41688526', 'name' => 'contracts', 'color' => null,
-     *    'created_at' => '2026-07-18T19:03:45Z', 'updated_at' => '2026-07-18T19:03:45Z'],
-     *   ['id' => '10428699b0c62399df6266326993', 'name' => 'urgent', 'color' => null,
-     *    'created_at' => '2026-08-27T00:40:10Z', 'updated_at' => '2026-08-27T00:40:10Z'],
+     *     [
+     *         'id' => 'tag-id',
+     *         'name' => 'urgent',
+     *         'color' => null,
+     *         'created_at' => '2026-09-01T12:00:00Z',
+     *         'updated_at' => '2026-09-01T12:00:00Z',
+     *     ],
      * ]
      * ```
      *
@@ -778,9 +912,11 @@ class DocumentResource extends AbstractResource
      *
      * Request: no body.
      *
-     * Response (unwrapped `data`; empty on success):
-     * ```
-     * []
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
+     * [
+     *     'detached' => true,
+     * ]
      * ```
      *
      * @return array<string, mixed>
@@ -814,36 +950,53 @@ class DocumentResource extends AbstractResource
      * [
      *   'signers' => [
      *     [
-     *       'role_id'              => '10414160d1669a27520ea6d385cf',  // required
-     *       'id'                   => '19e6b92e7895332ed9708535d8c',   // required
+     *       'role_id'              => 'role-id',  // required
+     *       'id'                   => 'signer-id',   // required
      *       'verification_method'  => 'Email',
      *       'notification_methods' => ['Email'],
      *       'step'                 => 1,
      *     ],
      *   ],
      *   'editor_fields' => [
-     *     ['field_id' => '102d25a48bec03ebcf3b5f651998', 'value' => 'Acme Inc.'],
+     *     ['field_id' => 'field-id', 'value' => 'Acme Inc.'],
      *   ],
-     *   'name'       => 'Acme — service agreement.pdf',
+     *   'name'       => 'agreement.pdf',
      *   'message'    => 'Please sign this contract',
      *   'expires_at' => '2026-12-31T23:59:59Z',
-     *   'tags'       => ['contracts'],
+     *   'tags'       => [],
      * ]
      * ```
      *
-     * Response (unwrapped `data` — the created document, with `template_id` set and the
-     * assignment already attached):
-     * ```
+     * Example response shape (SDK return; relationship expansion depends on document state):
+     * ```php
      * [
-     *   'id'          => '1042a416aaa85fcf325679fecb97',
-     *   'account_id'  => '64f000000000000000000001',
-     *   'template_id' => '10414160b9d1a5ff705effd35c43',
-     *   'name'        => 'Acme — service agreement.pdf',
-     *   'status'      => 'pending_signature',
-     *   'artifacts'   => ['original' => 'https://…', 'thumbnail' => 'https://…'],
-     *   'tags'        => [['id' => '103aa…', 'name' => 'contracts', 'color' => null]],
-     *   'assignment'  => ['id' => '1030…', 'method' => 'virtual', 'signers' => [ … ]],
-     *   'created_at'  => '2026-08-27T14:24:43Z',
+     *     'resource' => 'document',
+     *     'id' => 'document-id',
+     *     'account_id' => 'account-id',
+     *     'template_id' => 'template-id',
+     *     'name' => 'agreement.pdf',
+     *     'status' => 'metadata_ready',
+     *     'artifacts' => [
+     *         'original' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/download/original',
+     *         'thumbnail' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/thumbnail',
+     *     ],
+     *     'is_closed' => false,
+     *     'signing_url' => 'https://app-sandbox.assinafy.com.br/sign/signing-token',
+     *     'decline_reason' => null,
+     *     'declined_by' => null,
+     *     'tags' => [],
+     *     'created_at' => '2026-09-01T12:00:00Z',
+     *     'updated_at' => '2026-09-01T12:00:00Z',
+     *     'assignment' => null,
+     *     'pages' => [
+     *         [
+     *             'id' => 'page-id',
+     *             'number' => 1,
+     *             'height' => 1651,
+     *             'width' => 1275,
+     *             'download_url' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/pages/page-id/download',
+     *         ],
+     *     ],
      * ]
      * ```
      *
@@ -892,29 +1045,28 @@ class DocumentResource extends AbstractResource
      * [
      *   'signers' => [
      *     [
-     *       'role_id'              => '10414160d1669a27520ea6d385cf',  // required
-     *       'verification_method'  => 'Whatsapp',
-     *       'notification_methods' => ['Whatsapp'],
+     *       'role_id'              => 'role-id',  // required
+     *       'verification_method'  => 'Email',
+     *       'notification_methods' => ['Email'],
      *     ],
      *   ],
      * ]
      * ```
      *
-     * Response (unwrapped `data`) — the same estimate shape as
-     * {@see AssignmentResource::estimateCost()}:
-     * ```
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
      * [
-     *   'documents'                => 1,
-     *   'credits'                  => 0,
-     *   'needs_extra_document'     => true,
-     *   'extra_document_cost'      => 1,
-     *   'total_credits'            => 1,
-     *   'breakdown'                => [],
-     *   'document_balance'         => 0,
-     *   'credit_balance'           => 0,
-     *   'has_sufficient_resources' => false,
-     *   'blocking_reason'          => 'InsufficientDocuments',
-     *   'message'                  => 'A conta não possui documentos suficientes.',
+     *     'documents' => 1,
+     *     'credits' => 0,
+     *     'needs_extra_document' => false,
+     *     'extra_document_cost' => 0,
+     *     'total_credits' => 0,
+     *     'breakdown' => [],
+     *     'document_balance' => 66,
+     *     'credit_balance' => 0,
+     *     'has_sufficient_resources' => true,
+     *     'blocking_reason' => null,
+     *     'message' => null,
      * ]
      * ```
      *
@@ -961,6 +1113,41 @@ class DocumentResource extends AbstractResource
      * time is `$maxWaitSeconds` plus one request timeout.
      *
      * Response: the same payload as {@see self::get()}, once it is ready.
+     *
+     * Request: path parameters shown above; no request body.
+     *
+     * Example response (SDK return; optional fields depend on state):
+     * ```php
+     * [
+     *     'resource' => 'document',
+     *     'id' => 'document-id',
+     *     'account_id' => 'account-id',
+     *     'template_id' => null,
+     *     'name' => 'agreement.pdf',
+     *     'status' => 'metadata_ready',
+     *     'artifacts' => [
+     *         'original' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/download/original',
+     *         'thumbnail' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/thumbnail',
+     *     ],
+     *     'is_closed' => false,
+     *     'signing_url' => 'https://app-sandbox.assinafy.com.br/sign/signing-token',
+     *     'decline_reason' => null,
+     *     'declined_by' => null,
+     *     'tags' => [],
+     *     'created_at' => '2026-09-01T12:00:00Z',
+     *     'updated_at' => '2026-09-01T12:00:00Z',
+     *     'assignment' => null,
+     *     'pages' => [
+     *         [
+     *             'id' => 'page-id',
+     *             'number' => 1,
+     *             'height' => 1651,
+     *             'width' => 1275,
+     *             'download_url' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/pages/page-id/download',
+     *         ],
+     *     ],
+     * ]
+     * ```
      *
      * @param int $maxWaitSeconds      total budget before giving up
      * @param int $pollIntervalSeconds delay between polls; the last sleep is trimmed so the

@@ -154,7 +154,7 @@ final class AccountResourceTest extends TestCase
 
     /**
      * The documented schema puts `force` in a JSON body rather than the query string.
-     * Deliberately not exercised live — it would have destroyed the sandbox workspace.
+     * Live deletion is exercised only on accounts created by the disposable-account test.
      */
     public function testDeleteSendsForceInTheJsonBody(): void
     {
