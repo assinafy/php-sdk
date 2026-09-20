@@ -17,8 +17,28 @@ class AssignmentResource extends AbstractResource
     public const METHOD_VIRTUAL = 'virtual';
     public const METHOD_COLLECT = 'collect';
 
+    /** Signer enters a code received by email. Free, and the default for both sides. */
     public const VERIFICATION_EMAIL = 'Email';
+
+    /**
+     * Signer enters a code received over WhatsApp. Needs `whatsapp_phone_number` and a paid
+     * subscription, and always travels with the WhatsApp notification — 0.45 credits per signer.
+     */
     public const VERIFICATION_WHATSAPP = 'Whatsapp';
+
+    /**
+     * Signer signs with their own ICP-Brasil certificate — **A1** (a software file on the
+     * device) or **A3** (a smart card or token) — through the Web PKI browser extension,
+     * producing a qualified PAdES signature downloadable as
+     * {@see DocumentResource::ARTIFACT_PADES}.
+     *
+     * A1 and A3 differ only in where the private key lives; both use this one value and the
+     * same payload. Needs the account's Digital Certificate feature, a CPF in the signer's
+     * `government_id`, and the signer alone in its signing step. Costs 2 credits per signer
+     * under the `SignatureDigitalCertificate` breakdown code, on top of its notification.
+     * Pairs with either notification method. The browser completes the signature, so
+     * {@see SignerSessionResource::sign()} cannot finish it.
+     */
     public const VERIFICATION_DIGITAL_CERTIFICATE = 'DigitalCertificate';
 
     public const VERIFICATION_METHODS = [
@@ -27,7 +47,13 @@ class AssignmentResource extends AbstractResource
         self::VERIFICATION_DIGITAL_CERTIFICATE,
     ];
 
+    /** Emails the signing invitation. 0 credits. */
     public const NOTIFICATION_EMAIL = 'Email';
+
+    /**
+     * Sends the signing invitation over WhatsApp. Needs `whatsapp_phone_number` and a paid
+     * subscription. 0.45 credits per signer, charged again on every resend.
+     */
     public const NOTIFICATION_WHATSAPP = 'Whatsapp';
 
     public const NOTIFICATION_METHODS = [

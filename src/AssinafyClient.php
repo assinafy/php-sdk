@@ -11,6 +11,7 @@ use Assinafy\SDK\Resources\AssignmentResource;
 use Assinafy\SDK\Resources\AuthResource;
 use Assinafy\SDK\Resources\DocumentResource;
 use Assinafy\SDK\Resources\FieldResource;
+use Assinafy\SDK\Resources\OAuthResource;
 use Assinafy\SDK\Resources\SignerDocumentResource;
 use Assinafy\SDK\Resources\SignerResource;
 use Assinafy\SDK\Resources\SignerSessionResource;
@@ -254,6 +255,41 @@ class AssinafyClient
         }
 
         return $this->auth;
+    }
+
+    /**
+     * Marketplace OAuth: the authorization-code + PKCE flow for acting on **another**
+     * workspace, plus token exchange, refresh, revocation, userinfo and discovery.
+     *
+     * Automating your own workspace needs none of this — keep using an API key.
+     * Usually called on a {@see self::forAuth()} client, since the flow runs before any
+     * workspace credential exists:
+     *
+     * ```php
+     * $oauth = AssinafyClient::forAuth()->oauth($clientId, $clientSecret);
+     * ```
+     *
+     * Unlike the other accessors this one is not memoized: the resource is a small
+     * stateless object and the credentials are arguments, so caching it would only
+     * create a stale-secret footgun.
+     *
+     * @param string      $clientId     the application's `client_id` from the Assinafy app
+     * @param string|null $clientSecret confidential applications only; public applications
+     *     authenticate with PKCE and are never issued a secret
+     * @throws \Assinafy\SDK\Exceptions\ValidationException on an empty client ID or a
+     *     present-but-blank secret
+     */
+    public function oauth(
+        string $clientId,
+        #[\SensitiveParameter] ?string $clientSecret = null
+    ): OAuthResource {
+        return new OAuthResource(
+            $this->httpClient,
+            $this->config,
+            $this->loggerProxy,
+            $clientId,
+            $clientSecret
+        );
     }
 
     /**

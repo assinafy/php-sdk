@@ -104,7 +104,7 @@ $client = new AssinafyClient($configuration, logger: $logger);
 ```
 
 The bundled transport enforces `User-Agent: Assinafy-PHP-SDK/v{SDK_VERSION}` on every request—for
-example, version 2.1.4 sends `Assinafy-PHP-SDK/v2.1.4`. This applies to authenticated, public,
+example, version 2.2.0 sends `Assinafy-PHP-SDK/v2.2.0`. This applies to authenticated, public,
 signer, JSON, multipart-upload, raw-body, and binary-download requests.
 `Configuration::SDK_VERSION` is the single source for the header version.
 Applications that replace the bundled `HttpClientInterface` transport must send the same exact
@@ -139,10 +139,68 @@ $bearerClient = AssinafyClient::forBearer(
 );
 ```
 
-For marketplace connections, follow the [OAuth guide](docs/OAUTH.md): PKCE, consent, scopes,
-per-workspace storage, token rotation, and revocation. Token, refresh, revocation, userinfo and
-discovery calls use the public HTTP transport. There is no `oauth()` resource or automatic renewal;
-the application owns authorization callbacks and token persistence.
+### Marketplace OAuth
+
+Use OAuth when your application acts on **someone else's** workspace, without ever handling their
+password or API key. Automating your own workspace needs an API key instead.
+
+`oauth()` returns an `OAuthResource` covering the whole flow: PKCE material, the authorization
+URL, callback validation, the token exchange, refresh, revocation, userinfo and both discovery
+documents. The [OAuth guide](docs/OAUTH.md) has the complete payloads, scope rules and go-live
+checklist.
+
+```php
+use Assinafy\SDK\Resources\OAuthResource;
+
+$oauth = AssinafyClient::forAuth()->oauth(
+    (string) getenv('ASSINAFY_OAUTH_CLIENT_ID'),
+    (string) getenv('ASSINAFY_OAUTH_CLIENT_SECRET') ?: null,
+);
+
+// 1. Send the browser to Assinafy, keeping the transaction in the user's session.
+$start = $oauth->startAuthorization('https://app.example.com/callback', [
+    OAuthResource::SCOPE_DOCUMENTS_READ,
+    OAuthResource::SCOPE_DOCUMENTS_WRITE,
+    OAuthResource::SCOPE_OFFLINE_ACCESS,
+]);
+$_SESSION['assinafy_oauth'] = $start;
+header('Location: ' . $start['authorization_url'], true, 302);
+
+// 2. On the redirect URI, validate the callback and exchange the code.
+$transaction = $_SESSION['assinafy_oauth'];
+unset($_SESSION['assinafy_oauth']);
+$tokens = $oauth->exchangeCode($oauth->handleCallback($_GET, $transaction), $transaction);
+
+// 3. The token belongs to the one workspace the user chose.
+$accounts = AssinafyClient::forAuth()->accounts()->list($tokens['access_token']);
+$connected = AssinafyClient::forBearer($tokens['access_token'], $accounts['data'][0]['id']);
+```
+
+`startAuthorization()` mints a fresh `code_verifier` and `state` on every attempt.
+`handleCallback()` compares `state` with `hash_equals` and requires `iss` to be the expected
+authorization server before the code is used anywhere. Pass `null` as the second argument to
+`oauth()` for a public application, which authenticates with PKCE alone and is never issued a
+secret.
+
+Token responses are flat JSON with no `data` envelope. Read the returned `scope` rather than
+assuming every requested permission was granted; `refresh_token` needs approved `offline_access`
+and `id_token` needs `openid`.
+
+```php
+$renewed = $oauth->refresh($connection->refreshToken);   // returns a NEW refresh token
+$claims  = $oauth->userinfo($tokens['access_token']);    // {sub, name?, email?, email_verified?}
+$oauth->revoke($connection->refreshToken, OAuthResource::TOKEN_TYPE_HINT_REFRESH);
+```
+
+Every refresh retires the token it used. A replayed refresh token is indistinguishable from a
+stolen one, so the server ends the whole connection: persist the replacement before anything else,
+refresh one at a time per connection, and never retry blindly after a timeout. Access tokens last
+one hour and a connection lasts 30 days from approval — refreshing does not extend it.
+
+The SDK stores no tokens, holds no locks and renews nothing automatically. Create one client per
+connection and never share a mutable credential between users. OAuth is deployed to production;
+sandbox does not serve these routes. The legacy `socialLoginUrl()` and `socialLoginCallbackUrl()`
+helpers are separate from this flow.
 
 API keys, Bearer tokens, and signer access codes are separate credentials. A public client sends
 neither `X-Api-Key` nor `Authorization`; calling an account-scoped resource on it fails locally.
@@ -258,9 +316,26 @@ The estimate data contains `documents`, `credits`, `needs_extra_document`,
 `extra_document_cost`, `total_credits`, `breakdown`, `document_balance`, `credit_balance`,
 `has_sufficient_resources`, `blocking_reason`, and `message`.
 
-An ordinary Email or WhatsApp assignment uses at most one notification method, and its
-verification and delivery channels must match. `DigitalCertificate` uses its own verification
-rules and may still use Email notification.
+Each signer carries a verification method (how they prove their identity) coupled to one
+notification method (how they receive the invitation). Supply one side, both or neither: the
+missing side is inferred, and omitting both defaults to Email. The SDK enforces the matrix locally
+before sending the request.
+
+| Verification | Allowed notification | Requirements | Credits per signer |
+| --- | --- | --- | --- |
+| `VERIFICATION_EMAIL` | `Email` | An email address on the signer | 0 |
+| `VERIFICATION_WHATSAPP` | `Whatsapp` | `whatsapp_phone_number` and a paid subscription | 0.45 |
+| `VERIFICATION_DIGITAL_CERTIFICATE` | `Email` or `Whatsapp` | The account's Digital Certificate feature (Standard and Pro plans), a CPF in `government_id`, and the signer alone in its step | 2 for the signature, on top of its notification |
+
+`DigitalCertificate` covers the ICP-Brasil **A1** (a software file on the device) and **A3** (a
+smart card or token) certificates. Both use this one value and the same payload — they differ only
+in where the private key lives. The signature is completed in the browser through the Web PKI
+extension, so `signerSession()->sign()` cannot finish it and the API publishes no certificate
+start/complete operation. The result is a qualified PAdES signature, downloadable as the `pades`
+artifact and billed in the breakdown under `SignatureDigitalCertificate`.
+
+Exactly one notification method is allowed per signer; an explicit empty list is preserved rather
+than replaced.
 
 ### 5. Assign and notify
 
@@ -643,6 +718,7 @@ or signature data.
 | `fields()` | Field definitions, types, and value validation |
 | `webhooks()` | Subscription, event types, delivery history, and retries |
 | `auth()` | Login, social authentication, API-key lifecycle, password reset, and password change |
+| `oauth()` | Marketplace authorization: PKCE, callback validation, token exchange, refresh, revocation, userinfo, and discovery |
 | `signerSession()` | Signer identity, terms, verification, signature image, sign, and decline actions |
 | `signerDocuments()` | Signer document list, search, bulk actions, and downloads |
 | `webhookEvents()` | Incoming webhook payload parsing |
@@ -654,9 +730,12 @@ as WhatsApp notification and digital-certificate signing still depend on the acc
 server deployment. A 403 can indicate a plan restriction; inspect the response message before
 changing the request.
 
-Production publishes marketplace OAuth endpoints that may be absent from sandbox. Use the
-[OAuth integration guide](docs/OAUTH.md) and the discovery metadata for the intended environment.
-A workspace API key cannot replace OAuth application credentials or a signer's access code.
+Marketplace OAuth is deployed to production. Sandbox answers `/oauth/token`, `/oauth/revoke`
+and `/oauth/userinfo` with a framework 404, and its origin does not serve the protected-resource
+document, so `oauth()` calls skip rather than fail there. Read endpoint URLs from the discovery
+metadata of the intended environment, and never mix a sandbox resource URL with production
+authorization. A workspace API key cannot replace OAuth application credentials or a signer's
+access code.
 
 A framework routing 404 (`name: Not Found`) is different from a resource-not-found API envelope.
 Keep supported resource methods when an environment has not deployed a route yet.

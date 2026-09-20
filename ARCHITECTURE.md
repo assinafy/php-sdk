@@ -32,6 +32,7 @@ assinafy-php-sdk/
 │   │   ├── AuthResource.php
 │   │   ├── DocumentResource.php
 │   │   ├── FieldResource.php
+│   │   ├── OAuthResource.php
 │   │   ├── SignerDocumentResource.php
 │   │   ├── SignerResource.php
 │   │   ├── SignerSessionResource.php
@@ -92,10 +93,16 @@ bootstrap methods must receive the login token explicitly. Once an account ID is
 resource. Account-scoped methods reject public configuration instead of sending placeholder
 credentials.
 
-Marketplace OAuth uses the existing public transport for token, revocation, userinfo and discovery
-calls, then `forBearer()` for scoped resources. See [docs/OAUTH.md](docs/OAUTH.md). The application
-owns consent, PKCE transactions, encrypted token storage and per-connection refresh locking.
-The legacy social URL builders on `AuthResource` are separate compatibility methods.
+`AssinafyClient::oauth($clientId, $clientSecret)` builds the marketplace `OAuthResource` for one
+registered application, then `forBearer()` serves the scoped resource calls. It is the one accessor
+that is not cached: the credentials are arguments, so caching would serve a rotated secret from a
+stale instance. Token, revocation and userinfo travel over the configured transport as relative
+`/v1` paths; the two discovery documents sit at their host's origin, above that prefix and on two
+different hosts, so the resource fetches each with a short-lived credential-free client obtained
+from an injectable factory. The application still owns consent, encrypted token storage and
+per-connection refresh locking — the SDK stores nothing and renews nothing. See
+[docs/OAUTH.md](docs/OAUTH.md). The legacy social URL builders on `AuthResource` are separate
+compatibility methods.
 
 The high-level `uploadAndRequestSignatures()` workflow validates every signer description before
 uploading, uploads a PDF, optionally waits for document readiness, resolves or creates signers,
@@ -119,6 +126,7 @@ Each resource extends `AbstractResource`, which centralizes account paths, path-
 | `auth()` | Login, social login, password flows, API-key lifecycle, and legacy social URL builders |
 | `documents()` | Document upload, retrieval, search, downloads (including `pades`), tags, verification, and template-driven creation |
 | `fields()` | Field definitions, validation, and the global field-type catalog |
+| `oauth()` | Marketplace PKCE transactions, callback validation, token exchange/refresh, revocation, userinfo, and RFC 8414/9728 discovery |
 | `signers()` | Workspace signer CRUD (including `government_id` update), email lookup, and explicit-country-code E.164 normalization |
 | `signerSession()` | End-signer identity, verification, data confirmation, signature image, signing, and decline operations |
 | `signerDocuments()` | End-signer document lookup, search, bulk actions, and downloads |

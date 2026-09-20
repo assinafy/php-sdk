@@ -5,19 +5,20 @@ This reference maps every public resource method in this SDK to the Assinafy API
 - <https://api.assinafy.com.br/v1/docs>
 - <https://api.assinafy.com.br/v1/docs/openapi.json>
 
-This reference describes SDK version 2.1.4. Install published releases with
+This reference describes SDK version 2.2.0. Install published releases with
 `composer require assinafy/php-sdk` and use the documentation shipped with the selected tag.
 See [INSTALLATION.md](INSTALLATION.md) for setup.
 
-Resource classes map 89 workspace, document, signer and authentication operations. The current
-production OpenAPI adds four OAuth/discovery operations, documented under
-[Marketplace OAuth](#marketplace-oauth); use the existing public HTTP transport for these calls.
-Five working template-management routes and two legacy social URL builders are outside OpenAPI.
+Resource classes map all 93 operations in the current production OpenAPI document, including the
+four OAuth and discovery operations under
+[Marketplace OAuth](#marketplace-oauth-oauthresource). Five working template-management routes
+and two legacy social URL builders exist at runtime outside OpenAPI and are documented with their
+resources.
 
 Production: `https://api.assinafy.com.br/v1`; sandbox: `https://sandbox.assinafy.com.br/v1`.
-Statistics and notification preferences work in sandbox. OAuth deployment and plan-gated features
-can differ between environments. Origin-level discovery uses a separate public client without
-the `/v1` prefix.
+Statistics and notification preferences work in sandbox. Marketplace OAuth is deployed to
+production only, and plan-gated features can differ between environments. Origin-level discovery
+uses a separate public client without the `/v1` prefix.
 
 ## Conventions
 
@@ -136,6 +137,7 @@ resources through `AssinafyClient` instead.
 | `fields(): FieldResource` | Lazy, cached field resource. |
 | `webhooks(): WebhookResource` | Lazy, cached webhook-management resource. |
 | `auth(): AuthResource` | Lazy, cached authentication resource. |
+| `oauth(string $clientId, ?string $clientSecret = null): OAuthResource` | Marketplace OAuth resource for one registered application. Pass `null` as the secret for a public client. Deliberately **not** cached, so a rotated secret can never be served from a stale instance. Throws `ValidationException` on an empty client ID or a present-but-blank secret. |
 | `signerSession(): SignerSessionResource` | Lazy, cached signer-session resource. |
 | `signerDocuments(): SignerDocumentResource` | Lazy, cached signer-document resource. |
 | `users(): UserResource` | Lazy, cached authenticated-user resource. |
@@ -231,6 +233,7 @@ An application-supplied `HttpClientInterface` owns its wire behavior and must se
 | `WebhookEventParser::getEventData(?array $event): array` | Returns the polymorphic `object` entity. |
 | `WebhookEventParser::getEventPayload(?array $event): array` | Returns event-specific `payload`. |
 | `WebhookEventParser::getAccountId(?array $event): ?string` | Returns `account_id`. |
+| `Iso8601::reasonInvalid(string $value): ?string` | Returns why an expiration timestamp is unusable, or `null` when it is valid. Requires an explicit `Z` or `±HH:MM` offset and a real calendar date. Shared by `assignments()->create()`, `resetExpiration()` and `uploadAndRequestSignatures()` so all three reject the same values with the same wording. |
 | `MutableLogger::__construct(LoggerInterface $logger)` | Creates the internal logger proxy shared by existing resources and transport. |
 | `MutableLogger::setLogger(LoggerInterface $logger): void` | Replaces the proxy target. |
 | `MutableLogger::getLogger(): LoggerInterface` | Returns the proxy target. |
@@ -275,6 +278,61 @@ month in daily mode when the route is available.
 ## Assignments (`AssignmentResource`)
 
 The assignment request field is `signers`.
+
+### Verification and notification methods
+
+Each signer on an assignment carries a **verification method** (how they prove their identity
+before signing) and one **notification method** (how they are told a signature is being requested),
+set through `signers[].verification_method` and `signers[].notification_methods`. The two are
+coupled: send one, both or neither, and the missing side is inferred. Sending neither defaults
+both to `Email`.
+
+| Verification | Constant | What the signer does | Requirements |
+|---|---|---|---|
+| `Email` | `AssignmentResource::VERIFICATION_EMAIL` | Enters a code received by email before signing. | An email address on the signer. |
+| `Whatsapp` | `AssignmentResource::VERIFICATION_WHATSAPP` | Enters a code received over WhatsApp before signing. | A `whatsapp_phone_number` on the signer; paid subscriptions only. Requires the WhatsApp notification channel — the two always travel together. |
+| `DigitalCertificate` | `AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE` | Signs with their own ICP-Brasil certificate — **A1** (a software file on the device) or **A3** (a smart card or token) — through the Web PKI browser extension, producing a qualified PAdES signature. | The account's Digital Certificate feature (Standard and Pro plans), a CPF in the signer's `government_id`, and the signer alone in its signing step. |
+
+| Notification | Constant | Delivers | Requirements |
+|---|---|---|---|
+| `Email` | `AssignmentResource::NOTIFICATION_EMAIL` | An email invitation with a link to sign. | An email address on the signer. |
+| `Whatsapp` | `AssignmentResource::NOTIFICATION_WHATSAPP` | A WhatsApp message with a link to sign. | A `whatsapp_phone_number` on the signer; paid subscriptions only. |
+
+Only matching combinations are accepted; an invalid pairing returns `400`. The SDK enforces the
+same matrix locally, before the request is sent.
+
+| Verification method | Allowed notification methods |
+|---|---|
+| `Email` | `Email` |
+| `Whatsapp` | `Whatsapp` |
+| `DigitalCertificate` | `Email` or `Whatsapp` |
+
+Exactly one notification method is allowed per signer. An explicit
+`notification_methods: []` is preserved rather than replaced.
+
+No verification method is priced on its own — the **notification** it is paired with is what is
+billed, which is why WhatsApp verification costs what WhatsApp notification costs. The one
+addition is the certificate signature itself.
+
+| Per signer | Credits |
+|---|---|
+| Email verification and notification | 0 |
+| WhatsApp verification and notification | 0.45 |
+| DigitalCertificate signature | 2, charged at assignment creation under the `SignatureDigitalCertificate` breakdown code, on top of its notification |
+
+Notification cost is charged per signer, on top of the document cost: two signers notified by
+email cost 0 credits, two notified by WhatsApp cost 0.9. Use `estimateCost()` to preview the exact
+total before creating an assignment.
+
+By default every signer is notified as soon as the assignment is created. When `signers[].step`
+defines a signing order, each signer's notification is held until their step activates: step 1 is
+notified at creation, and a later step only after every signer in the previous step has finished.
+
+A1 and A3 differ only in where the signer's private key lives; both reach the API through the same
+`DigitalCertificate` verification method, and the SDK sends the same payload for either. The
+signature is completed in the browser through the Web PKI extension, so the ordinary
+`signerSession()->sign()` path cannot complete it and the API publishes no certificate
+start/complete operation. The resulting qualified signature is downloadable as the `pades` artifact.
 
 ### Assignment creation body
 
@@ -352,23 +410,63 @@ Use `AssinafyClient::forAuth()` for public bootstrap operations and pass the log
 The two browser-facing GET routes are compatibility URL builders. They do not perform OAuth
 consent or exchange tokens. Use the marketplace integration described below for customer connections.
 
-## Marketplace OAuth
+## Marketplace OAuth (`OAuthResource`)
 
-These operations use flat OAuth/OIDC success bodies. They are not methods on `AuthResource`.
-The complete request/response examples, scope rules, PKCE flow and renewal requirements are in
-[OAUTH.md](OAUTH.md).
+Obtain the resource with `AssinafyClient::forAuth()->oauth($clientId, $clientSecret)`. Use OAuth
+only when your application acts on **someone else's** workspace; automating your own needs an API
+key. Full request/response walkthroughs, scope rules, refresh-token handling and the go-live
+checklist are in [OAUTH.md](OAUTH.md).
 
-| Operation | Existing SDK transport call | Authentication and request | Success response |
-| --- | --- | --- | --- |
-| `POST /v1/oauth/token` | `forAuth()->getHttpClient()->postRaw('oauth/token', $form, 'application/x-www-form-urlencoded')` | Code exchange: `grant_type=authorization_code`, `code`, `redirect_uri`, `client_id`, `code_verifier`, recommended `resource=https://api.assinafy.com.br`, and `client_secret` for confidential clients. Refresh: `grant_type=refresh_token`, `refresh_token`, `client_id`, optional client secret. | Flat `{access_token, token_type, expires_in, scope, refresh_token?, id_token?}`. |
-| `POST /v1/oauth/revoke` | `forAuth()->getHttpClient()->postRaw('oauth/revoke', $form, 'application/x-www-form-urlencoded')` | `token`, `client_id`, confidential `client_secret`, optional `token_type_hint: access_token\|refresh_token`. No workspace key. | HTTP 200 with no token data; client authentication failure is 401. |
-| `GET /v1/oauth/userinfo` | `forAuth()->getHttpClient()->get('oauth/userinfo', [], ['Authorization' => 'Bearer ' . $token])` | OAuth token with `openid`; `profile` and `email` enable optional claims. | Flat `{sub, name?, email?, email_verified?}`. |
-| `GET /.well-known/oauth-protected-resource` | Origin-level public client, `getHttpClient()->get('.well-known/oauth-protected-resource')` | No authentication, query or body. The base URL is the API origin without `/v1`. | Flat `{resource, authorization_servers, scopes_supported, bearer_methods_supported}`. |
+Every operation here uses a **flat** body in both directions. RFC 6749 §5.1/§5.2, RFC 8414,
+RFC 9728 and OIDC Core §5.3.2 all forbid the `{status, message, data}` envelope, so these methods
+return the decoded body as-is instead of unwrapping `data`. Token and revocation failures are flat
+`{error, error_description}` objects, which makes `ApiException::getMessage()` the machine-readable
+RFC code applications branch on; `getResponseData()['error_description']` holds the human-readable
+text. Userinfo is the exception — it authenticates like any other API route, so its `401`/`403`
+arrive in the ordinary envelope.
 
-Read flat bodies with `Response::getData()`. A successful transport call does not validate an OIDC
-ID token: verify its signature, issuer, audience, expiration and nonce with an OIDC implementation.
-Persist refreshed credentials atomically under a per-connection lock. Resource calls then use
-`AssinafyClient::forBearer($accessToken, $authorizedAccountId)`.
+OAuth is deployed to production. Sandbox answers these routes with a framework `404`, and its
+origin does not serve the protected-resource document.
+
+| SDK method | Official operation | Auth | Request | SDK success return | Statuses |
+|---|---|---|---|---|---|
+| `startAuthorization(string $redirectUri, array $scopes, array $options = [])` | Browser navigation to `GET {issuer}/oauth/authorize` | None | Builds rather than requests the URL; no HTTP call. Mints a fresh 43-character `code_verifier` and `state` per call, adds `nonce` only when `openid` is requested, and sends `response_type=code`, `code_challenge_method=S256` and `resource`. `$options` overrides `state`, `code_verifier`, `nonce`, `issuer`, `authorization_endpoint`, `resource`. | `{authorization_url, state, code_verifier, code_challenge, redirect_uri, issuer, resource, nonce?}` — the transaction to persist in the user's session. | Local only. Throws `ValidationException` on a non-HTTPS or fragment-bearing redirect URI, an empty scope list, a scope containing a space, or a verifier outside the 43–128 unreserved-character grammar. |
+| `handleCallback(array $query, array $transaction)` | Your redirect URI | None | Verification only; no HTTP call. Compares `state` with `hash_equals` and requires `iss` to equal the transaction's issuer, both before the code is used. | The single-use authorization code string, valid for 60 seconds. | Local only. `ValidationException` on a missing/mismatched `state`, an absent or foreign `iss`, or no code. `ApiException` 400 carrying `access_denied`, `invalid_scope`, `invalid_request`, `unsupported_response_type` or `invalid_target`. |
+| `exchangeCode(string $code, array $transaction)` | [`POST /v1/oauth/token`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Foauth%2Ftoken) | Client credentials | Form-encoded `grant_type=authorization_code`, `code`, `redirect_uri`, `code_verifier`, `resource`, `client_id`, and `client_secret` for confidential clients. `redirect_uri`, `code_verifier` and `resource` are read from the stored transaction so they match the authorization request byte for byte. | Flat `{access_token, token_type, expires_in, scope, refresh_token?, id_token?}`. `refresh_token` requires approved `offline_access`; `id_token` requires `openid`. `scope` reports what was actually granted and never lists `offline_access`. | `200; 400 invalid_grant/invalid_target/unsupported_grant_type, 401 invalid_client` |
+| `refresh(string $refreshToken)` | [`POST /v1/oauth/token`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Foauth%2Ftoken) | Client credentials | Form-encoded `grant_type=refresh_token`, `refresh_token`, `client_id`, optional `client_secret`. | Same flat shape, with a **new** `refresh_token` that retires the one just used. | `200; 400 invalid_grant, 401 invalid_client` |
+| `revoke(string $token, ?string $tokenTypeHint = null)` | [`POST /v1/oauth/revoke`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Foauth%2Frevoke) | Client credentials | Form-encoded `token`, `client_id`, optional `client_secret` and `token_type_hint: access_token\|refresh_token`. | `[]`. Every token outcome — revoked, already revoked, unknown, malformed — answers 200, so success is not evidence the token existed. | `200; 401 invalid_client, 500` |
+| `userinfo(string $accessToken)` | [`GET /v1/oauth/userinfo`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Foauth%2Fuserinfo) | OAuth Bearer | No body or query. The token travels in `Authorization: Bearer`, the only accepted method; sent as `X-Api-Key` or in the query string it is refused. | Flat `{sub, name?, email?, email_verified?}`. `name` requires `profile`, `email` requires `email`. | `200; 401, 403, 500` (ordinary envelope) |
+| `protectedResourceMetadata()` | [`GET /.well-known/oauth-protected-resource`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2F.well-known%2Foauth-protected-resource) | None | No parameters. Fetched with a separate credential-free client at the configured API origin, since the document sits above the `/v1` prefix. | Flat `{resource, authorization_servers, scopes_supported, bearer_methods_supported}`. `scopes_supported` omits `offline_access` by design. | `200; 500`. Absent from sandbox. |
+| `authorizationServerMetadata(?string $issuer = null)` | RFC 8414 `GET {issuer}/.well-known/oauth-authorization-server` | None | No parameters; defaults to `OAuthResource::DEFAULT_ISSUER`. Served only by the authorization server, never by this API, so it uses a separate credential-free client for that origin. | Flat `{issuer, authorization_endpoint, token_endpoint, revocation_endpoint, userinfo_endpoint, jwks_uri, scopes_supported, response_types_supported, grant_types_supported, code_challenge_methods_supported, token_endpoint_auth_methods_supported, authorization_response_iss_parameter_supported, client_id_metadata_document_supported}`. | `200`. Outside this API's OpenAPI document. |
+
+| Static helper | Purpose / return |
+|---|---|
+| `createCodeVerifier(): string` | 43 characters from the RFC 7636 unreserved set. `startAuthorization()` calls it; use it directly only when your framework owns the session material. |
+| `codeChallenge(string $codeVerifier): string` | The S256 challenge: base64url of the raw SHA-256 of the verifier. |
+| `createState(): string` | The random per-attempt `state` that protects the callback against CSRF. |
+| `__debugInfo(): array` | Returns `{client_id, client_type}` only, where `client_type` is `confidential` or `public`. The client secret never appears in a diagnostic dump. |
+
+Constants: `DEFAULT_ISSUER`, `AUTHORIZATION_SERVER_METADATA_PATH`,
+`PROTECTED_RESOURCE_METADATA_PATH`, `CODE_CHALLENGE_METHOD`, `GRANT_AUTHORIZATION_CODE`,
+`GRANT_REFRESH_TOKEN`, `TOKEN_TYPE_HINT_ACCESS`, `TOKEN_TYPE_HINT_REFRESH`, the nine
+`SCOPE_*` values and the `SCOPES` list. `SCOPES` is supplied for autocompletion;
+`startAuthorization()` does not reject an unlisted scope, because the authorization server may
+publish new ones — it only rejects a scope that is empty or contains a space, since `scope` is a
+space-delimited list on the wire.
+
+A token belongs to the one workspace the user selected. After the exchange, call
+`accounts()->list($accessToken)` — it returns exactly that workspace — and store `data[0].id`
+with the connection, then use `AssinafyClient::forBearer($accessToken, $authorizedAccountId)`
+for resource calls. Any other workspace answers `403`.
+
+A successful call does not validate an OIDC ID token: verify its RS256 signature against `jwks_uri`,
+plus issuer, audience, expiration and nonce, with a maintained OIDC implementation. The SDK ships
+no JWT implementation, no token storage, no refresh lock and no automatic renewal. Refresh tokens
+rotate on every use and a replayed one ends the whole connection, so persist the replacement under
+a per-connection lock before using the response. A `403` carrying
+`WWW-Authenticate: Bearer error="insufficient_scope"` names the missing permission in its `scope`
+parameter; read it with `ApiException::getResponseHeaderLine('WWW-Authenticate')` and reconnect
+rather than retry.
 
 ## Authenticated user (`UserResource`)
 

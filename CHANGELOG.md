@@ -3,6 +3,19 @@
 All notable changes to the Assinafy PHP SDK are documented here.
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## 2.2.0 - 2026-09-20
+
+- Add `AssinafyClient::oauth()` and `OAuthResource`, covering the marketplace authorization-code
+  flow end to end: PKCE material, the authorization URL, callback validation, token exchange,
+  refresh, revocation, OpenID Connect userinfo, and both discovery documents.
+- Mint a fresh PKCE verifier and `state` per connection attempt, and verify the callback's `state`
+  and `iss` before an authorization code is used.
+- Return OAuth and OpenID Connect bodies as flat JSON; token and revocation errors expose the RFC
+  error code as the exception message and `error_description` in the response data.
+- Document the verification and notification matrix, including ICP-Brasil A1 and A3 certificates
+  under `DigitalCertificate`, with per-signer credit costs.
+- Set the SDK User-Agent version to `2.2.0`.
+
 ## 2.1.4 - 2026-09-18
 
 - Prevent transport exception chains from retaining Guzzle requests when PHP records exception arguments.

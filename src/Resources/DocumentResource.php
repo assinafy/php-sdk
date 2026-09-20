@@ -540,7 +540,7 @@ class DocumentResource extends AbstractResource
      *         'payload' => [],
      *         'origin' => [
      *             'ip' => '<ip>',
-     *             'user-agent' => 'Assinafy-PHP-SDK/v2.1.4',
+     *             'user-agent' => 'Assinafy-PHP-SDK/v2.2.0',
      *         ],
      *         'created_at' => '2026-09-01T12:00:00Z',
      *     ],

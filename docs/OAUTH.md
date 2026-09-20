@@ -1,36 +1,25 @@
 # Marketplace OAuth integration
 
-Use OAuth when an application connects a customer's Assinafy workspace. Keep a separate connection
-record for each workspace, with its granted scopes, encrypted credentials, and expiration times.
-An API key is appropriate for a backend accessing its own workspace.
+Use OAuth when your application connects **someone else's** Assinafy workspace, without ever
+handling their password or API key. The user approves your app once and you receive tokens limited
+to the permissions they approved and to the single workspace they chose. Automating your own
+workspace needs none of this — keep using an API key.
 
-The [official OAuth guide](https://api.assinafy.com.br/v1/docs#tag/OAuth-Integration-Guide) defines authorization-code
-flow with PKCE S256. Registration requires an eligible Assinafy account, a registered application,
-and an exact redirect URI. A confidential backend also receives a client secret. A workspace API
-key cannot create an authorization code or substitute for the client's credentials and consent.
+| | API key | OAuth |
+| --- | --- | --- |
+| Acts on | Your own workspace | Someone else's workspace, with their permission |
+| Can do | Everything your account can do | Only the approved scopes |
+| The user can switch it off | No | Yes, at any time |
+| Choose it when | You automate your own account | You build an app other people connect |
 
-The SDK's `forBearer()` client handles resource calls with the resulting access token. Token,
-revocation, userinfo, and discovery calls use the existing public HTTP transport; there is no
-`oauth()` resource or automatic token renewal. The examples below describe the published success
-contract. Successful consent, exchange, renewal, and revocation require a registered app and are
-separate from API-key sandbox tests.
+`AssinafyClient::oauth()` returns an `OAuthResource` that covers the whole flow: PKCE material,
+the authorization URL, callback validation, the token exchange, refresh, revocation, userinfo and
+both discovery documents. The SDK deliberately does **not** store tokens, hold refresh locks or
+renew anything automatically — those belong to your application, and this guide shows where.
 
-## Register the application
-
-An owner of an eligible workspace creates the application in the
-[Assinafy app](https://app.assinafy.com.br), under **Settings → OAuth applications → New application**.
-Choose Confidential for a backend that can protect a client secret, or Public for code on a user's
-device. Register the maximum permissions the app needs and an exact HTTPS redirect URI without a
-fragment. Local development requires an HTTPS callback; plain `http://localhost` is not accepted.
-
-Store the issued `client_id` and, for confidential apps, the secret shown once. The examples use
-`ASSINAFY_OAUTH_CLIENT_ID` and `ASSINAFY_OAUTH_CLIENT_SECRET` from server-side secret configuration.
-Deleting or disabling an app invalidates its connections. New unverified apps are limited to
-25 workspaces; arrange verification with Assinafy before expanding beyond that limit.
-
-## Discover the production endpoints
-
-The protected-resource document is at the API origin, outside `/v1`:
+Two hosts are involved on purpose. The browser-facing consent page lives on the authorization
+server `https://auth.assinafy.com.br`; token, revocation and userinfo live on the API under `/v1`.
+OAuth is deployed to production; sandbox does not serve these routes.
 
 ```php
 <?php
@@ -40,249 +29,354 @@ declare(strict_types=1);
 require 'vendor/autoload.php';
 
 use Assinafy\SDK\AssinafyClient;
-use Assinafy\SDK\Configuration;
+use Assinafy\SDK\Resources\OAuthResource;
 
-$resourceClient = AssinafyClient::forAuth('https://api.assinafy.com.br');
-$resourceMetadata = $resourceClient->getHttpClient()
-    ->get('.well-known/oauth-protected-resource')->getData();
-
-$issuerClient = AssinafyClient::forAuth('https://auth.assinafy.com.br');
-$authorizationMetadata = $issuerClient->getHttpClient()
-    ->get('.well-known/oauth-authorization-server')->getData();
+$oauth = AssinafyClient::forAuth()->oauth(
+    (string) getenv('ASSINAFY_OAUTH_CLIENT_ID'),
+    (string) getenv('ASSINAFY_OAUTH_CLIENT_SECRET') ?: null,
+);
 ```
 
-Both requests have no body or authentication. The protected-resource response is a flat object:
+Pass `null` as the second argument for a public application: it authenticates with PKCE alone and
+is never issued a secret.
+
+## Register the application
+
+An owner of an eligible workspace creates the application in the
+[Assinafy app](https://app.assinafy.com.br) under **Settings → OAuth applications → New
+application**. Applications are created there, not through an API.
+
+| Field | What to put |
+| --- | --- |
+| Name | What users see on the approval screen |
+| Description | One sentence on what the app does with their documents |
+| Logo URL | Optional `https://` image |
+| Redirect URIs | Where users return after approving. Must be `https://`, without `#`, and is matched exactly — `…/callback` and `…/callback/` are different. Register one per environment. |
+| Permissions | The most your app will ever request; you can ask for less at connect time, never more |
+| Type | **Confidential** for code on a server you control, **Public** for code on the user's device. Cannot be changed later. |
+
+Store the issued `client_id` and, for confidential apps, the secret shown once. The examples read
+`ASSINAFY_OAUTH_CLIENT_ID` and `ASSINAFY_OAUTH_CLIENT_SECRET` from server-side secret storage. If
+a secret is lost, rotate it — the old one stops working immediately, so deploy the new one at
+once. Deleting or disabling the application disconnects every user immediately.
+
+Local development needs an HTTPS tunnel; plain `http://localhost` is not accepted. New
+applications are unverified: the approval screen says Assinafy has not reviewed them and they can
+connect at most 25 workspaces. Arrange verification before launching beyond a pilot. One product
+that many Assinafy customers will connect can be registered as a verified application owned by no
+single workspace — talk to Assinafy first.
+
+## Discover the endpoints
+
+Read endpoint URLs from discovery rather than hardcoding them. Both documents are unauthenticated
+and live at their host's origin, above the `/v1` prefix, so the SDK fetches each with a separate
+credential-free client.
 
 ```php
-[
-    'resource' => 'https://api.assinafy.com.br',
-    'authorization_servers' => ['https://auth.assinafy.com.br'],
-    'scopes_supported' => [
-        'documents:read', 'documents:write', 'templates:read', 'templates:write',
-        'account:read', 'openid', 'profile', 'email',
-    ],
-    'bearer_methods_supported' => ['header'],
-]
+$resource = $oauth->protectedResourceMetadata();
+// [
+//     'resource' => 'https://api.assinafy.com.br',
+//     'authorization_servers' => ['https://auth.assinafy.com.br'],
+//     'scopes_supported' => [
+//         'documents:read', 'documents:write', 'templates:read', 'templates:write',
+//         'account:read', 'openid', 'profile', 'email',
+//     ],
+//     'bearer_methods_supported' => ['header'],
+// ]
+
+$server = $oauth->authorizationServerMetadata($resource['authorization_servers'][0]);
+// [
+//     'issuer' => 'https://auth.assinafy.com.br',
+//     'authorization_endpoint' => 'https://auth.assinafy.com.br/oauth/authorize',
+//     'token_endpoint' => 'https://api.assinafy.com.br/v1/oauth/token',
+//     'revocation_endpoint' => 'https://api.assinafy.com.br/v1/oauth/revoke',
+//     'userinfo_endpoint' => 'https://api.assinafy.com.br/v1/oauth/userinfo',
+//     'jwks_uri' => 'https://auth.assinafy.com.br/.well-known/jwks.json',
+//     'scopes_supported' => [
+//         'documents:read', 'documents:write', 'templates:read', 'templates:write',
+//         'account:read', 'openid', 'profile', 'email', 'offline_access',
+//     ],
+//     'response_types_supported' => ['code'],
+//     'grant_types_supported' => ['authorization_code', 'refresh_token'],
+//     'code_challenge_methods_supported' => ['S256'],
+//     'token_endpoint_auth_methods_supported' => ['client_secret_post', 'none'],
+//     'authorization_response_iss_parameter_supported' => true,
+//     'client_id_metadata_document_supported' => true,
+// ]
 ```
 
-The authorization-server response is also a flat object:
+`scopes_supported` on the protected resource omits `offline_access` on purpose: asking for a
+refresh token is a client concern, not something the API is protected by. The authorization
+server's own list includes it.
 
-```php
-[
-    'issuer' => 'https://auth.assinafy.com.br',
-    'authorization_endpoint' => 'https://auth.assinafy.com.br/oauth/authorize',
-    'token_endpoint' => 'https://api.assinafy.com.br/v1/oauth/token',
-    'revocation_endpoint' => 'https://api.assinafy.com.br/v1/oauth/revoke',
-    'userinfo_endpoint' => 'https://api.assinafy.com.br/v1/oauth/userinfo',
-    'jwks_uri' => 'https://auth.assinafy.com.br/.well-known/jwks.json',
-    'scopes_supported' => [
-        'documents:read', 'documents:write', 'templates:read', 'templates:write',
-        'account:read', 'openid', 'profile', 'email', 'offline_access',
-    ],
-    'response_types_supported' => ['code'],
-    'grant_types_supported' => ['authorization_code', 'refresh_token'],
-    'code_challenge_methods_supported' => ['S256'],
-    'token_endpoint_auth_methods_supported' => ['client_secret_post', 'none'],
-    'authorization_response_iss_parameter_supported' => true,
-    'client_id_metadata_document_supported' => true,
-]
-```
+Validate the returned `issuer` against the one you expect before sending a secret to any endpoint
+it names, and do not mix a sandbox resource URL with production authorization. The SDK falls back
+to `OAuthResource::DEFAULT_ISSUER` when you pass nothing.
 
-The metadata advertises client-ID metadata documents as an additional client-identification
-mechanism. This guide uses an application registered in Assinafy.
-Pin the expected issuer and validate discovered origins before sending secrets. Do not mix sandbox
-resource URLs with production authorization. Sandbox deployments may not expose these OAuth routes.
+## Permissions (scopes)
+
+| Constant | Scope | Lets your app |
+| --- | --- | --- |
+| `SCOPE_DOCUMENTS_READ` | `documents:read` | Read documents, their signers, assignments and activity |
+| `SCOPE_DOCUMENTS_WRITE` | `documents:write` | Create documents and send them for signature |
+| `SCOPE_TEMPLATES_READ` | `templates:read` | Read templates |
+| `SCOPE_TEMPLATES_WRITE` | `templates:write` | Create and change templates |
+| `SCOPE_ACCOUNT_READ` | `account:read` | Read the workspace profile, theme and logo |
+| `SCOPE_OPENID` | `openid` | Receive an `id_token` identifying the user |
+| `SCOPE_PROFILE` | `profile` | Read the user's name |
+| `SCOPE_EMAIL` | `email` | Read the user's email and whether it is verified |
+| `SCOPE_OFFLINE_ACCESS` | `offline_access` | Receive a refresh token, to keep working while the user is away |
+
+Request the minimum: every permission is another line the user reads before deciding. The user
+approves everything you requested or nothing, so a feature that needs more later means running the
+flow again with the larger set. `documents:write` can spend the workspace's notification credits,
+because sending for signature notifies signers. Billing and subscriptions, workspace membership,
+credentials and administration are never available to an OAuth token, whatever its scopes.
 
 ## Begin authorization
 
-Generate new state and a verifier for every connection attempt. Store this transaction in the
-application's authenticated server-side session with a short expiry and bind it to the initiating
-user. The verifier must be 43–128 characters from the PKCE unreserved character set.
+`startAuthorization()` mints a fresh PKCE verifier and `state` on every call and returns the
+transaction to persist. It makes no HTTP request.
 
 ```php
-$clientId = (string) getenv('ASSINAFY_OAUTH_CLIENT_ID');
-if ($clientId === '') {
-    throw new RuntimeException('ASSINAFY_OAUTH_CLIENT_ID is required');
-}
-$redirectUri = 'https://app.example.com/integrations/assinafy/callback';
-$verifier = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
-$challenge = rtrim(strtr(base64_encode(hash('sha256', $verifier, true)), '+/', '-_'), '=');
-$state = bin2hex(random_bytes(32));
-$nonce = bin2hex(random_bytes(32));
+$start = $oauth->startAuthorization('https://app.example.com/integrations/assinafy/callback', [
+    OAuthResource::SCOPE_DOCUMENTS_READ,
+    OAuthResource::SCOPE_DOCUMENTS_WRITE,
+    OAuthResource::SCOPE_ACCOUNT_READ,
+    OAuthResource::SCOPE_OPENID,
+    OAuthResource::SCOPE_EMAIL,
+    OAuthResource::SCOPE_OFFLINE_ACCESS,
+], ['issuer' => $server['issuer'], 'authorization_endpoint' => $server['authorization_endpoint']]);
+
+// [
+//     'state' => '<43-character random string>',
+//     'code_verifier' => '<43-character random string>',
+//     'code_challenge' => '<base64url sha256 of the verifier>',
+//     'redirect_uri' => 'https://app.example.com/integrations/assinafy/callback',
+//     'issuer' => 'https://auth.assinafy.com.br',
+//     'resource' => 'https://api.assinafy.com.br',
+//     'nonce' => '<43-character random string>',
+//     'authorization_url' => 'https://auth.assinafy.com.br/oauth/authorize?response_type=code&…',
+// ]
 
 // The host application must already have started its secure authenticated session.
-$_SESSION['assinafy_oauth'] = [
-    'state' => $state,
-    'verifier' => $verifier,
-    'nonce' => $nonce,
-    'redirect_uri' => $redirectUri,
-    'created_at' => time(),
-];
+$_SESSION['assinafy_oauth'] = $start + ['created_at' => time()];
 
-$authorizationUrl = 'https://auth.assinafy.com.br/oauth/authorize?' . http_build_query([
-    'response_type' => 'code',
-    'client_id' => $clientId,
-    'redirect_uri' => $redirectUri,
-    'scope' => 'documents:read documents:write account:read openid profile email offline_access',
-    'resource' => 'https://api.assinafy.com.br',
-    'code_challenge' => $challenge,
-    'code_challenge_method' => 'S256',
-    'state' => $state,
-    'nonce' => $nonce,
-], '', '&', PHP_QUERY_RFC3986);
+header('Location: ' . $start['authorization_url'], true, 302);
 ```
 
-Redirect the user to `$authorizationUrl`. The user selects a workspace and grants permissions.
-Request only scopes needed by the app; template access needs `templates:read` or `templates:write`.
-The `resource` value is the API origin, without `/v1`.
+Bind the transaction to the initiating user with a short expiry, and redirect with a full page
+navigation — never an AJAX call. A `nonce` is generated only when `openid` is among the scopes,
+because nothing else echoes one back.
+
+The `options` argument overrides `state`, `code_verifier`, `nonce`, `issuer`,
+`authorization_endpoint` and `resource`; every one has a correct default. Supply your own only
+when your framework owns that material.
+
+If `client_id` or `redirect_uri` is wrong the user is **not** sent back to you — the authorization
+server shows an error on its own page, because redirecting to an unverified address would be
+unsafe. Users stuck on an Assinafy error page usually mean one of those two values is wrong.
 
 ## Validate the callback and exchange the code
 
-The callback includes `code`, `state`, and `iss`, or an OAuth error. Verify state and issuer before
-using the code. Consume the stored transaction once. Authorization codes expire after 60 seconds.
+`handleCallback()` is the security-critical step. It rejects a `state` that does not match the
+stored transaction and an `iss` that is not the expected authorization server before the code is
+sent anywhere, and turns a declined authorization into an exception. Consume the stored
+transaction exactly once.
 
 ```php
+use Assinafy\SDK\Exceptions\ApiException;
+
 $transaction = $_SESSION['assinafy_oauth'] ?? null;
 unset($_SESSION['assinafy_oauth']);
 
-if (
-    !is_array($transaction)
-    || !is_string($_GET['state'] ?? null)
-    || !hash_equals($transaction['state'], $_GET['state'])
-    || ($_GET['iss'] ?? null) !== 'https://auth.assinafy.com.br'
-    || time() - $transaction['created_at'] > 600
-) {
-    throw new RuntimeException('Invalid or expired OAuth callback');
-}
-if (isset($_GET['error'])) {
-    throw new RuntimeException('Assinafy authorization was not completed');
-}
-$code = $_GET['code'] ?? null;
-if (!is_string($code) || $code === '') {
-    throw new RuntimeException('Missing authorization code');
+if (!is_array($transaction) || time() - $transaction['created_at'] > 600) {
+    throw new RuntimeException('Invalid or expired OAuth transaction');
 }
 
-$tokenRequest = [
-    'grant_type' => 'authorization_code',
-    'code' => $code,
-    'redirect_uri' => $transaction['redirect_uri'],
-    'client_id' => (string) getenv('ASSINAFY_OAUTH_CLIENT_ID'),
-    'client_secret' => (string) getenv('ASSINAFY_OAUTH_CLIENT_SECRET'),
-    'code_verifier' => $transaction['verifier'],
-    'resource' => 'https://api.assinafy.com.br',
-];
-$public = AssinafyClient::forAuth(Configuration::DEFAULT_BASE_URL);
-$tokens = $public->getHttpClient()->postRaw(
-    'oauth/token',
-    http_build_query($tokenRequest, '', '&', PHP_QUERY_RFC3986),
-    'application/x-www-form-urlencoded',
-)->getData();
+try {
+    $code = $oauth->handleCallback($_GET, $transaction);
+    $tokens = $oauth->exchangeCode($code, $transaction);
+} catch (ApiException $e) {
+    // 'access_denied' when the user declined; 'invalid_scope', 'invalid_request',
+    // 'unsupported_response_type' or 'invalid_target' for a malformed request;
+    // 'invalid_grant' or 'invalid_client' from the token endpoint.
+    throw new RuntimeException('Assinafy authorization was not completed: ' . $e->getMessage());
+}
+
+// [
+//     'access_token' => '<access-token>',
+//     'token_type' => 'Bearer',
+//     'expires_in' => 3600,
+//     'scope' => 'documents:read documents:write account:read openid email',
+//     'refresh_token' => '<refresh-token>',
+//     'id_token' => '<signed-id-token>',
+// ]
 ```
 
-This example is for a confidential backend using `client_secret_post`. Public clients omit
-`client_secret` and still use PKCE. Use form encoding as specified in the integration guide.
-Token responses are flat JSON, with no `data` envelope:
+The code is single-use and expires **60 seconds** after approval, so exchange it from your server
+immediately. `exchangeCode()` reads `code_verifier`, `redirect_uri` and `resource` from the stored
+transaction so they match the authorization request byte for byte.
 
-```php
-[
-    'access_token' => '<access-token>',
-    'token_type' => 'Bearer',
-    'expires_in' => 3600,
-    'refresh_token' => '<refresh-token>',
-    'scope' => 'documents:read documents:write account:read openid profile email offline_access',
-    'id_token' => '<signed-id-token>',
-]
-```
+`refresh_token` is present only when `offline_access` was requested **and** approved; `id_token`
+only with `openid`. Read the returned `scope` instead of assuming every requested permission was
+granted — `offline_access` is a request-time signal, not an access-token permission, and never
+appears there.
 
-`refresh_token` is present only with approved offline access; `id_token` requires `openid`.
-Read actual granted scopes from `scope`; do not assume every requested scope was approved.
-`offline_access` is a renewal request signal and is not an access-token permission.
-Persist tokens only after validating the response and the initiating application's user/session.
-If using OIDC identity, use a maintained OIDC/JWT library to validate the RS256 signature against
-JWKS, issuer, audience, expiration, and the stored nonce. Merely decoding a JWT does not validate it.
+Token responses are flat JSON: RFC 6749 forbids the `{ status, message, data }` envelope the rest
+of the API uses, so these methods return the decoded body as-is. Errors are flat too, which is why
+`ApiException::getMessage()` is the machine-readable code and `getResponseData()['error_description']`
+is the human-readable text. Persist tokens only after validating the response and the initiating
+session, and never log the callback, the request, the token response or the exception context.
 
 ## Select the authorized workspace
 
+A token belongs to the one workspace the user picked. With an OAuth token the workspace list
+returns exactly that workspace.
+
 ```php
-if (!is_array($tokens) || !is_string($tokens['access_token'] ?? null)) {
-    throw new RuntimeException('Invalid OAuth token response');
-}
-$accounts = $public->accounts()->list($tokens['access_token']);
+$accounts = AssinafyClient::forAuth()->accounts()->list($tokens['access_token']);
 $accountId = $accounts['data'][0]['id'] ?? null;
 if (!is_string($accountId) || $accountId === '') {
     throw new RuntimeException('No authorized workspace returned');
 }
+
 $connected = AssinafyClient::forBearer($tokens['access_token'], $accountId);
 $documents = $connected->documents()->list();
 ```
 
-The OAuth connection authorizes one workspace. Persist that ID with the connection and never
-accept a different workspace ID from an untrusted request. Create a fresh client for each
-connection; avoid shared mutable credentials in workers or service singletons.
+Store that workspace id with the connection and never accept a different one from an untrusted
+request. Calling any other workspace returns `403`, even one the same user belongs to — if your
+customer uses several workspaces, connect each one separately and keep tokens per workspace. This
+is the integration mistake we see most often.
 
-OAuth scopes restrict resource access. Billing, membership, credential-management, and some
-administrative APIs are unavailable through OAuth even though an API-key client exposes them.
-For `403` with `insufficient_scope` in `WWW-Authenticate`, request the missing permission through
-new consent. Other `403` responses may be plan, ownership, or feature restrictions.
+Always send the token in `Authorization: Bearer`, which `forBearer()` does. A token sent as
+`X-Api-Key` or in the query string is refused.
+
+Create a fresh client per connection and avoid shared mutable credentials in workers or service
+singletons.
 
 ## Refresh and replace credentials atomically
 
-Access tokens last one hour. Refresh tokens rotate on every use, and approval expires after
-30 days. Hold a lock for the connection, load its current refresh token, refresh once, and
-atomically save the new token pair before releasing the lock.
+Access tokens last one hour. A connection lasts **30 days from the user's approval** and
+refreshing does not extend it, so plan for users to reconnect monthly.
 
 ```php
-$refreshRequest = [
-    'grant_type' => 'refresh_token',
-    'refresh_token' => (string) getenv('ASSINAFY_OAUTH_REFRESH_TOKEN'),
-    'client_id' => (string) getenv('ASSINAFY_OAUTH_CLIENT_ID'),
-    'client_secret' => (string) getenv('ASSINAFY_OAUTH_CLIENT_SECRET'),
-];
-$renewed = $public->getHttpClient()->postRaw(
-    'oauth/token',
-    http_build_query($refreshRequest, '', '&', PHP_QUERY_RFC3986),
-    'application/x-www-form-urlencoded',
-)->getData();
+$renewed = $oauth->refresh($connection->refreshToken);
+// Same shape as the code exchange, with a NEW refresh_token.
 ```
 
-The response has the same token fields as the code exchange. In an application, load the refresh
-token from the encrypted connection record rather than a process-wide environment variable.
-Never reuse an old refresh token, run parallel refreshes, or blindly retry after an ambiguous
-timeout: reuse detection can invalidate the connection. Reconnect after expiration, revocation,
-or `invalid_grant`. The SDK does not implement storage, locks, consent, or automatic retries.
+Every refresh returns a new refresh token and retires the old one. A reused refresh token cannot
+be told apart from a stolen one being replayed, so it ends the whole connection: every token stops
+working and the user must connect again. Therefore:
 
-## Userinfo and disconnect
+1. Hold a lock for the connection and refresh one at a time.
+2. Save the new `refresh_token` before doing anything else with the response.
+3. Treat a timeout as "maybe it worked" — re-read your stored token before retrying, never retry
+   blindly with the old one.
 
-Userinfo requires an OAuth Bearer token and returns flat OIDC claims:
+Load the refresh token from the encrypted connection record rather than a process-wide environment
+variable. Reconnect after expiration, revocation, or `invalid_grant`. If the user approves your app
+again with different permissions, the previous tokens stop working immediately.
+
+## Sign users in (OpenID Connect)
+
+Request `openid`, plus `profile` and/or `email`, to receive an `id_token`: a signed JWT saying who
+approved. Validate it with a maintained OpenID Connect library — signature `RS256` against the
+keys at `jwks_uri` matching the `kid`, `iss` equal to the issuer, `aud` equal to your `client_id`,
+`exp` in the future, and `nonce` equal to the one you stored. Decoding a JWT is not validating it,
+and the SDK does not ship a JWT implementation.
+
+For the user's name and email, call userinfo instead of trusting a decoded token:
 
 ```php
-$userinfo = $public->getHttpClient()->get('oauth/userinfo', [], [
-    'Authorization' => 'Bearer ' . $tokens['access_token'],
-])->getData();
-// ['sub' => 'user-id', 'name' => 'Example User', 'email' => 'user@example.com', 'email_verified' => true]
+$claims = $oauth->userinfo($tokens['access_token']);
+// ['sub' => 'user-id', 'name' => 'Example User', 'email' => 'person@example.com',
+//  'email_verified' => true]
 ```
 
-Optional claims depend on scopes. Disconnect with a refresh token when one is stored, otherwise
-with the access token:
+`sub` is the user's stable identifier. `name` requires `profile` and `email` requires `email`;
+optional claims are null or absent otherwise. Userinfo authenticates like any other API route, so
+unlike the token endpoint its `401`/`403` arrive in the ordinary API envelope.
+
+## Disconnecting
+
+When a user disconnects in your product, revoke the token instead of only deleting your copy.
+Revoke the refresh token when you hold one — that ends the whole connection.
 
 ```php
-$revokeRequest = [
-    'token' => $tokens['refresh_token'] ?? $tokens['access_token'],
-    'client_id' => (string) getenv('ASSINAFY_OAUTH_CLIENT_ID'),
-    'client_secret' => (string) getenv('ASSINAFY_OAUTH_CLIENT_SECRET'),
-];
-$public->getHttpClient()->postRaw(
-    'oauth/revoke',
-    http_build_query($revokeRequest, '', '&', PHP_QUERY_RFC3986),
-    'application/x-www-form-urlencoded',
+$oauth->revoke(
+    $connection->refreshToken ?? $connection->accessToken,
+    OAuthResource::TOKEN_TYPE_HINT_REFRESH,
 );
 ```
 
-Successful revocation returns HTTP 200 with no token information; unknown/revoked tokens also
-succeed. Invalid client authentication can return 401. Remove the local connection's credentials
-when disconnecting, and record any remote revocation failure without recording token values.
+Every token outcome answers `200` — revoked, already revoked, unknown, malformed — so the endpoint
+can never be used to probe whether a token exists, and success here is not evidence the token was
+real. Only failed client authentication answers `401` with `invalid_client`.
 
-OAuth errors can be flat objects such as
-`['error' => 'invalid_client', 'error_description' => 'Client authentication failed.']`.
-The SDK raises `ApiException`; inspect `getResponseData()` and `getResponseHeaderLine()` without
-logging the full callback, request, token response, or exception context.
+Users can also revoke your app themselves under **Connected apps** in their Assinafy profile, and
+deleting or disabling your application has the same effect. In every case your tokens stop working
+at once: handle the `401` by asking the user to connect again. Remove the local connection's
+credentials when disconnecting, and record a remote revocation failure without recording token
+values.
+
+## Errors
+
+On your redirect URI, surfaced by `handleCallback()` as `ApiException` with status 400:
+
+| `error` | Meaning |
+| --- | --- |
+| `access_denied` | The user declined |
+| `invalid_scope` | A scope your application is not registered for, or none |
+| `invalid_request` | Missing or malformed PKCE parameters |
+| `unsupported_response_type` | Anything other than `response_type=code` |
+| `invalid_target` | A `resource` other than the API origin |
+
+From the token endpoint, surfaced by `exchangeCode()` and `refresh()`:
+
+| `error` | Usual causes |
+| --- | --- |
+| `invalid_grant` | Code expired, already used, or issued to another client; a `code_verifier` outside the 43–128 unreserved-character grammar; `redirect_uri` mismatch; a refresh token already used, expired, or whose authorization no longer includes `offline_access` |
+| `invalid_client` | Wrong `client_id` or secret, or the application is disabled |
+| `invalid_target` | `resource` does not match what was authorized |
+| `unsupported_grant_type` | Only `authorization_code` and `refresh_token` exist |
+
+From resource calls made with the token:
+
+| Status | Meaning |
+| --- | --- |
+| `401` | Token expired, revoked, or not sent as `Bearer`. Refresh; if that fails, ask the user to reconnect. |
+| `403` with `insufficient_scope` | Missing permission. Reconnect requesting the scope named in `WWW-Authenticate`. |
+| `403` otherwise | Another workspace, the user's own role, or an area OAuth tokens can never reach. |
+| `429` | Too many requests. Back off and retry later. |
+
+An `insufficient_scope` challenge names what is missing and where the resource metadata lives:
+
+```php
+try {
+    $connected->documents()->upload($path);
+} catch (ApiException $e) {
+    $challenge = $e->getResponseHeaderLine('WWW-Authenticate');
+    // Bearer error="insufficient_scope", scope="documents:write",
+    //   resource_metadata="https://api.assinafy.com.br/.well-known/oauth-protected-resource"
+}
+```
+
+Treat it as a prompt to reconnect with that scope added, not as a request to retry.
+
+The authorize and token endpoints accept **50 requests per minute per IP**. Normal traffic stays
+far below that; hitting it usually means a refresh loop.
+
+## Before you go live
+
+- A new PKCE verifier and `state` for every connection attempt — `startAuthorization()` does this.
+- `state` and `iss` checked on your redirect URI — `handleCallback()` does this.
+- `client_secret` only on your server, never in a mobile app, browser code or a repository.
+- The new refresh token saved before use, and one refresh at a time per connection.
+- `401` handled: refresh, and if that fails, ask the user to reconnect.
+- The workspace id stored per connection, and the returned `scope` read rather than assumed.
+- Every production redirect URI registered, `https://` and exact.
+- Only the permissions you need.
+- Tokens revoked when a user disconnects.
+- Verification requested before launching beyond a pilot.

@@ -131,9 +131,25 @@ A resposta inclui `documents`, `credits`, `needs_extra_document`, `extra_documen
 `total_credits`, `breakdown`, `document_balance`, `credit_balance`, `has_sufficient_resources`,
 `blocking_reason` e `message`. IDs de signatário podem ser omitidos na estimativa.
 
-Uma atribuição comum aceita no máximo um canal de notificação por signatário. Email combina com
-Email; Whatsapp combina com Whatsapp. Se um lado for omitido, o servidor infere o outro; omitir ambos
-seleciona Email. Etapas informadas devem ser contíguas a partir de 1 e existir para todos os signatários.
+Uma atribuição comum aceita no máximo um canal de notificação por signatário. Se um lado for
+omitido, o servidor infere o outro; omitir ambos seleciona Email. Etapas informadas devem ser
+contíguas a partir de 1 e existir para todos os signatários.
+
+Cada signatário tem um método de verificação (como comprova a identidade) acoplado a um método de
+notificação (como recebe o convite). O SDK valida a matriz antes de enviar a requisição.
+
+| Verificação | Notificação permitida | Requisitos | Créditos por signatário |
+| --- | --- | --- | --- |
+| `VERIFICATION_EMAIL` | `Email` | Email cadastrado no signatário | 0 |
+| `VERIFICATION_WHATSAPP` | `Whatsapp` | `whatsapp_phone_number` e assinatura paga | 0,45 |
+| `VERIFICATION_DIGITAL_CERTIFICATE` | `Email` ou `Whatsapp` | Recurso Certificado Digital na conta (planos Standard e Pro), CPF em `government_id` e o signatário sozinho na sua etapa | 2 pela assinatura, além da notificação |
+
+`DigitalCertificate` cobre os certificados ICP-Brasil **A1** (arquivo de software no dispositivo) e
+**A3** (cartão ou token). Os dois usam esse mesmo valor e o mesmo payload — mudam apenas onde a
+chave privada fica guardada. A assinatura é concluída no navegador pela extensão Web PKI, então
+`signerSession()->sign()` não a finaliza e a API não publica operação de início/conclusão de
+certificado. O resultado é uma assinatura qualificada PAdES, baixável pelo artefato `pades`.
+Nos custos, ela aparece no breakdown sob o código `SignatureDigitalCertificate`.
 
 ### 4. Solicitar a assinatura
 
@@ -367,23 +383,65 @@ solicita outra entrega. O [catálogo completo](docs/API_REFERENCE.md#event-catal
 
 ## Aplicativos de marketplace e OAuth
 
-Para conectar contas de outros usuários, use autorização OAuth com PKCE S256 e um aplicativo
-registrado na Assinafy. O [guia OAuth](docs/OAUTH.md) cobre descoberta, consentimento, troca do código,
-renovação com rotação de refresh token, revogação, escopos e isolamento por conta.
+Use OAuth quando a sua aplicação age sobre a conta **de outra pessoa**, sem nunca receber a senha
+ou a API key dela. Para automatizar a sua própria conta, continue com a API key.
 
-Troca de código, renovação, revogação, userinfo e descoberta usam o transporte HTTP público.
-Não existe um recurso `oauth()` nem renovação automática; a aplicação controla o callback,
-o consentimento e o armazenamento dos tokens.
+`oauth()` devolve um `OAuthResource` que cobre o fluxo inteiro: material PKCE, URL de autorização,
+validação do callback, troca do código, renovação, revogação, userinfo e os dois documentos de
+descoberta. O [guia OAuth](docs/OAUTH.md) traz os payloads completos, os escopos e a lista de
+verificação para produção.
 
 ```php
-$public = AssinafyClient::forAuth(Configuration::DEFAULT_BASE_URL);
-$accessToken = (string) getenv('ASSINAFY_ACCESS_TOKEN');
-$accounts = $public->accounts()->list($accessToken);
-$connectedClient = AssinafyClient::forBearer($accessToken, $accounts['data'][0]['id']);
+use Assinafy\SDK\Resources\OAuthResource;
+
+$oauth = AssinafyClient::forAuth()->oauth(
+    (string) getenv('ASSINAFY_OAUTH_CLIENT_ID'),
+    (string) getenv('ASSINAFY_OAUTH_CLIENT_SECRET') ?: null,
+);
+
+// 1. Envie o navegador para a Assinafy e guarde a transação na sessão do usuário.
+$start = $oauth->startAuthorization('https://app.example.com/callback', [
+    OAuthResource::SCOPE_DOCUMENTS_READ,
+    OAuthResource::SCOPE_DOCUMENTS_WRITE,
+    OAuthResource::SCOPE_OFFLINE_ACCESS,
+]);
+$_SESSION['assinafy_oauth'] = $start;
+header('Location: ' . $start['authorization_url'], true, 302);
+
+// 2. No redirect URI, valide o retorno e troque o código.
+$transaction = $_SESSION['assinafy_oauth'];
+unset($_SESSION['assinafy_oauth']);
+$tokens = $oauth->exchangeCode($oauth->handleCallback($_GET, $transaction), $transaction);
+
+// 3. O token vale para a única conta escolhida pelo usuário.
+$accounts = AssinafyClient::forAuth()->accounts()->list($tokens['access_token']);
+$connected = AssinafyClient::forBearer($tokens['access_token'], $accounts['data'][0]['id']);
 ```
 
-Crie um cliente por conexão/conta. Nunca mantenha uma credencial mutável global entre usuários.
-Os helpers legados `socialLoginUrl()` e `socialLoginCallbackUrl()` são separados desse fluxo OAuth.
+`startAuthorization()` gera um `code_verifier` e um `state` novos a cada tentativa;
+`handleCallback()` compara o `state` com `hash_equals` e exige que `iss` seja o servidor de
+autorização esperado, antes de o código ser usado. Passe `null` como segundo argumento de `oauth()`
+para um aplicativo público, que autentica só com PKCE e não recebe segredo.
+
+As respostas de token são JSON plano, sem o envelope `data`. Leia o `scope` retornado em vez de
+supor que todo escopo pedido foi concedido. `refresh_token` só vem com `offline_access` aprovado e
+`id_token` só com `openid`.
+
+```php
+$renovado = $oauth->refresh($conexao->refreshToken);     // devolve um refresh token NOVO
+$claims   = $oauth->userinfo($tokens['access_token']);   // {sub, name?, email?, email_verified?}
+$oauth->revoke($conexao->refreshToken, OAuthResource::TOKEN_TYPE_HINT_REFRESH);
+```
+
+Cada renovação aposenta o refresh token usado. Um refresh token repetido é indistinguível de um
+roubado, então o servidor encerra a conexão inteira: guarde o novo token antes de qualquer outra
+coisa, renove um de cada vez por conexão e nunca repita a chamada às cegas após um timeout. O
+acesso dura 1 hora e a conexão 30 dias a partir do consentimento — renovar não estende esse prazo.
+
+O SDK não guarda tokens, não mantém locks e não renova nada sozinho. Crie um cliente por conexão e
+nunca compartilhe credencial mutável entre usuários. OAuth está publicado em produção; o sandbox
+não responde essas rotas. Os helpers legados `socialLoginUrl()` e `socialLoginCallbackUrl()` são
+separados desse fluxo.
 
 ## Respostas, paginação e erros
 
@@ -437,11 +495,12 @@ credenciais. Respostas e contextos de exceção podem conter dados pessoais: nã
 | `tags()` / `fields()` | Organização, definições de campos e validação de valores |
 | `webhooks()` / `webhookEvents()` | Configuração, histórico, retry e leitura de eventos |
 | `auth()` | Login, conta de usuário, API key e senha |
+| `oauth()` | Autorização de marketplace: PKCE, callback, token, renovação, revogação, userinfo e descoberta |
 | `signerSession()` / `signerDocuments()` | Ações e documentos acessíveis ao signatário |
 
 Estatísticas de conta/usuário e preferências de notificação estão disponíveis no sandbox.
-Recursos sujeitos ao plano, como notificações WhatsApp, podem responder 403. A disponibilidade OAuth
-é distinta entre ambientes; consulte a descoberta do ambiente escolhido.
+Recursos sujeitos ao plano, como notificações WhatsApp e Certificado Digital, podem responder 403.
+OAuth está publicado em produção e ausente do sandbox; confirme pela descoberta do ambiente escolhido.
 
 ## Testes e desenvolvimento
 

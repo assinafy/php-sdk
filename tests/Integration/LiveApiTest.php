@@ -9,6 +9,7 @@ use Assinafy\SDK\Configuration;
 use Assinafy\SDK\Exceptions\ApiException;
 use Assinafy\SDK\Resources\AssignmentResource;
 use Assinafy\SDK\Resources\DocumentResource;
+use Assinafy\SDK\Resources\OAuthResource;
 use Assinafy\SDK\Resources\WebhookResource;
 use PHPUnit\Framework\TestCase;
 
@@ -22,6 +23,10 @@ use PHPUnit\Framework\TestCase;
  *   ASSINAFY_NOTIFICATION_TESTS – set to 1 to enable notification flows
  *   ASSINAFY_TEST_EMAIL / ASSINAFY_TEST_EMAIL_ALT – controlled notification recipients
  *   ASSINAFY_STATEFUL_TESTS – set to 1 to modify and restore shared account settings
+ *
+ * The OAuth tests need no registered application: they read public discovery documents
+ * and assert that an unknown client is refused. OAuth is deployed to production only,
+ * so they skip on sandbox.
  *
  * These tests perform real network calls and may incur sandbox credit costs. They
  * refuse to target production unless ASSINAFY_ALLOW_PRODUCTION=1 is also set.
@@ -1279,6 +1284,161 @@ final class LiveApiTest extends TestCase
                 'Expected 401: signer-access-code was present but invalid.'
             );
         }
+    }
+
+    /**
+     * Discovery documents are unauthenticated, read-only and live at each host's origin.
+     *
+     * The authorization-server document is only ever served by the production issuer, so
+     * this assertion is the same on a sandbox run; the protected-resource document follows
+     * the configured environment and is absent from sandbox.
+     */
+    public function testOAuthDiscoveryWhenDeployed(): void
+    {
+        $oauth = $this->probeOAuthResource();
+
+        $authorizationServer = $oauth->authorizationServerMetadata();
+        $this->assertSame(OAuthResource::DEFAULT_ISSUER, $authorizationServer['issuer']);
+        $this->assertSame(
+            'https://auth.assinafy.com.br/oauth/authorize',
+            $authorizationServer['authorization_endpoint']
+        );
+        $this->assertContains(
+            OAuthResource::CODE_CHALLENGE_METHOD,
+            $authorizationServer['code_challenge_methods_supported']
+        );
+        $this->assertSame(
+            ['authorization_code', 'refresh_token'],
+            $authorizationServer['grant_types_supported']
+        );
+
+        // Every scope the server publishes must be a constant the SDK exposes. Assert a
+        // subset rather than equality: environments may publish a scope the SDK predates.
+        foreach ($authorizationServer['scopes_supported'] as $scope) {
+            $this->assertContains($scope, OAuthResource::SCOPES, "Unknown OAuth scope {$scope}");
+        }
+
+        try {
+            $resource = $oauth->protectedResourceMetadata();
+        } catch (ApiException $e) {
+            if (in_array($e->getStatusCode(), [403, 404], true)) {
+                $this->markTestSkipped('Protected-resource metadata is not deployed to this environment');
+            }
+            throw $e;
+        }
+
+        $this->assertSame([OAuthResource::DEFAULT_ISSUER], $resource['authorization_servers']);
+        $this->assertSame(['header'], $resource['bearer_methods_supported']);
+    }
+
+    /**
+     * The authorization URL the SDK builds must point at the endpoint discovery names,
+     * and carry the PKCE parameters the server requires.
+     */
+    public function testOAuthAuthorizationUrlMatchesTheDiscoveredEndpoint(): void
+    {
+        $oauth = $this->probeOAuthResource();
+        $endpoint = $oauth->authorizationServerMetadata()['authorization_endpoint'];
+
+        $start = $oauth->startAuthorization('https://app.example.com/oauth/callback', [
+            OAuthResource::SCOPE_DOCUMENTS_READ,
+            OAuthResource::SCOPE_OPENID,
+        ]);
+
+        $this->assertStringStartsWith($endpoint . '?', $start['authorization_url']);
+        parse_str((string) parse_url($start['authorization_url'], PHP_URL_QUERY), $query);
+        $this->assertSame('code', $query['response_type']);
+        $this->assertSame('S256', $query['code_challenge_method']);
+        $this->assertSame($start['code_challenge'], $query['code_challenge']);
+        $this->assertSame($start['state'], $query['state']);
+        $this->assertSame($start['nonce'], $query['nonce']);
+    }
+
+    /**
+     * Token and revocation failures are flat RFC 6749 objects, not the API envelope, so
+     * `getMessage()` is the machine-readable error code applications branch on.
+     *
+     * A bogus client can never authenticate, which makes this safe to run anywhere: it
+     * proves the SDK's form-encoded body reaches the server and its error surfaces
+     * correctly, without needing a registered application.
+     */
+    public function testOAuthTokenAndRevocationReportFlatRfcErrors(): void
+    {
+        $oauth = $this->probeOAuthResource();
+
+        foreach (
+            [
+                'refresh' => fn (): array => $oauth->refresh('sdk-live-probe-refresh-token'),
+                'revoke' => fn (): array => $oauth->revoke(
+                    'sdk-live-probe-token',
+                    OAuthResource::TOKEN_TYPE_HINT_REFRESH
+                ),
+            ] as $label => $call
+        ) {
+            try {
+                $call();
+                $this->fail("An unknown OAuth client must not authenticate on {$label}");
+            } catch (ApiException $e) {
+                if ($e->getStatusCode() === 404) {
+                    $this->markTestSkipped('OAuth endpoints are not deployed to this environment');
+                }
+
+                $this->assertSame(401, $e->getStatusCode(), $label);
+                $this->assertSame('invalid_client', $e->getMessage(), $label);
+                $this->assertArrayHasKey('error_description', (array) $e->getResponseData());
+                $this->assertArrayNotHasKey('data', (array) $e->getResponseData(), $label);
+            }
+        }
+    }
+
+    /**
+     * `grant_type` is read before client authentication, so an unsupported grant is the
+     * one token-endpoint error that proves the request body itself was parsed.
+     */
+    public function testOAuthTokenEndpointParsesTheFormEncodedBody(): void
+    {
+        $oauth = $this->probeOAuthResource();
+
+        try {
+            $oauth->exchangeCode('sdk-live-probe-code', [
+                'code_verifier' => OAuthResource::createCodeVerifier(),
+                'redirect_uri' => 'https://app.example.com/oauth/callback',
+            ]);
+            $this->fail('An unknown OAuth client must not exchange a code');
+        } catch (ApiException $e) {
+            if ($e->getStatusCode() === 404) {
+                $this->markTestSkipped('OAuth endpoints are not deployed to this environment');
+            }
+
+            $this->assertContains($e->getMessage(), ['invalid_client', 'invalid_grant']);
+        }
+    }
+
+    /** Userinfo authenticates like any other API route, so its errors keep the envelope. */
+    public function testOAuthUserinfoRejectsAnInvalidBearerToken(): void
+    {
+        try {
+            $this->probeOAuthResource()->userinfo('sdk-live-probe-access-token');
+            $this->fail('A bogus access token must not authenticate');
+        } catch (ApiException $e) {
+            if ($e->getStatusCode() === 404) {
+                $this->markTestSkipped('OAuth endpoints are not deployed to this environment');
+            }
+
+            $this->assertSame(401, $e->getStatusCode());
+            $this->assertArrayHasKey('status', (array) $e->getResponseData());
+        }
+    }
+
+    /**
+     * An OAuth resource for an application that does not exist.
+     *
+     * Every call it makes either fails client authentication or reads a public document,
+     * so no workspace, token or consent is touched.
+     */
+    private function probeOAuthResource(): OAuthResource
+    {
+        return $this->client->oauth('sdk-live-probe-client', 'sdk-live-probe-secret');
     }
 
     /**

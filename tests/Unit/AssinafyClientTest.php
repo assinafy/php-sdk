@@ -10,6 +10,7 @@ use Assinafy\SDK\Resources\AssignmentResource;
 use Assinafy\SDK\Resources\AuthResource;
 use Assinafy\SDK\Resources\DocumentResource;
 use Assinafy\SDK\Resources\FieldResource;
+use Assinafy\SDK\Resources\OAuthResource;
 use Assinafy\SDK\Resources\SignerDocumentResource;
 use Assinafy\SDK\Resources\AccountResource;
 use Assinafy\SDK\Resources\SignerResource;
@@ -47,6 +48,25 @@ final class AssinafyClientTest extends TestCase
         $this->assertInstanceOf(UserResource::class, $client->users());
         $this->assertSame($client->webhookEvents(), $client->webhookEvents());
         $this->assertInstanceOf(WebhookEventParser::class, $client->webhookEvents());
+    }
+
+    public function testOAuthAccessorBuildsAFreshResourcePerCredentials(): void
+    {
+        $client = AssinafyClient::forAuth();
+
+        $confidential = $client->oauth('client-id', 'client-secret');
+        $this->assertInstanceOf(OAuthResource::class, $confidential);
+        $this->assertSame('confidential', $confidential->__debugInfo()['client_type']);
+        $this->assertSame('public', $client->oauth('client-id')->__debugInfo()['client_type']);
+
+        // Deliberately not memoized: caching would serve a stale secret after a rotation.
+        $this->assertNotSame($confidential, $client->oauth('client-id', 'client-secret'));
+    }
+
+    public function testOAuthAccessorRejectsAnEmptyClientId(): void
+    {
+        $this->expectException(\Assinafy\SDK\Exceptions\ValidationException::class);
+        AssinafyClient::forAuth()->oauth('');
     }
 
     public function testForAuthBuildsPublicClient(): void

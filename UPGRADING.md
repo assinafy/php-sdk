@@ -4,6 +4,29 @@ Install a published 2.x release with `composer require assinafy/php-sdk:^2.1`. R
 VCS/path repository overrides if they prevent Composer from resolving the Packagist package.
 Use the documentation shipped with the installed tag; `main` may include unreleased changes.
 
+## Upgrading to 2.2.0
+
+This release is additive; no existing call changes shape. Marketplace OAuth is now a first-class
+resource, so replace hand-rolled transport calls with `AssinafyClient::oauth($clientId,
+$clientSecret)`:
+
+```php
+$oauth = AssinafyClient::forAuth()->oauth($clientId, $clientSecret);
+$start = $oauth->startAuthorization($redirectUri, [OAuthResource::SCOPE_DOCUMENTS_READ]);
+$tokens = $oauth->exchangeCode($oauth->handleCallback($_GET, $start), $start);
+```
+
+`startAuthorization()` replaces manual PKCE and state generation, and `handleCallback()` replaces
+the manual `state`/`iss` checks — it requires `iss` to be present and to match, where a hand-rolled
+check may have tolerated its absence. `exchangeCode()`, `refresh()` and `revoke()` send the same
+form-encoded bodies as before, so a working integration keeps working; `userinfo()` replaces the
+explicit Bearer header. Token responses remain flat JSON.
+
+Unlike every other accessor, `oauth()` is not cached: it returns a new resource per call so a
+rotated client secret is never served from a stale instance. Application-owned concerns are
+unchanged — the SDK still stores no tokens, holds no refresh lock, and renews nothing
+automatically. The SDK User-Agent is `Assinafy-PHP-SDK/v2.2.0`.
+
 ## Upgrading to 2.1.4
 
 The transport rejects an injected concrete Guzzle client with a default `auth` option. Supply

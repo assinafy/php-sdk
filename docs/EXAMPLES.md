@@ -334,8 +334,9 @@ Use a public client before an API key exists:
 $publicClient = AssinafyClient::forAuth(Configuration::SANDBOX_BASE_URL);
 ```
 
-For marketplace connections, use the [OAuth guide](OAUTH.md). The legacy `socialLoginUrl()` and
-`socialLoginCallbackUrl()` URL builders are separate from authorization-code/PKCE integration.
+For marketplace connections, see [Marketplace OAuth](#marketplace-oauth) below and the full
+[OAuth guide](OAUTH.md). The legacy `socialLoginUrl()` and `socialLoginCallbackUrl()` URL builders
+are separate from authorization-code/PKCE integration.
 
 For password login, load both values from secret input and never commit them:
 
@@ -368,6 +369,137 @@ $maskedApiKey = $bearerClient->auth()->getApiKey();
 `users()->get()` normalizes both an `AuthUser` response and the wrapped
 `{user: AuthUser, accounts: AuthAccount[]}` form, so `$authenticatedUser` is always the user
 object. Continue using `accounts()->list()` for account discovery.
+
+## Marketplace OAuth
+
+Connect a customer's workspace without ever handling their password or API key. OAuth is deployed
+to production, so these calls use the production base URL even while the rest of your integration
+is pointed at sandbox.
+
+```php
+use Assinafy\SDK\Exceptions\ApiException;
+use Assinafy\SDK\Resources\OAuthResource;
+
+$oauth = AssinafyClient::forAuth(Configuration::DEFAULT_BASE_URL)->oauth(
+    requiredEnv('ASSINAFY_OAUTH_CLIENT_ID'),
+    getenv('ASSINAFY_OAUTH_CLIENT_SECRET') ?: null,  // null for a public application
+);
+```
+
+Read the endpoints from discovery instead of hardcoding them, and check the issuer you get back:
+
+```php
+$resource = $oauth->protectedResourceMetadata();
+$server = $oauth->authorizationServerMetadata($resource['authorization_servers'][0]);
+
+if ($server['issuer'] !== OAuthResource::DEFAULT_ISSUER) {
+    throw new RuntimeException('Unexpected OAuth issuer');
+}
+```
+
+Start a connection. Each call mints a fresh verifier and state; persist the whole transaction in
+the user's authenticated session and redirect with a full page navigation:
+
+```php
+$start = $oauth->startAuthorization('https://app.example.com/integrations/assinafy/callback', [
+    OAuthResource::SCOPE_DOCUMENTS_READ,
+    OAuthResource::SCOPE_DOCUMENTS_WRITE,
+    OAuthResource::SCOPE_ACCOUNT_READ,
+    OAuthResource::SCOPE_OFFLINE_ACCESS,
+], ['issuer' => $server['issuer'], 'authorization_endpoint' => $server['authorization_endpoint']]);
+
+$_SESSION['assinafy_oauth'] = $start + ['created_at' => time()];
+header('Location: ' . $start['authorization_url'], true, 302);
+```
+
+On the redirect URI, validate the callback and exchange the code. The code is single-use and
+expires 60 seconds after approval:
+
+```php
+$transaction = $_SESSION['assinafy_oauth'] ?? null;
+unset($_SESSION['assinafy_oauth']);
+
+if (!is_array($transaction) || time() - $transaction['created_at'] > 600) {
+    throw new RuntimeException('Invalid or expired OAuth transaction');
+}
+
+try {
+    $code = $oauth->handleCallback($_GET, $transaction);
+    $tokens = $oauth->exchangeCode($code, $transaction);
+} catch (ApiException $e) {
+    // 'access_denied' when the user declined, 'invalid_grant' for a stale or replayed code.
+    throw new RuntimeException('Authorization was not completed: ' . $e->getMessage());
+}
+
+$grantedScopes = explode(' ', $tokens['scope']);
+$hasRefreshToken = isset($tokens['refresh_token']);
+```
+
+The token belongs to the one workspace the user selected. Store its ID with the connection:
+
+```php
+$accounts = AssinafyClient::forAuth(Configuration::DEFAULT_BASE_URL)
+    ->accounts()->list($tokens['access_token']);
+$authorizedAccountId = $accounts['data'][0]['id'];
+
+$connected = AssinafyClient::forBearer(
+    $tokens['access_token'],
+    $authorizedAccountId,
+    Configuration::DEFAULT_BASE_URL,
+);
+$documents = $connected->documents()->list(page: 1, perPage: 20);
+```
+
+Renew under a per-connection lock, saving the new refresh token before anything else — a replayed
+refresh token ends the whole connection:
+
+```php
+$lock->acquire($connectionId);
+try {
+    $renewed = $oauth->refresh($store->currentRefreshToken($connectionId));
+    $store->replaceTokens($connectionId, $renewed);
+} catch (ApiException $e) {
+    if ($e->getMessage() === 'invalid_grant') {
+        $store->markDisconnected($connectionId);  // ask the user to connect again
+    }
+    throw $e;
+} finally {
+    $lock->release($connectionId);
+}
+```
+
+A missing permission arrives as a `403` naming the scope in its challenge. Treat it as a prompt to
+reconnect, not to retry:
+
+```php
+try {
+    $connected->documents()->upload($pdfPath);
+} catch (ApiException $e) {
+    $challenge = $e->getResponseHeaderLine('WWW-Authenticate');
+    if (str_contains($challenge, 'insufficient_scope')) {
+        // Bearer error="insufficient_scope", scope="documents:write", resource_metadata="..."
+        $store->requestReconnect($connectionId, $challenge);
+    }
+}
+```
+
+Read OIDC claims through userinfo rather than decoding the `id_token`, and revoke on disconnect:
+
+```php
+$claims = $oauth->userinfo($tokens['access_token']);
+// ['sub' => 'user-id', 'name' => 'Example User', 'email' => 'person@example.com',
+//  'email_verified' => true]
+
+$oauth->revoke(
+    $store->currentRefreshToken($connectionId),
+    OAuthResource::TOKEN_TYPE_HINT_REFRESH,
+);
+$store->forget($connectionId);
+```
+
+Revocation answers `200` for every token outcome, including one that never existed, so a success
+is not evidence the token was valid. Validating an `id_token` needs a maintained OIDC library for
+the RS256 signature, issuer, audience, expiration and nonce; the SDK ships none.
 
 ## Notification preferences
 

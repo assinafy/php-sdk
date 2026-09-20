@@ -120,7 +120,8 @@ declare(strict_types=1);
                 The SDK is tested on PHP 8.2 through 8.5, uses strict types and PSR-4 autoloading,
                 accepts PSR-3 loggers, and supports Guzzle 7 and 8 as its runtime transport. It implements
                 workspace, document, signer and webhook operations, with template-management routes
-                supported by the service. Marketplace OAuth uses the public transport and scoped Bearer clients.
+                supported by the service. Marketplace OAuth is a first-class resource covering PKCE,
+                callback validation, token exchange, refresh, revocation, userinfo and discovery.
             </p>
         </section>
 
@@ -184,8 +185,8 @@ $documents = $client-&gt;documents()-&gt;list(page: 1, perPage: 20);</code></pre
                     <li><a href="API_REFERENCE.md">Complete public API reference</a></li>
                     <li><a href="EXAMPLES.md">Examples</a></li>
                     <li><a href="OAUTH.md">Marketplace OAuth</a></li>
-                    <li><a href="https://github.com/assinafy/php-sdk/blob/v2.1.4/README.md">Complete document workflow</a></li>
-                    <li><a href="https://github.com/assinafy/php-sdk/blob/v2.1.4/ARCHITECTURE.md">Architecture</a></li>
+                    <li><a href="https://github.com/assinafy/php-sdk/blob/v2.2.0/README.md">Complete document workflow</a></li>
+                    <li><a href="https://github.com/assinafy/php-sdk/blob/v2.2.0/ARCHITECTURE.md">Architecture</a></li>
                     <li>Read-only CLI quick start: <code>php docs/quickstart.php</code></li>
                     <li><a href="https://api.assinafy.com.br/v1/docs">Official Assinafy API documentation</a></li>
                     <li><a href="https://github.com/assinafy/php-sdk">GitHub mirror</a></li>

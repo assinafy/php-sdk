@@ -150,6 +150,24 @@ final class GuzzleHttpClientTest extends TestCase
         }
     }
 
+    /**
+     * An OAuth access token is refused when sent as `X-Api-Key` or in the query string,
+     * so userinfo must travel with the Bearer header alone even on an API-key client.
+     */
+    public function testUserinfoSendsOnlyTheBearerTokenOnAnApiKeyClient(): void
+    {
+        $client = $this->client([
+            new GuzzleResponse(200, [], '{"sub":"user-id","email":"person@example.com"}'),
+        ]);
+
+        $client->get('oauth/userinfo', [], ['Authorization' => 'Bearer oauth-access-token']);
+
+        $request = $this->lastRequest();
+        $this->assertSame('Bearer oauth-access-token', $request->getHeaderLine('Authorization'));
+        $this->assertFalse($request->hasHeader('X-Api-Key'));
+        $this->assertSame('', $request->getUri()->getQuery());
+    }
+
     public function testOwnerEstimateAndSignerSignWithSimilarPathsUseCorrectCredentials(): void
     {
         $client = $this->client([
