@@ -435,9 +435,10 @@ class AssignmentResource extends AbstractResource
     ): array {
         $this->assertMethod($method);
         $options = $this->normalizeListOptions($options);
-        if ($method === self::METHOD_VIRTUAL) {
-            $this->assertSigners($signers);
-        } elseif (($options['entries'] ?? []) === []) {
+        // The API prices per signer in both modes and rejects a signer-less estimate with
+        // `400 "Pelo menos um signatários precisa ser informado."`, so `collect` needs them too.
+        $this->assertSigners($signers);
+        if ($method === self::METHOD_COLLECT && ($options['entries'] ?? []) === []) {
             throw new ValidationException('Collect estimates require field entries');
         }
 

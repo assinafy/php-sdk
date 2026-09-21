@@ -304,19 +304,23 @@ final class AssignmentResourceTest extends TestCase
         $this->assertSame([['id' => 's1']], $this->http->lastCall()['body']['signers']);
     }
 
-    public function testCollectEstimateAllowsNoSignersWhenEntriesAreProvided(): void
+    public function testCollectEstimateSendsSignersAlongsideEntries(): void
     {
         $this->http->queueJson(200, ['total_credits' => 0]);
 
         $this->assignments->estimateCost(
             'doc1',
-            [],
+            [['verification_method' => 'Whatsapp', 'notification_methods' => ['Whatsapp']]],
             AssignmentResource::METHOD_COLLECT,
             ['entries' => [['page_id' => 'page1', 'fields' => []]]]
         );
 
         $call = $this->http->lastCall();
-        $this->assertSame([], $call['body']['signers']);
+        $this->assertSame(
+            [['verification_method' => 'Whatsapp', 'notification_methods' => ['Whatsapp']]],
+            $call['body']['signers'],
+            'collect is priced per signer too, so the channels must reach the API'
+        );
         $this->assertSame([['page_id' => 'page1', 'fields' => []]], $call['body']['entries']);
     }
 
@@ -326,7 +330,7 @@ final class AssignmentResourceTest extends TestCase
 
         $this->assignments->estimateCost(
             'doc1',
-            [],
+            [['verification_method' => 'Email']],
             AssignmentResource::METHOD_COLLECT,
             ['entries' => [4 => [
                 'page_id' => 'page1',
@@ -343,7 +347,20 @@ final class AssignmentResourceTest extends TestCase
     public function testCollectEstimateRequiresEntries(): void
     {
         $this->expectException(ValidationException::class);
-        $this->assignments->estimateCost('doc1', [], AssignmentResource::METHOD_COLLECT);
+        $this->assignments->estimateCost(
+            'doc1',
+            [['verification_method' => 'Email']],
+            AssignmentResource::METHOD_COLLECT
+        );
+    }
+
+    /** The API prices per signer in both modes and refuses a signer-less estimate. */
+    public function testCollectEstimateRequiresSigners(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->assignments->estimateCost('doc1', [], AssignmentResource::METHOD_COLLECT, [
+            'entries' => [['page_id' => 'page1', 'fields' => [['field_id' => 'field1']]]],
+        ]);
     }
 
     /** Creating an assignment still needs to know who signs. */

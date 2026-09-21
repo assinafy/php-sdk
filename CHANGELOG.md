@@ -3,6 +3,16 @@
 All notable changes to the Assinafy PHP SDK are documented here.
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## 2.3.0 - 2026-09-21
+
+- Require at least one signer for **every** cost estimate, not just `virtual` ones. The published
+  contract marks `signers` as required only for `virtual`, but the API prices per signer in both
+  modes and answers a signer-less estimate with
+  `400 "Pelo menos um signatários precisa ser informado."` A `collect` estimate built without
+  signers could never be priced, so `estimateCost()` now raises `ValidationException` locally
+  instead of letting the call fail upstream.
+- Set the SDK User-Agent version to `2.3.0`.
+
 ## 2.2.0 - 2026-09-20
 
 - Add `AssinafyClient::oauth()` and `OAuthResource`, covering the marketplace authorization-code
