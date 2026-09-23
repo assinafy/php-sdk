@@ -86,6 +86,7 @@ class OAuthResource extends AbstractResource
     public const SCOPE_TEMPLATES_READ = 'templates:read';
     public const SCOPE_TEMPLATES_WRITE = 'templates:write';
     public const SCOPE_ACCOUNT_READ = 'account:read';
+    public const SCOPE_WEBHOOKS_WRITE = 'webhooks:write';
     public const SCOPE_OPENID = 'openid';
     public const SCOPE_PROFILE = 'profile';
     public const SCOPE_EMAIL = 'email';
@@ -102,6 +103,7 @@ class OAuthResource extends AbstractResource
         self::SCOPE_TEMPLATES_READ,
         self::SCOPE_TEMPLATES_WRITE,
         self::SCOPE_ACCOUNT_READ,
+        self::SCOPE_WEBHOOKS_WRITE,
         self::SCOPE_OPENID,
         self::SCOPE_PROFILE,
         self::SCOPE_EMAIL,
@@ -601,7 +603,7 @@ class OAuthResource extends AbstractResource
      *     'authorization_servers' => ['https://auth.assinafy.com.br'],
      *     'scopes_supported' => [
      *         'documents:read', 'documents:write', 'templates:read', 'templates:write',
-     *         'account:read', 'openid', 'profile', 'email',
+     *         'account:read', 'webhooks:write', 'openid', 'profile', 'email',
      *     ],
      *     'bearer_methods_supported' => ['header'],
      * ]
@@ -642,7 +644,7 @@ class OAuthResource extends AbstractResource
      *     'jwks_uri' => 'https://auth.assinafy.com.br/.well-known/jwks.json',
      *     'scopes_supported' => [
      *         'documents:read', 'documents:write', 'templates:read', 'templates:write',
-     *         'account:read', 'openid', 'profile', 'email', 'offline_access',
+     *         'account:read', 'webhooks:write', 'openid', 'profile', 'email', 'offline_access',
      *     ],
      *     'response_types_supported' => ['code'],
      *     'grant_types_supported' => ['authorization_code', 'refresh_token'],

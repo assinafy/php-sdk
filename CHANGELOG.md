@@ -3,6 +3,11 @@
 All notable changes to the Assinafy PHP SDK are documented here.
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## 2.4.0 - 2026-09-23
+
+- `OAuthResource::SCOPE_WEBHOOKS_WRITE` requests permission to configure and deactivate a workspace webhook subscription.
+- The SDK User-Agent reports version `2.4.0`.
+
 ## 2.3.0 - 2026-09-21
 
 - Require at least one signer for **every** cost estimate, not just `virtual` ones. The published

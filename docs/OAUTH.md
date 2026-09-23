@@ -79,7 +79,7 @@ $resource = $oauth->protectedResourceMetadata();
 //     'authorization_servers' => ['https://auth.assinafy.com.br'],
 //     'scopes_supported' => [
 //         'documents:read', 'documents:write', 'templates:read', 'templates:write',
-//         'account:read', 'openid', 'profile', 'email',
+//         'account:read', 'webhooks:write', 'openid', 'profile', 'email',
 //     ],
 //     'bearer_methods_supported' => ['header'],
 // ]
@@ -94,7 +94,7 @@ $server = $oauth->authorizationServerMetadata($resource['authorization_servers']
 //     'jwks_uri' => 'https://auth.assinafy.com.br/.well-known/jwks.json',
 //     'scopes_supported' => [
 //         'documents:read', 'documents:write', 'templates:read', 'templates:write',
-//         'account:read', 'openid', 'profile', 'email', 'offline_access',
+//         'account:read', 'webhooks:write', 'openid', 'profile', 'email', 'offline_access',
 //     ],
 //     'response_types_supported' => ['code'],
 //     'grant_types_supported' => ['authorization_code', 'refresh_token'],
@@ -122,6 +122,7 @@ to `OAuthResource::DEFAULT_ISSUER` when you pass nothing.
 | `SCOPE_TEMPLATES_READ` | `templates:read` | Read templates |
 | `SCOPE_TEMPLATES_WRITE` | `templates:write` | Create and change templates |
 | `SCOPE_ACCOUNT_READ` | `account:read` | Read the workspace profile, theme and logo |
+| `SCOPE_WEBHOOKS_WRITE` | `webhooks:write` | Configure and deactivate the workspace webhook subscription |
 | `SCOPE_OPENID` | `openid` | Receive an `id_token` identifying the user |
 | `SCOPE_PROFILE` | `profile` | Read the user's name |
 | `SCOPE_EMAIL` | `email` | Read the user's email and whether it is verified |

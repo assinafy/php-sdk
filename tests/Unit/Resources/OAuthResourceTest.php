@@ -89,6 +89,7 @@ final class OAuthResourceTest extends TestCase
         $start = $this->oauth->startAuthorization(self::REDIRECT, [
             OAuthResource::SCOPE_DOCUMENTS_READ,
             OAuthResource::SCOPE_DOCUMENTS_WRITE,
+            OAuthResource::SCOPE_WEBHOOKS_WRITE,
             OAuthResource::SCOPE_OFFLINE_ACCESS,
         ]);
 
@@ -101,7 +102,7 @@ final class OAuthResourceTest extends TestCase
         $this->assertSame('code', $query['response_type']);
         $this->assertSame('client-id', $query['client_id']);
         $this->assertSame(self::REDIRECT, $query['redirect_uri']);
-        $this->assertSame('documents:read documents:write offline_access', $query['scope']);
+        $this->assertSame('documents:read documents:write webhooks:write offline_access', $query['scope']);
         $this->assertSame('S256', $query['code_challenge_method']);
         $this->assertSame('https://api.assinafy.com.br', $query['resource']);
         $this->assertSame($start['state'], $query['state']);
