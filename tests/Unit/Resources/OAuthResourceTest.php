@@ -6,6 +6,7 @@ namespace Assinafy\SDK\Tests\Unit\Resources;
 
 use Assinafy\SDK\Configuration;
 use Assinafy\SDK\Exceptions\ApiException;
+use Assinafy\SDK\Exceptions\NetworkException;
 use Assinafy\SDK\Exceptions\ValidationException;
 use Assinafy\SDK\Http\HttpClientInterface;
 use Assinafy\SDK\Resources\OAuthResource;
@@ -277,6 +278,25 @@ final class OAuthResourceTest extends TestCase
         }
     }
 
+    public function testHandleCallbackChecksStateAndIssuerBeforeAnError(): void
+    {
+        $start = $this->oauth->startAuthorization(self::REDIRECT, [OAuthResource::SCOPE_ACCOUNT_READ]);
+        $declined = [
+            'error' => 'access_denied',
+            'state' => $start['state'],
+            'iss' => 'https://auth.assinafy.com.br',
+        ];
+
+        foreach ([['state' => 'another-attempt'], ['iss' => 'https://auth.example.com']] as $tampered) {
+            try {
+                $this->oauth->handleCallback($tampered + $declined, $start);
+                $this->fail('Expected a foreign error response to be rejected');
+            } catch (ValidationException $e) {
+                $this->assertStringContainsString('does not match', $e->getMessage());
+            }
+        }
+    }
+
     public function testHandleCallbackRejectsAResponseWithoutACode(): void
     {
         $start = $this->oauth->startAuthorization(self::REDIRECT, [OAuthResource::SCOPE_ACCOUNT_READ]);
@@ -364,6 +384,21 @@ final class OAuthResourceTest extends TestCase
             'client_secret' => 'client-secret',
         ], $body);
         $this->assertSame('new-refresh', $renewed['refresh_token']);
+    }
+
+    public function testATimedOutRefreshIsSentOnceAndNeverRetried(): void
+    {
+        $this->http->queueException(new NetworkException('Network error: operation timed out'));
+        $this->http->queueRaw(200, '{"access_token":"must-not-be-used"}');
+
+        try {
+            $this->oauth->refresh('current-refresh');
+            $this->fail('A timed-out refresh must surface as NetworkException.');
+        } catch (NetworkException) {
+            // Indeterminate: the server may already have rotated the token.
+        }
+
+        $this->assertCount(1, $this->http->calls, 'The refresh token must never be resent automatically.');
     }
 
     public function testRefreshRejectsAnEmptyToken(): void

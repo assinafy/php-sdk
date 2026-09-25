@@ -105,7 +105,7 @@ $client = new AssinafyClient($configuration, logger: $logger);
 ```
 
 The bundled transport enforces `User-Agent: Assinafy-PHP-SDK/v{SDK_VERSION}` on every request—for
-example, version 2.4.1 sends `Assinafy-PHP-SDK/v2.4.1`. This applies to authenticated, public,
+example, version 2.4.2 sends `Assinafy-PHP-SDK/v2.4.2`. This applies to authenticated, public,
 signer, JSON, multipart-upload, raw-body, and binary-download requests.
 `Configuration::SDK_VERSION` is the single source for the header version.
 Applications that replace the bundled `HttpClientInterface` transport must send the same exact
@@ -189,14 +189,19 @@ and `id_token` needs `openid`.
 
 ```php
 $renewed = $oauth->refresh($connection->refreshToken);   // returns a NEW refresh token
-$claims  = $oauth->userinfo($tokens['access_token']);    // {sub, name?, email?, email_verified?}
-$oauth->revoke($connection->refreshToken, OAuthResource::TOKEN_TYPE_HINT_REFRESH);
+$store->saveRefreshToken($renewed['refresh_token']);     // persist it before anything else
+$claims  = $oauth->userinfo($renewed['access_token']);   // {sub, name?, email?, email_verified?}
+// On disconnect, revoke the token you stored most recently — never a retired copy.
+$oauth->revoke($store->currentRefreshToken(), OAuthResource::TOKEN_TYPE_HINT_REFRESH);
 ```
 
 Every refresh retires the token it used. A replayed refresh token is indistinguishable from a
 stolen one, so the server ends the whole connection: persist the replacement before anything else,
-refresh one at a time per connection, and never retry blindly after a timeout. Access tokens last
-one hour and a connection lasts 30 days from approval — refreshing does not extend it.
+refresh one at a time per connection, and never resend a refresh token after a timeout: re-read
+what you stored, and if it is still the token you sent, ask the user to reconnect. Only a failure
+that provably happened before sending (DNS, refused connection, TLS handshake) is safe to retry. Access tokens last
+one hour. A refresh token lasts 30 days and every refresh returns a new one with a fresh 30 days,
+so a connection only expires after 30 days without a refresh.
 
 The SDK stores no tokens, holds no locks and renews nothing automatically. Create one client per
 connection and never share a mutable credential between users. OAuth is deployed to production;

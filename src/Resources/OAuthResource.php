@@ -438,14 +438,16 @@ class OAuthResource extends AbstractResource
      * Renew an access token without the user.
      * `POST /oauth/token` with `grant_type=refresh_token`
      *
-     * Access tokens last one hour; a connection lasts 30 days from approval and refreshing
-     * does not extend it, so plan for users to reconnect monthly.
+     * Access tokens last one hour. A refresh token is valid for 30 days, and every refresh
+     * returns a new one with a fresh 30 days, so a connection only expires after 30 days
+     * without a refresh; after that, the user has to reconnect.
      *
      * **Every refresh retires the token it used and returns a new one.** A replayed refresh
      * token cannot be distinguished from a stolen one, so the server ends the entire
      * connection when it sees one. Hold a per-connection lock, persist the returned
-     * `refresh_token` before doing anything else with the response, and never retry after
-     * an ambiguous timeout without first re-reading what you stored.
+     * `refresh_token` before doing anything else with the response, and never resend a
+     * refresh token after an ambiguous failure (timeout, reset): re-read what you stored and,
+     * if it is still the token you sent, ask the user to reconnect. The SDK never retries.
      *
      * Request body (`application/x-www-form-urlencoded`):
      * ```php

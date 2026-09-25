@@ -642,6 +642,7 @@ class DocumentResource extends AbstractResource
      * [
      *     'hash' => 'FE32EDDADE7CBDDCBB934E7402047450B0E59C02',
      *     'id' => 'document-verification-id',
+     *     'agreement_code' => '550E8400-E29B-41D4-A716-446655440000',
      *     'status' => 'certificated',
      *     'page_count' => '1',
      *     'signer_count' => '1',
@@ -653,10 +654,13 @@ class DocumentResource extends AbstractResource
      * ]
      * ```
      *
+     * `agreement_code` is the agreement code printed on the document certificate. It may be null
+     * or absent (the sandbox omits it), so read it with `$result['agreement_code'] ?? null`.
+     *
      * An unknown or unsigned hash answers **200, not 404** — always branch on `is_valid`:
      * ```
      * [
-     *   'hash' => 'resource-id', 'id' => null, 'status' => null,
+     *   'hash' => 'resource-id', 'id' => null, 'agreement_code' => null, 'status' => null,
      *   'page_count' => null, 'signer_count' => null, 'completed_count' => null,
      *   'completed_at' => null, 'verified_at' => '2026-08-27T22:20:03Z',
      *   'is_valid' => false, 'message' => 'Documento não assinado ou não encontrado.',

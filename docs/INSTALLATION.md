@@ -5,6 +5,7 @@
 - PHP 8.2, 8.3, 8.4, or 8.5
 - Composer 2
 - The PHP `json` and `mbstring` extensions
+- TLS 1.2 or newer (the API refuses TLS 1.0 and 1.1)
 - TLS trust roots (CA certificates) suitable for HTTPS API requests
 
 PHP uses annually supported release branches rather than an LTS designation. The

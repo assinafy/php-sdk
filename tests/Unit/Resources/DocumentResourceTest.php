@@ -202,9 +202,10 @@ final class DocumentResourceTest extends TestCase
         $this->documents->statuses();
         $this->assertSame('documents/statuses', $this->http->lastCall()['uri']);
 
-        $this->http->queueJson(200, ['is_valid' => true]);
-        $this->documents->verify('HASH');
+        $this->http->queueJson(200, ['is_valid' => true, 'agreement_code' => 'AGREEMENT-CODE']);
+        $verification = $this->documents->verify('HASH');
         $this->assertSame('documents/HASH/verify', $this->http->lastCall()['uri']);
+        $this->assertSame('AGREEMENT-CODE', $verification['agreement_code']);
     }
 
     public function testPublicInfoAndSendToken(): void

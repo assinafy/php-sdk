@@ -3,6 +3,13 @@
 All notable changes to the Assinafy PHP SDK are documented here.
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## 2.4.2 - 2026-09-25
+
+- OAuth docs describe the current refresh-token lifetime: every refresh returns a new refresh token valid for a fresh 30 days, and a connection only expires after 30 days without a refresh.
+- After an ambiguous token failure (timeout, reset) the docs say never to resend the same refresh token: re-read what you stored and ask the user to reconnect if it is unchanged. A test pins that a timed-out refresh is sent exactly once.
+- `documents()->verify()` documents `agreement_code`, which may be null or absent.
+- The README refresh example saves the new refresh token and revokes the most recently stored one.
+
 ## 2.4.1 - 2026-09-25
 
 - The SDK's own HTTPS client now requires TLS 1.2 or newer; TLS 1.0 and 1.1 connections are refused. Caller-supplied clients are unchanged.

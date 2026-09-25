@@ -259,8 +259,9 @@ singletons.
 
 ## Refresh and replace credentials atomically
 
-Access tokens last one hour. A connection lasts **30 days from the user's approval** and
-refreshing does not extend it, so plan for users to reconnect monthly.
+Access tokens last one hour. A refresh token is valid for **30 days**, and every refresh returns
+a new one with a fresh 30 days. A connection only expires if your app goes 30 days without
+refreshing; after that, the user has to reconnect.
 
 ```php
 $renewed = $oauth->refresh($connection->refreshToken);
@@ -273,8 +274,10 @@ working and the user must connect again. Therefore:
 
 1. Hold a lock for the connection and refresh one at a time.
 2. Save the new `refresh_token` before doing anything else with the response.
-3. Treat a timeout as "maybe it worked" — re-read your stored token before retrying, never retry
-   blindly with the old one.
+3. Treat a timeout as "maybe it worked". Re-read your stored token (another worker may have saved
+   a newer one); if it is still the token you sent, never send it again — the server may already
+   have retired it — and ask the user to reconnect. Only a failure that provably happened before
+   the request was sent (DNS, refused connection, TLS handshake) is safe to retry.
 
 Load the refresh token from the encrypted connection record rather than a process-wide environment
 variable. Reconnect after expiration, revocation, or `invalid_grant`. If the user approves your app

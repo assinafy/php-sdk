@@ -429,14 +429,19 @@ supor que todo escopo pedido foi concedido. `refresh_token` só vem com `offline
 
 ```php
 $renovado = $oauth->refresh($conexao->refreshToken);     // devolve um refresh token NOVO
-$claims   = $oauth->userinfo($tokens['access_token']);   // {sub, name?, email?, email_verified?}
-$oauth->revoke($conexao->refreshToken, OAuthResource::TOKEN_TYPE_HINT_REFRESH);
+$repositorio->salvarRefreshToken($renovado['refresh_token']); // guarde-o antes de qualquer outra coisa
+$claims   = $oauth->userinfo($renovado['access_token']); // {sub, name?, email?, email_verified?}
+// Ao desconectar, revogue o token guardado mais recentemente — nunca uma cópia aposentada.
+$oauth->revoke($repositorio->refreshTokenAtual(), OAuthResource::TOKEN_TYPE_HINT_REFRESH);
 ```
 
 Cada renovação aposenta o refresh token usado. Um refresh token repetido é indistinguível de um
 roubado, então o servidor encerra a conexão inteira: guarde o novo token antes de qualquer outra
-coisa, renove um de cada vez por conexão e nunca repita a chamada às cegas após um timeout. O
-acesso dura 1 hora e a conexão 30 dias a partir do consentimento — renovar não estende esse prazo.
+coisa, renove um de cada vez por conexão e nunca reenvie um refresh token após um timeout: releia o
+que você guardou e, se ainda for o token enviado, peça ao usuário para reconectar. Só uma falha que
+comprovadamente ocorreu antes do envio (DNS, conexão recusada, handshake TLS) pode ser repetida. O
+acesso dura 1 hora. O refresh token vale 30 dias e cada renovação devolve um novo, válido por 30
+dias a partir dela: a conexão só expira se a aplicação passar 30 dias sem renovar.
 
 O SDK não guarda tokens, não mantém locks e não renova nada sozinho. Crie um cliente por conexão e
 nunca compartilhe credencial mutável entre usuários. OAuth está publicado em produção; o sandbox

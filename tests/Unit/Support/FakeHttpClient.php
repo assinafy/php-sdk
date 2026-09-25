@@ -17,8 +17,16 @@ final class FakeHttpClient implements HttpClientInterface
     /** @var array<int, array<string, mixed>> */
     public array $calls = [];
 
-    /** @var array<int, Response> */
+    /** @var array<int, Response|\Throwable> */
     private array $responses = [];
+
+    /** Queue a transport failure (e.g. a timeout) that the next call throws after being recorded. */
+    public function queueException(\Throwable $error): self
+    {
+        $this->responses[] = $error;
+
+        return $this;
+    }
 
     public function queueJson(int $status, array $data, array $headers = []): self
     {
@@ -101,6 +109,11 @@ final class FakeHttpClient implements HttpClientInterface
 
         $this->calls[] = array_merge(['method' => $method, 'uri' => $uri], $extra);
 
-        return array_shift($this->responses);
+        $next = array_shift($this->responses);
+        if ($next instanceof \Throwable) {
+            throw $next;
+        }
+
+        return $next;
     }
 }
