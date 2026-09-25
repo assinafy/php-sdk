@@ -3,6 +3,10 @@
 All notable changes to the Assinafy PHP SDK are documented here.
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## 2.4.1 - 2026-09-25
+
+- The SDK's own HTTPS client now requires TLS 1.2 or newer; TLS 1.0 and 1.1 connections are refused. Caller-supplied clients are unchanged.
+
 ## 2.4.0 - 2026-09-23
 
 - `OAuthResource::SCOPE_WEBHOOKS_WRITE` requests permission to configure and deactivate a workspace webhook subscription.

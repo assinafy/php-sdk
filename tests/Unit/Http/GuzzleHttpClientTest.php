@@ -54,6 +54,15 @@ final class GuzzleHttpClientTest extends TestCase
         return $this->transactions[count($this->transactions) - 1]['request'];
     }
 
+    public function testDefaultClientRequiresTls12OrNewer(): void
+    {
+        $client = (new \ReflectionProperty(GuzzleHttpClient::class, 'client'))
+            ->getValue(new GuzzleHttpClient(new Configuration('key', 'acc')));
+
+        $this->assertInstanceOf(Client::class, $client);
+        $this->assertSame(STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT, $client->getConfig('crypto_method'));
+    }
+
     public function testGetSendsQueryStringAndParsesEnvelope(): void
     {
         $client = $this->client([new GuzzleResponse(200, [], '{"status":200,"data":[{"id":"d1"}]}')]);

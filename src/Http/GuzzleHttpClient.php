@@ -97,6 +97,8 @@ class GuzzleHttpClient implements HttpClientInterface
             // API calls are not browser navigation. Refusing redirects prevents the
             // custom API-key header from being forwarded to another origin.
             'allow_redirects' => false,
+            // TLS 1.2 minimum (1.3 allowed); Guzzle 7 sets no floor of its own.
+            'crypto_method' => STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT,
         ]);
     }
 

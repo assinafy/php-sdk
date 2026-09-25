@@ -40,6 +40,7 @@ structure, and [Testing](#testing) below describes the quality gate and the live
 - `ext-json`
 - `ext-mbstring`
 - Composer 2
+- TLS 1.2 or newer (the default client refuses older versions)
 
 The default transport uses Guzzle. Applications may inject a PSR-3 logger or the SDK's own
 `HttpClientInterface`; the transport is not a PSR-18 implementation.
@@ -104,7 +105,7 @@ $client = new AssinafyClient($configuration, logger: $logger);
 ```
 
 The bundled transport enforces `User-Agent: Assinafy-PHP-SDK/v{SDK_VERSION}` on every request—for
-example, version 2.4.0 sends `Assinafy-PHP-SDK/v2.4.0`. This applies to authenticated, public,
+example, version 2.4.1 sends `Assinafy-PHP-SDK/v2.4.1`. This applies to authenticated, public,
 signer, JSON, multipart-upload, raw-body, and binary-download requests.
 `Configuration::SDK_VERSION` is the single source for the header version.
 Applications that replace the bundled `HttpClientInterface` transport must send the same exact

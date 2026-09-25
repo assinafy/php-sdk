@@ -19,7 +19,7 @@ retorno de todo o SDK. Os docblocks dos recursos incluem exemplos completos de r
 
 ## Instalação e configuração
 
-Requisitos: PHP 8.2–8.5, Composer 2 e extensões `json` e `mbstring`.
+Requisitos: PHP 8.2–8.5, Composer 2 e extensões `json` e `mbstring`. O cliente padrão exige TLS 1.2 ou superior.
 PHP usa ciclos de suporte, sem uma edição LTS; PHP 8.5 é a versão recomendada para novos projetos.
 Consulte a [política de suporte do PHP](https://www.php.net/supported-versions.php).
 Guzzle é instalado como dependência de execução.
