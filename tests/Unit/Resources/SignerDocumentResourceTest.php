@@ -134,6 +134,12 @@ final class SignerDocumentResourceTest extends TestCase
         $this->docs->declineMultiple('CODE', ['d1'], '');
     }
 
+    public function testDeclineMultipleRejectsReasonOver2000Characters(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->docs->declineMultiple('CODE', ['d1'], str_repeat('a', 2001));
+    }
+
     public function testDownloadReturnsBodyAndValidatesArtifact(): void
     {
         $this->http->queueRaw(200, '%PDF-1.4 binary');

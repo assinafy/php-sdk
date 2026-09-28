@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Assinafy\SDK\Resources;
 
+use Assinafy\SDK\Exceptions\ValidationException;
+
 /**
  * Accounts (workspaces) resource — covers every documented endpoint under `/accounts`.
  *
@@ -137,7 +139,7 @@ class AccountResource extends AbstractResource
      *
      * @param string|null $notificationSenderType one of the `NOTIFICATION_SENDER_*` constants
      * @return array<string, mixed> the created account
-     * @throws \Assinafy\SDK\Exceptions\ValidationException on an empty name or unknown sender type
+     * @throws ValidationException on an empty name or unknown sender type
      */
     public function create(
         string $name,
@@ -145,7 +147,7 @@ class AccountResource extends AbstractResource
         #[\SensitiveParameter] ?string $accessToken = null
     ): array {
         if (trim($name) === '') {
-            throw new \Assinafy\SDK\Exceptions\ValidationException('Account name cannot be empty');
+            throw new ValidationException('Account name cannot be empty');
         }
 
         $payload = ['name' => $name];
@@ -193,7 +195,7 @@ class AccountResource extends AbstractResource
      *
      * @param string|null $notificationSenderType one of the `NOTIFICATION_SENDER_*` constants
      * @return array<string, mixed> the updated account
-     * @throws \Assinafy\SDK\Exceptions\ValidationException when nothing was supplied to update
+     * @throws ValidationException when nothing was supplied to update
      */
     public function update(?string $name = null, ?string $notificationSenderType = null): array
     {
@@ -201,7 +203,7 @@ class AccountResource extends AbstractResource
 
         if ($name !== null) {
             if (trim($name) === '') {
-                throw new \Assinafy\SDK\Exceptions\ValidationException(
+                throw new ValidationException(
                     'Account name cannot be empty'
                 );
             }
@@ -214,7 +216,7 @@ class AccountResource extends AbstractResource
         }
 
         if ($payload === []) {
-            throw new \Assinafy\SDK\Exceptions\ValidationException(
+            throw new ValidationException(
                 'Nothing to update — pass $name and/or $notificationSenderType'
             );
         }
@@ -340,7 +342,7 @@ class AccountResource extends AbstractResource
      *
      * Available in production and sandbox; access depends on the authenticated account.
      *
-     * @throws \Assinafy\SDK\Exceptions\ValidationException on an unknown granularity, or on
+     * @throws ValidationException on an unknown granularity, or on
      *     `daily` without a `YYYY-MM` month
      * @return array<int, array{period: string, documents_uploaded: int, documents_sent: int,
      *     signature_requests: int, signature_requests_notification_email: int,
@@ -403,7 +405,7 @@ class AccountResource extends AbstractResource
      * ]
      * ```
      *
-     * @return array<string, mixed> empty on success
+     * @return array<string, mixed> the raw envelope
      * @throws \InvalidArgumentException when the file does not exist or is unreadable
      */
     public function uploadLogo(#[\SensitiveParameter] string $filePath): array
@@ -439,12 +441,12 @@ class AccountResource extends AbstractResource
     }
 
     /**
-     * @throws \Assinafy\SDK\Exceptions\ValidationException
+     * @throws ValidationException
      */
     private static function assertNotificationSenderType(string $type): void
     {
         if (!in_array($type, self::NOTIFICATION_SENDER_TYPES, true)) {
-            throw new \Assinafy\SDK\Exceptions\ValidationException(sprintf(
+            throw new ValidationException(sprintf(
                 'Invalid notification sender type "%s". Expected one of: %s',
                 $type,
                 implode(', ', self::NOTIFICATION_SENDER_TYPES)

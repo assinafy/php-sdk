@@ -204,8 +204,9 @@ one hour. A refresh token lasts 30 days and every refresh returns a new one with
 so a connection only expires after 30 days without a refresh.
 
 The SDK stores no tokens, holds no locks and renews nothing automatically. Create one client per
-connection and never share a mutable credential between users. OAuth is deployed to production;
-sandbox does not serve these routes. The legacy `socialLoginUrl()` and `socialLoginCallbackUrl()`
+connection and never share a mutable credential between users. OAuth is deployed to production
+and sandbox; the sandbox issuer is `https://auth-sandbox.assinafy.com.br`, named by the
+environment's discovery documents. The legacy `socialLoginUrl()` and `socialLoginCallbackUrl()`
 helpers are separate from this flow.
 
 API keys, Bearer tokens, and signer access codes are separate credentials. A public client sends

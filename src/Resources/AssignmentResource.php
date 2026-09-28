@@ -72,20 +72,20 @@ class AssignmentResource extends AbstractResource
      * places named input fields on the pages, so it requires `entries`.
      *
      * Request body:
-     * ```
+     * ```php
      * [
-     *   'method'  => 'virtual',                       // 'virtual' | 'collect'
-     *   'signers' => [
-     *     [
-     *       'id'                   => 'signer-id',   // required
-     *       'verification_method'  => 'Email',        // Email | Whatsapp | DigitalCertificate
-     *       'notification_methods' => ['Email'],      // exactly one: Email | Whatsapp
-     *       'step'                 => 1,              // 1-based signing order
+     *     'method' => 'virtual',                        // 'virtual' | 'collect'
+     *     'signers' => [
+     *         [
+     *             'id' => 'signer-id',                  // required
+     *             'verification_method' => 'Email',     // Email | Whatsapp | DigitalCertificate
+     *             'notification_methods' => ['Email'],  // exactly one: Email | Whatsapp
+     *             'step' => 1,                          // 1-based signing order
+     *         ],
      *     ],
-     *   ],
-     *   'message'        => 'Please sign this contract',
-     *   'expires_at'     => '2026-12-31T23:59:59Z',   // ISO 8601, must carry Z or ±HH:MM
-     *   'copy_receivers' => [],  // signer IDs CC'd on completion
+     *     'message' => 'Please sign this contract',
+     *     'expires_at' => '2026-12-31T23:59:59Z',       // ISO 8601, must carry Z or ±HH:MM
+     *     'copy_receivers' => [],  // signer IDs CC'd on completion
      * ]
      * ```
      *
@@ -424,7 +424,8 @@ class AssignmentResource extends AbstractResource
      *
      * @param array<int, string|array<string, mixed>> $signers signer IDs or objects; entries
      *     may omit `id` and carry only `verification_method` / `notification_methods`
-     * @param array<string, mixed> $options extra body fields forwarded verbatim
+     * @param array<string, mixed> $options
+     *     Optional keys: `entries` (required for collect), `message`, `expires_at`, `copy_receivers`.
      * @return array<string, mixed>
      */
     public function estimateCost(

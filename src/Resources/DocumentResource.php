@@ -1170,10 +1170,7 @@ class DocumentResource extends AbstractResource
 
         while (hrtime(true) < $deadline) {
             $document = $this->get($documentId);
-            if (hrtime(true) >= $deadline) {
-                break;
-            }
-            $status = $document['status'] ?? 'unknown';
+            $status = strtolower((string) ($document['status'] ?? 'unknown'));
 
             if (in_array($status, self::READY_STATUSES, true)) {
                 return $document;
@@ -1181,6 +1178,10 @@ class DocumentResource extends AbstractResource
 
             if (in_array($status, self::FAILURE_STATUSES, true)) {
                 throw new \RuntimeException("Document processing failed with status: {$status}");
+            }
+
+            if (hrtime(true) >= $deadline) {
+                break;
             }
 
             $remainingNanoseconds = $deadline - hrtime(true);
@@ -1210,11 +1211,9 @@ class DocumentResource extends AbstractResource
      */
     public function isFullySigned(string $documentId): bool
     {
-        return in_array(
-            $this->get($documentId)['status'] ?? '',
-            self::FULLY_SIGNED_STATUSES,
-            true
-        );
+        $status = $this->get($documentId)['status'] ?? '';
+
+        return is_string($status) && in_array(strtolower($status), self::FULLY_SIGNED_STATUSES, true);
     }
 
     /**
@@ -1243,8 +1242,9 @@ class DocumentResource extends AbstractResource
     {
         $document = $this->get($documentId);
         $assignment = $document['assignment'] ?? null;
+        $status = $document['status'] ?? null;
 
-        if (in_array($document['status'] ?? null, self::FULLY_SIGNED_STATUSES, true)) {
+        if (is_string($status) && in_array(strtolower($status), self::FULLY_SIGNED_STATUSES, true)) {
             $signers = is_array($assignment['signers'] ?? null) ? $assignment['signers'] : [];
             $total = count($signers);
 
@@ -1327,7 +1327,10 @@ class DocumentResource extends AbstractResource
 
             $size = $metadata['size'];
             if ($size > self::MAX_UPLOAD_BYTES) {
-                throw new ValidationException('File size exceeds the 25 MB API limit', [
+                throw new ValidationException(sprintf(
+                    'File size exceeds the %d MB API limit',
+                    intdiv(self::MAX_UPLOAD_BYTES, 1024 * 1024)
+                ), [
                     'file_size' => $size,
                     'max_size' => self::MAX_UPLOAD_BYTES,
                 ]);

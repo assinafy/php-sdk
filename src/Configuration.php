@@ -8,7 +8,7 @@ use Assinafy\SDK\Http\LogRedactor;
 
 class Configuration
 {
-    public const SDK_VERSION = '2.4.2';
+    public const SDK_VERSION = '2.4.3';
     public const DEFAULT_BASE_URL = 'https://api.assinafy.com.br/v1';
     public const SANDBOX_BASE_URL = 'https://sandbox.assinafy.com.br/v1';
 
@@ -238,6 +238,10 @@ class Configuration
             }
 
             return;
+        }
+
+        if ($apiKey === self::PUBLIC_PLACEHOLDER || $accountId === self::PUBLIC_PLACEHOLDER) {
+            throw new \InvalidArgumentException("'__public__' is reserved for Configuration::forPublic()");
         }
 
         $hasApiKey = trim($apiKey) !== '';

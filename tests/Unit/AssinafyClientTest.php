@@ -6,6 +6,7 @@ namespace Assinafy\SDK\Tests\Unit;
 
 use Assinafy\SDK\AssinafyClient;
 use Assinafy\SDK\Configuration;
+use Assinafy\SDK\Http\GuzzleHttpClient;
 use Assinafy\SDK\Resources\AssignmentResource;
 use Assinafy\SDK\Resources\AuthResource;
 use Assinafy\SDK\Resources\DocumentResource;
@@ -366,5 +367,20 @@ final class AssinafyClientTest extends TestCase
         $this->assertSame([], $first->messages);
         $this->assertContains('Deleting account', $second->messages);
         $this->assertSame($second, $client->getLogger());
+    }
+
+    public function testGetHttpClientReturnsTheInjectedTransport(): void
+    {
+        $http = new FakeHttpClient();
+        $client = new AssinafyClient(new Configuration('k', 'a'), $http);
+
+        $this->assertSame($http, $client->getHttpClient());
+    }
+
+    public function testGetHttpClientReturnsTheDefaultGuzzleTransport(): void
+    {
+        $client = new AssinafyClient(new Configuration('k', 'a'));
+
+        $this->assertInstanceOf(GuzzleHttpClient::class, $client->getHttpClient());
     }
 }

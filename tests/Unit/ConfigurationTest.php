@@ -186,6 +186,20 @@ final class ConfigurationTest extends TestCase
         $this->assertFalse((new Configuration('k', 'a'))->isPublic());
     }
 
+    public function testRejectsPublicPlaceholderInMixedCredentials(): void
+    {
+        // The sentinel value itself is private; the test pins the wire string that must
+        // never be accepted alongside a real credential.
+        foreach ([['__public__', 'account'], ['key', '__public__']] as [$apiKey, $accountId]) {
+            try {
+                new Configuration($apiKey, $accountId);
+                $this->fail('Expected the reserved public placeholder to be rejected');
+            } catch (InvalidArgumentException $e) {
+                $this->assertStringContainsString('reserved', $e->getMessage());
+            }
+        }
+    }
+
     public function testForBearerConfiguresWorkspaceAuthorizationHeader(): void
     {
         $config = Configuration::forBearer('oauth-token', 'account', Configuration::SANDBOX_BASE_URL);

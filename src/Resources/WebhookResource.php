@@ -151,10 +151,12 @@ class WebhookResource extends AbstractResource
      * ]
      * ```
      *
-     * Returns `null` — not an empty array — when the workspace has never configured one, so
-     * `if ($client->webhooks()->get() === null)` is the way to test for absence.
+     * Returns `null` — not an empty array — when the workspace has never configured one,
+     * although a never-configured workspace may instead answer with an inactive subscription
+     * carrying an empty `url`; {@see self::activate()} rejects both shapes.
      *
-     * @return array<string, mixed>|null the subscription, or null when none exists
+     * @return array<string, mixed>|null the subscription, or null when none exists; a new
+     *     account can instead return an inactive subscription with an empty `url`
      */
     public function get(): ?array
     {
@@ -353,7 +355,7 @@ class WebhookResource extends AbstractResource
      *             'resource' => 'activity_dispatching_history',
      *             'id' => 'webhook-dispatch-id',
      *             'event' => 'document_ready',
-     *             'activity_id' => 'activity-id',
+     *             'activity_id' => 456,
      *             'endpoint' => 'https://example.com/webhook',
      *             'payload' => null,
      *             'delivered' => true,

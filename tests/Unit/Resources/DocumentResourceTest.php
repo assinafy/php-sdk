@@ -7,6 +7,8 @@ namespace Assinafy\SDK\Tests\Unit\Resources;
 use Assinafy\SDK\Configuration;
 use Assinafy\SDK\Exceptions\NetworkException;
 use Assinafy\SDK\Exceptions\ValidationException;
+use Assinafy\SDK\Http\HttpClientInterface;
+use Assinafy\SDK\Http\Response;
 use Assinafy\SDK\Resources\DocumentResource;
 use Assinafy\SDK\Tests\Unit\Support\FakeHttpClient;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -345,6 +347,52 @@ final class DocumentResourceTest extends TestCase
 
         $this->expectException(\RuntimeException::class);
         $this->documents->waitUntilReady('doc1', 5, 1);
+    }
+
+    public function testWaitUntilReadyAcceptsAReadyResponseArrivingAtTheDeadline(): void
+    {
+        $body = json_encode([
+            'status' => 200,
+            'message' => '',
+            'data' => ['id' => 'doc1', 'status' => DocumentResource::STATUS_METADATA_READY],
+        ]);
+        $this->assertIsString($body);
+        $response = new Response(200, [], $body);
+
+        $http = $this->createStub(HttpClientInterface::class);
+        $http->method('get')->willReturnCallback(static function () use ($response): Response {
+            usleep(1_100_000);
+
+            return $response;
+        });
+
+        $documents = new DocumentResource($http, new Configuration('key', 'acc'));
+
+        $result = $documents->waitUntilReady('doc1', 1, 1);
+
+        $this->assertSame(DocumentResource::STATUS_METADATA_READY, $result['status']);
+    }
+
+    public function testReadinessComparisonsAreCaseInsensitive(): void
+    {
+        $this->http->queueJson(200, ['id' => 'doc1', 'status' => 'METADATA_READY']);
+        $result = $this->documents->waitUntilReady('doc1', 5, 1);
+        $this->assertSame('METADATA_READY', $result['status']);
+
+        $this->http->queueJson(200, ['id' => 'doc1', 'status' => 'Ready', 'assignment' => null]);
+        $this->assertTrue($this->documents->isFullySigned('doc1'));
+
+        $this->http->queueJson(200, [
+            'id' => 'doc1',
+            'status' => 'Certificated',
+            'assignment' => [
+                'signers' => [['id' => 's1'], ['id' => 's2']],
+                'items' => [],
+            ],
+        ]);
+        $progress = $this->documents->getSigningProgress('doc1');
+        $this->assertSame(2, $progress['signed']);
+        $this->assertSame(100.0, $progress['percentage']);
     }
 
     public function testDocumentTagsLifecyclePaths(): void

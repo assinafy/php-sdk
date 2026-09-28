@@ -6,11 +6,11 @@ namespace Assinafy\SDK\Resources;
 
 use Assinafy\SDK\Configuration;
 use Assinafy\SDK\Exceptions\ApiException;
+use Assinafy\SDK\Exceptions\NetworkException;
 use Assinafy\SDK\Exceptions\ValidationException;
 use Assinafy\SDK\Http\GuzzleHttpClient;
 use Assinafy\SDK\Http\HttpClientInterface;
 use Psr\Log\LoggerInterface;
-use Psr\Log\NullLogger;
 
 /**
  * Marketplace OAuth 2.1 resource — the authorization-code + PKCE flow an application
@@ -641,6 +641,7 @@ class OAuthResource extends AbstractResource
      *     'issuer' => 'https://auth.assinafy.com.br',
      *     'authorization_endpoint' => 'https://auth.assinafy.com.br/oauth/authorize',
      *     'token_endpoint' => 'https://api.assinafy.com.br/v1/oauth/token',
+     *     'introspection_endpoint' => 'https://api.assinafy.com.br/v1/oauth/introspect',
      *     'revocation_endpoint' => 'https://api.assinafy.com.br/v1/oauth/revoke',
      *     'userinfo_endpoint' => 'https://api.assinafy.com.br/v1/oauth/userinfo',
      *     'jwks_uri' => 'https://auth.assinafy.com.br/.well-known/jwks.json',
@@ -649,13 +650,20 @@ class OAuthResource extends AbstractResource
      *         'account:read', 'webhooks:write', 'openid', 'profile', 'email', 'offline_access',
      *     ],
      *     'response_types_supported' => ['code'],
-     *     'grant_types_supported' => ['authorization_code', 'refresh_token'],
+     *     'grant_types_supported' => [
+     *         'authorization_code', 'refresh_token', 'urn:ietf:params:oauth:grant-type:token-exchange',
+     *     ],
      *     'code_challenge_methods_supported' => ['S256'],
      *     'token_endpoint_auth_methods_supported' => ['client_secret_post', 'none'],
+     *     'introspection_endpoint_auth_methods_supported' => ['client_secret_post'],
      *     'authorization_response_iss_parameter_supported' => true,
      *     'client_id_metadata_document_supported' => true,
      * ]
      * ```
+     *
+     * The introspection endpoint and the token-exchange grant serve internal service
+     * clients — an ordinary client authenticating there gets `invalid_client` — so the
+     * SDK exposes neither.
      *
      * Validate the returned `issuer` against the one you expect before sending a secret
      * to any endpoint it names.
@@ -768,7 +776,7 @@ class OAuthResource extends AbstractResource
         $flat = [];
         foreach ($data as $key => $value) {
             if (!is_string($key)) {
-                throw new \Assinafy\SDK\Exceptions\NetworkException(
+                throw new NetworkException(
                     'Assinafy API returned a non-object OAuth response'
                 );
             }

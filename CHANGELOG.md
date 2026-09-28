@@ -3,6 +3,16 @@
 All notable changes to the Assinafy PHP SDK are documented here.
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## 2.4.3 - 2026-09-28
+
+- Reject a `Configuration` that mixes the public placeholder with a real credential, so the reserved `__public__` value can never be transmitted as `X-Api-Key`.
+- `waitUntilReady()` honors a document that reaches a ready or failed status during the final poll before the deadline, instead of reporting a timeout while holding that document.
+- Readiness comparisons in `waitUntilReady()`, `isFullySigned()` and `getSigningProgress()` are case-insensitive, matching the documented status contract.
+- `decline()` and `declineMultiple()` reject a decline reason over 2000 characters locally, the documented API limit.
+- Document that marketplace OAuth is deployed to sandbox with issuer `https://auth-sandbox.assinafy.com.br`; the live discovery test validates the configured environment's own authorization server.
+- Complete docblock `@throws` lists, request/response examples and OAuth discovery examples; remove dead code and redundant pagination validation.
+- Set the SDK User-Agent version to `2.4.3`.
+
 ## 2.4.2 - 2026-09-25
 
 - OAuth docs describe the current refresh-token lifetime: every refresh returns a new refresh token valid for a fresh 30 days, and a connection only expires after 30 days without a refresh.

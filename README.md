@@ -444,8 +444,9 @@ acesso dura 1 hora. O refresh token vale 30 dias e cada renovação devolve um n
 dias a partir dela: a conexão só expira se a aplicação passar 30 dias sem renovar.
 
 O SDK não guarda tokens, não mantém locks e não renova nada sozinho. Crie um cliente por conexão e
-nunca compartilhe credencial mutável entre usuários. OAuth está publicado em produção; o sandbox
-não responde essas rotas. Os helpers legados `socialLoginUrl()` e `socialLoginCallbackUrl()` são
+nunca compartilhe credencial mutável entre usuários. OAuth está publicado em produção e no
+sandbox (issuer `https://auth-sandbox.assinafy.com.br`); leia o issuer da descoberta do ambiente.
+Os helpers legados `socialLoginUrl()` e `socialLoginCallbackUrl()` são
 separados desse fluxo.
 
 ## Respostas, paginação e erros
@@ -505,7 +506,7 @@ credenciais. Respostas e contextos de exceção podem conter dados pessoais: nã
 
 Estatísticas de conta/usuário e preferências de notificação estão disponíveis no sandbox.
 Recursos sujeitos ao plano, como notificações WhatsApp e Certificado Digital, podem responder 403.
-OAuth está publicado em produção e ausente do sandbox; confirme pela descoberta do ambiente escolhido.
+OAuth está publicado em produção e no sandbox; confirme o issuer pela descoberta do ambiente escolhido.
 
 ## Testes e desenvolvimento
 

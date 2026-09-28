@@ -19,7 +19,9 @@ renew anything automatically — those belong to your application, and this guid
 
 Two hosts are involved on purpose. The browser-facing consent page lives on the authorization
 server `https://auth.assinafy.com.br`; token, revocation and userinfo live on the API under `/v1`.
-OAuth is deployed to production; sandbox does not serve these routes.
+OAuth is deployed to production and sandbox; the sandbox authorization server is
+`https://auth-sandbox.assinafy.com.br`. Read the issuer from the environment's discovery
+documents instead of hardcoding either host.
 
 ```php
 <?php
@@ -248,11 +250,12 @@ $documents = $connected->documents()->list();
 
 Store that workspace id with the connection and never accept a different one from an untrusted
 request. Calling any other workspace returns `403`, even one the same user belongs to — if your
-customer uses several workspaces, connect each one separately and keep tokens per workspace. This
-is the integration mistake we see most often.
+customer uses several workspaces, connect each one separately and keep tokens per workspace. A
+token never authorizes a second workspace; mixing connections up is a common integration error.
 
-Always send the token in `Authorization: Bearer`, which `forBearer()` does. A token sent as
-`X-Api-Key` or in the query string is refused.
+Always send the token in `Authorization: Bearer`, which `forBearer()` does and the OIDC contract
+requires. The published OpenAPI also lists `apiKeyAuth` for the userinfo operation; the SDK uses
+Bearer for every OAuth call.
 
 Create a fresh client per connection and avoid shared mutable credentials in workers or service
 singletons.
@@ -344,7 +347,7 @@ From the token endpoint, surfaced by `exchangeCode()` and `refresh()`:
 | `invalid_grant` | Code expired, already used, or issued to another client; a `code_verifier` outside the 43–128 unreserved-character grammar; `redirect_uri` mismatch; a refresh token already used, expired, or whose authorization no longer includes `offline_access` |
 | `invalid_client` | Wrong `client_id` or secret, or the application is disabled |
 | `invalid_target` | `resource` does not match what was authorized |
-| `unsupported_grant_type` | Only `authorization_code` and `refresh_token` exist |
+| `unsupported_grant_type` | Anything other than `authorization_code` or `refresh_token`. The token schema also lists `urn:ietf:params:oauth:grant-type:token-exchange`, documented as internal-only: ordinary clients receive `invalid_client`, marketplace apps cannot use it, and the SDK does not expose it |
 
 From resource calls made with the token:
 

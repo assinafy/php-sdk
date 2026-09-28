@@ -115,14 +115,7 @@ abstract class AbstractResource
             if (!isset($normalized[$header]) || $normalized[$header] === '') {
                 return null;
             }
-            if (
-                preg_match('/^(?:0|[1-9]\d*)$/D', (string) $normalized[$header]) !== 1
-                || filter_var(
-                    $normalized[$header],
-                    FILTER_VALIDATE_INT,
-                    ['options' => ['min_range' => 0]]
-                ) === false
-            ) {
+            if (preg_match('/^(?:0|[1-9]\d*)$/D', (string) $normalized[$header]) !== 1) {
                 throw new NetworkException('Assinafy API returned invalid pagination headers');
             }
         }
@@ -135,6 +128,7 @@ abstract class AbstractResource
         ];
     }
 
+    /** Build the `accounts/{account_id}/{suffix}` path prefix for account-scoped endpoints. */
     protected function accountPath(string $suffix = ''): string
     {
         $path = 'accounts/' . $this->pathSegment($this->requireAccountId(), 'account ID');

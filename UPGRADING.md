@@ -1,8 +1,46 @@
 # Upgrading
 
-Install a published 2.x release with `composer require assinafy/php-sdk:^2.1`. Remove obsolete
+Install a published 2.x release with `composer require assinafy/php-sdk:^2.4`. Remove obsolete
 VCS/path repository overrides if they prevent Composer from resolving the Packagist package.
 Use the documentation shipped with the installed tag; `main` may include unreleased changes.
+
+## Upgrading to 2.4.3
+
+`decline()` and `declineMultiple()` now throw `ValidationException` locally for a decline reason
+over 2000 characters, the documented API limit. `waitUntilReady()` returns a document that
+becomes ready during the final poll instead of timing out, and readiness comparisons are
+case-insensitive. A `Configuration` mixing the public placeholder with a real credential is
+rejected. The SDK User-Agent is `Assinafy-PHP-SDK/v2.4.3`.
+
+## Upgrading to 2.4.2
+
+This release contains no code changes; it corrects OAuth documentation. Each refresh returns a
+new refresh token valid for a fresh 30 days, and a connection only expires after 30 days without
+a refresh. Refresh tokens rotate on every use: persist the replacement before discarding the old
+token, and never resend the same refresh token after an ambiguous refresh failure — recover the
+connection state first, or ask the user to reconnect. The SDK User-Agent is
+`Assinafy-PHP-SDK/v2.4.2`.
+
+## Upgrading to 2.4.1
+
+The SDK's own HTTPS client requires TLS 1.2 or newer; runtimes or servers limited to TLS 1.0/1.1
+are refused during the handshake. This matches the API, which already rejects those protocol
+versions. Caller-supplied Guzzle clients are unchanged. The SDK User-Agent is
+`Assinafy-PHP-SDK/v2.4.1`.
+
+## Upgrading to 2.4.0
+
+This release adds the `OAuthResource::SCOPE_WEBHOOKS_WRITE` scope constant for marketplace
+authorization requests. No existing call changes shape. The SDK User-Agent is
+`Assinafy-PHP-SDK/v2.4.0`.
+
+## Upgrading to 2.3.0
+
+`estimateCost()` now throws `ValidationException` locally for a signer-less estimate in either
+method mode, where callers previously received an upstream `ApiException` 400 (`Pelo menos um
+signatarios precisa ser informado.`). Catch `ValidationException`, or validate the signer list
+before calling. Collect estimates still also require entries. The SDK User-Agent is
+`Assinafy-PHP-SDK/v2.3.0`.
 
 ## Upgrading to 2.2.0
 

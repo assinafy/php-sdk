@@ -145,9 +145,9 @@ class SignerSessionResource extends AbstractResource
      * The `signer-access-code` is sent as a query parameter, the rest of the data
      * goes in the JSON body.
      *
-     * Current API prose also requires `has_accepted_terms: true` here before a
-     * digital-certificate signer can open the document, although that field is absent
-     * from this operation's request schema.
+     * A digital-certificate signer must send `has_accepted_terms: true` here before it
+     * can open the document. The SDK forwards the field in the JSON request body; the
+     * published OpenAPI declares it as a query parameter on this operation.
      *
      * The signer confirms the identity details that will be printed on the certificate page.
      *
@@ -304,6 +304,11 @@ class SignerSessionResource extends AbstractResource
      *
      * Request (query string): `signer-access-code`, plus `has_accepted_terms` when supplied.
      *
+     * DigitalCertificate signers must first call {@see self::confirmData()} with
+     * `has_accepted_terms: true` before opening the document — the query flag here alone
+     * is too late, and the API answers 400 while that gate is unmet. A 409 means the
+     * document is still being prepared; retry with backoff.
+     *
      * Example response (SDK return; optional fields depend on state):
      * ```php
      * [
@@ -431,10 +436,13 @@ class SignerSessionResource extends AbstractResource
      * ]
      * ```
      *
-     * @param bool|null $hasAcceptedTerms sent as a query flag when supplied
+     * @param bool|null $hasAcceptedTerms sent as a query flag when supplied; it does not
+     *     satisfy the DigitalCertificate confirm-data gate — see above
      * @return array<string, mixed>
      * @throws ValidationException when the access code is blank
-     * @throws \Assinafy\SDK\Exceptions\ApiException 401 before the code is verified
+     * @throws \Assinafy\SDK\Exceptions\ApiException 400 when the confirm-data gate is unmet;
+     *     401 before the code is verified; 409 while the document is still being prepared
+     *     (retry with backoff)
      */
     public function currentDocument(
         #[\SensitiveParameter] string $accessCode,
@@ -483,6 +491,7 @@ class SignerSessionResource extends AbstractResource
      * certification begins.
      *
      * @param array<int, array{itemId: string, fieldId: string, pageId: string, value: string}> $fields
+     *     empty for a virtual assignment, which carries no collect fields
      * @return array<array-key, mixed>
      * @throws ValidationException when an identifier or the access code is blank
      * @throws \Assinafy\SDK\Exceptions\ApiException 400 when an item is missing or invalid
@@ -525,9 +534,11 @@ class SignerSessionResource extends AbstractResource
      * []
      * ```
      *
-     * @param string $reason why the signer refuses; required and non-empty
+     * @param string $reason why the signer refuses; required, non-empty, and at most 2000
+     *     characters (the API answers 400 beyond that)
      * @return array<array-key, mixed>
-     * @throws ValidationException when no reason is provided, or an identifier is blank
+     * @throws ValidationException when no reason is provided, the reason exceeds 2000
+     *     characters, or an identifier is blank
      */
     public function decline(
         string $documentId,
@@ -537,6 +548,10 @@ class SignerSessionResource extends AbstractResource
     ): array {
         if (trim($reason) === '') {
             throw new ValidationException('A decline reason is required');
+        }
+
+        if (mb_strlen($reason) > 2000) {
+            throw new ValidationException('Decline reason cannot exceed 2000 characters');
         }
 
         $documentId = $this->pathSegment($documentId, 'document ID');

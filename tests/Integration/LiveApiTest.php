@@ -25,8 +25,8 @@ use PHPUnit\Framework\TestCase;
  *   ASSINAFY_STATEFUL_TESTS – set to 1 to modify and restore shared account settings
  *
  * The OAuth tests need no registered application: they read public discovery documents
- * and assert that an unknown client is refused. OAuth is deployed to production only,
- * so they skip on sandbox.
+ * and assert that an unknown client is refused. OAuth is deployed to production and
+ * sandbox (issuer https://auth-sandbox.assinafy.com.br), so they run in both.
  *
  * These tests perform real network calls and may incur sandbox credit costs. They
  * refuse to target production unless ASSINAFY_ALLOW_PRODUCTION=1 is also set.
@@ -34,6 +34,8 @@ use PHPUnit\Framework\TestCase;
 final class LiveApiTest extends TestCase
 {
     private AssinafyClient $client;
+    /** Issuer of the configured environment's authorization server */
+    private string $oauthIssuer;
     /** @var array<int, string> document ids we created and need to clean up */
     private array $createdDocuments = [];
     /** @var array<int, string> signer ids we created and need to clean up */
@@ -74,6 +76,9 @@ final class LiveApiTest extends TestCase
         }
 
         $this->client = AssinafyClient::create($apiKey, $accountId, $baseUrl);
+        $this->oauthIssuer = $host === 'sandbox.assinafy.com.br'
+            ? 'https://auth-sandbox.assinafy.com.br'
+            : OAuthResource::DEFAULT_ISSUER;
 
         // The shared sandbox enforces a short rolling request limit. Pacing tests
         // avoids turning a correct endpoint assertion into a rate-limit failure.
@@ -320,12 +325,20 @@ final class LiveApiTest extends TestCase
     {
         $page = $this->client->documents()->list(1, 1);
         $this->assertArrayHasKey('data', $page);
+        $this->assertLessThanOrEqual(1, count($page['data']));
+        if (isset($page['pagination'])) {
+            $this->assertSame(1, $page['pagination']['per_page']);
+        }
     }
 
     public function testTemplatesList(): void
     {
         $page = $this->client->templates()->list(1, 5);
         $this->assertArrayHasKey('data', $page);
+        $this->assertLessThanOrEqual(5, count($page['data']));
+        if (isset($page['pagination'])) {
+            $this->assertSame(5, $page['pagination']['per_page']);
+        }
     }
 
     /** Full template management lifecycle: create → get → update → page download → delete. */
@@ -383,7 +396,14 @@ final class LiveApiTest extends TestCase
     {
         $webhooks = $this->client->webhooks();
         $sub = $webhooks->get();
-        $this->assertTrue(is_array($sub) || $sub === null);
+
+        // A never-configured workspace may still answer with an inactive, empty-URL
+        // subscription rather than null, so pin the shape of whatever comes back.
+        if ($sub !== null) {
+            $this->assertArrayHasKey('url', $sub);
+            $this->assertArrayHasKey('events', $sub);
+            $this->assertArrayHasKey('is_active', $sub);
+        }
     }
 
     /** Read-only artifact downloads after metadata_ready. */
@@ -962,7 +982,7 @@ final class LiveApiTest extends TestCase
     }
 
     // ---------------------------------------------------------------------------------
-    // Accounts — added in 2.0.0; the whole tag was previously unimplemented.
+    // Accounts — workspace profile, branding, statistics and lifecycle.
     // ---------------------------------------------------------------------------------
 
     public function testAccountsListReturnsTheConfiguredAccount(): void
@@ -1248,7 +1268,7 @@ final class LiveApiTest extends TestCase
 
     /**
      * Cost is priced off the verification/notification methods alone, so signer IDs are not
-     * required. Before 2.0.0 this threw client-side and never reached the API.
+     * required and the estimate request must reach the API without them.
      */
     public function testEstimateCostAcceptsSignersWithoutIds(): void
     {
@@ -1289,9 +1309,10 @@ final class LiveApiTest extends TestCase
     /**
      * Discovery documents are unauthenticated, read-only and live at each host's origin.
      *
-     * The authorization-server document is only ever served by the production issuer, so
-     * this assertion is the same on a sandbox run; the protected-resource document follows
-     * the configured environment and is absent from sandbox.
+     * The production authorization-server document is environment-independent. The
+     * protected-resource document follows the configured environment and names its own
+     * authorization server — `https://auth-sandbox.assinafy.com.br` on sandbox — whose
+     * metadata is validated as well.
      */
     public function testOAuthDiscoveryWhenDeployed(): void
     {
@@ -1307,10 +1328,15 @@ final class LiveApiTest extends TestCase
             OAuthResource::CODE_CHALLENGE_METHOD,
             $authorizationServer['code_challenge_methods_supported']
         );
-        $this->assertSame(
-            ['authorization_code', 'refresh_token'],
-            $authorizationServer['grant_types_supported']
-        );
+        // Assert a subset, like the scopes below: environments may advertise grant types
+        // the SDK predates (e.g. token exchange).
+        foreach (['authorization_code', 'refresh_token'] as $grantType) {
+            $this->assertContains(
+                $grantType,
+                $authorizationServer['grant_types_supported'],
+                "Missing OAuth grant type {$grantType}"
+            );
+        }
 
         // Every scope the server publishes must be a constant the SDK exposes. Assert a
         // subset rather than equality: environments may publish a scope the SDK predates.
@@ -1327,8 +1353,18 @@ final class LiveApiTest extends TestCase
             throw $e;
         }
 
-        $this->assertSame([OAuthResource::DEFAULT_ISSUER], $resource['authorization_servers']);
+        $this->assertSame([$this->oauthIssuer], $resource['authorization_servers']);
         $this->assertSame(['header'], $resource['bearer_methods_supported']);
+
+        if ($this->oauthIssuer !== OAuthResource::DEFAULT_ISSUER) {
+            $environmentServer = $oauth->authorizationServerMetadata($this->oauthIssuer);
+            $this->assertSame($this->oauthIssuer, $environmentServer['issuer']);
+            $this->assertContains(
+                OAuthResource::CODE_CHALLENGE_METHOD,
+                $environmentServer['code_challenge_methods_supported']
+            );
+            $this->assertTrue($environmentServer['authorization_response_iss_parameter_supported']);
+        }
     }
 
     /**

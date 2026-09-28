@@ -249,7 +249,6 @@ class SignerDocumentResource extends AbstractResource
         if (!is_int($page) || !is_int($perPage)) {
             throw new ValidationException('Signer document page and per-page filters must be integers');
         }
-        unset($filters['page'], $filters['per-page']);
         $params = array_merge(
             $this->paginationQuery($page, $perPage, $filters),
             $this->accessCodeQuery($accessCode)
@@ -392,11 +391,12 @@ class SignerDocumentResource extends AbstractResource
      *
      * @param array<int, string> $documentIds documents to decline; re-indexed so a filtered
      *     PHP array still encodes as a JSON list
-     * @param string             $reason      applied to every document in the batch
+     * @param string             $reason      applied to every document in the batch;
+     *     required, non-empty, and at most 2000 characters (the API answers 400 beyond that)
      * @return array<array-key, mixed>
      *
-     * @throws ValidationException when no document IDs or no reason is provided, or the
-     *     access code is blank
+     * @throws ValidationException when no document IDs or no reason is provided, the reason
+     *     exceeds 2000 characters, or the access code is blank
      */
     public function declineMultiple(
         #[\SensitiveParameter] string $accessCode,
@@ -407,6 +407,10 @@ class SignerDocumentResource extends AbstractResource
 
         if (trim($reason) === '') {
             throw new ValidationException('A decline reason is required');
+        }
+
+        if (mb_strlen($reason) > 2000) {
+            throw new ValidationException('Decline reason cannot exceed 2000 characters');
         }
 
         $response = $this->httpClient->put(

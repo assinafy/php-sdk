@@ -75,6 +75,7 @@ class UserResource extends AbstractResource
      *     'government_id' => null,
      *     'is_email_verified' => false,
      *     'has_accepted_terms' => true,
+     *     'is_password_set' => true,
      *     'created_at' => '2023-03-03T11:51:34Z',
      *     'to_be_deleted_at' => null,
      * ]
@@ -84,7 +85,7 @@ class UserResource extends AbstractResource
      *
      * @return array{id?: string, name?: string, email?: string, telephone?: string|null,
      *     government_id?: string|null, is_email_verified?: bool, has_accepted_terms?: bool,
-     *     created_at?: string, to_be_deleted_at?: string|null}
+     *     is_password_set?: bool, created_at?: string, to_be_deleted_at?: string|null}
      */
     public function get(#[\SensitiveParameter] ?string $accessToken = null): array
     {

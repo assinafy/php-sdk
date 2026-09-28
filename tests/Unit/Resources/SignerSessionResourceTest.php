@@ -195,4 +195,21 @@ final class SignerSessionResourceTest extends TestCase
         $this->expectException(ValidationException::class);
         $this->session->decline('doc1', 'a1', 'CODE', '');
     }
+
+    public function testDeclineRejectsReasonOver2000Characters(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->session->decline('doc1', 'a1', 'CODE', str_repeat('a', 2001));
+    }
+
+    public function testDeclineAcceptsExactly2000Characters(): void
+    {
+        $this->http->queueJson(200, []);
+        $this->session->decline('doc1', 'a1', 'CODE', str_repeat('a', 2000));
+
+        $this->assertSame(
+            ['decline_reason' => str_repeat('a', 2000)],
+            $this->http->lastCall()['body']
+        );
+    }
 }

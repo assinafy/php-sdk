@@ -627,9 +627,9 @@ final class GuzzleHttpClientTest extends TestCase
     }
 
     /**
-     * Regression test for a real credential leak: before 2.0.0 the client logged the whole
-     * request options array, so `auth()->login()` wrote the plaintext password and every
-     * bearer-authenticated call wrote its token straight into the host application's logs.
+     * The client must never log credentials: debug output records structure and byte counts
+     * only, so passwords, bearer tokens, access tokens, signing-URL access codes and personal
+     * data never reach the host application's logs.
      */
     public function testDebugLogsNeverContainCredentialsOrPii(): void
     {

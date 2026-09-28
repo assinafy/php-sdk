@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Assinafy\SDK;
 
+use Assinafy\SDK\Exceptions\ValidationException;
 use Assinafy\SDK\Http\GuzzleHttpClient;
 use Assinafy\SDK\Http\HttpClientInterface;
 use Assinafy\SDK\Resources\AccountResource;
@@ -363,11 +364,11 @@ class AssinafyClient
      * signer ID whose government_id was set first. Returns the created document, the assignment,
      * and the resolved signer IDs.
      *
-     * SDK input (the helper composes multipart and JSON requests):
+     * Example call (the helper composes the multipart upload and JSON requests):
      * ```php
-     * [
-     *     'filePath' => '/absolute/path/agreement.pdf',
-     *     'signers' => [
+     * $result = $client->uploadAndRequestSignatures(
+     *     '/absolute/path/agreement.pdf',
+     *     [
      *         [
      *             'full_name' => 'Example Signer',
      *             'email' => 'person@example.com',
@@ -376,10 +377,10 @@ class AssinafyClient
      *             'step' => 1,
      *         ],
      *     ],
-     *     'message' => null,
-     *     'expiresAt' => null,
-     *     'waitForReady' => true,
-     * ]
+     *     message: 'Please sign this contract',
+     *     expiresAt: '2026-12-31T23:59:59Z',
+     *     waitForReady: true,
+     * );
      * ```
      *
      * Full return example:
@@ -508,6 +509,10 @@ class AssinafyClient
      *
      * @param array<int, string|array<string, mixed>> $signers
      * @return array{document: array<string, mixed>, assignment: array<string, mixed>, signer_ids: array<int, string>}
+     * @throws \InvalidArgumentException on an invalid signer description or expiration
+     * @throws \RuntimeException when an upload or signer creation returns no usable ID
+     * @throws \Assinafy\SDK\Exceptions\ApiException on an API error from the composed calls
+     * @throws \Assinafy\SDK\Exceptions\NetworkException on a transport failure from the composed calls
      */
     public function uploadAndRequestSignatures(
         #[\SensitiveParameter] string $filePath,
@@ -553,7 +558,7 @@ class AssinafyClient
         $assignment = $this->assignments()->create(
             $documentId,
             $assignmentSigners,
-            \Assinafy\SDK\Resources\AssignmentResource::METHOD_VIRTUAL,
+            AssignmentResource::METHOD_VIRTUAL,
             $options
         );
 
@@ -665,7 +670,7 @@ class AssinafyClient
                     }
                     try {
                         $normalizedPhone = SignerResource::normalizePhoneNumber($phone);
-                    } catch (\Assinafy\SDK\Exceptions\ValidationException $e) {
+                    } catch (ValidationException $e) {
                         throw new \InvalidArgumentException($e->getMessage(), 0, $e);
                     }
                 }

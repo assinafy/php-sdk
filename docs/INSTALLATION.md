@@ -24,16 +24,16 @@ configuration is required:
 composer require assinafy/php-sdk
 ```
 
-That resolves to the current 2.1 line. Pin the constraint explicitly if you prefer:
+That resolves to the current 2.4 line. Pin the constraint explicitly if you prefer:
 
 ```bash
-composer require assinafy/php-sdk:^2.1
+composer require assinafy/php-sdk:^2.4
 ```
 
 To install the version described by this documentation:
 
 ```bash
-composer require assinafy/php-sdk:2.2.0
+composer require assinafy/php-sdk:2.4.3
 ```
 
 The repository's `main` can include unreleased changes. Use the documentation shipped with the
