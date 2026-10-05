@@ -372,15 +372,18 @@ object. Continue using `accounts()->list()` for account discovery.
 
 ## Marketplace OAuth
 
-Connect a customer's workspace without ever handling their password or API key. OAuth is deployed
-to production, so these calls use the production base URL even while the rest of your integration
-is pointed at sandbox.
+Connect a customer's workspace without ever handling their password or API key. OAuth is
+available in production and sandbox. Use the API base URL, authorization issuer and registered
+application from the same environment throughout the connection.
 
 ```php
 use Assinafy\SDK\Exceptions\ApiException;
 use Assinafy\SDK\Resources\OAuthResource;
 
-$oauth = AssinafyClient::forAuth(Configuration::DEFAULT_BASE_URL)->oauth(
+$oauthBaseUrl = Configuration::SANDBOX_BASE_URL;
+$expectedIssuer = 'https://auth-sandbox.assinafy.com.br';
+$oauthClient = AssinafyClient::forAuth($oauthBaseUrl);
+$oauth = $oauthClient->oauth(
     requiredEnv('ASSINAFY_OAUTH_CLIENT_ID'),
     getenv('ASSINAFY_OAUTH_CLIENT_SECRET') ?: null,  // null for a public application
 );
@@ -390,9 +393,12 @@ Read the endpoints from discovery instead of hardcoding them, and check the issu
 
 ```php
 $resource = $oauth->protectedResourceMetadata();
-$server = $oauth->authorizationServerMetadata($resource['authorization_servers'][0]);
+if (($resource['authorization_servers'][0] ?? null) !== $expectedIssuer) {
+    throw new RuntimeException('Unexpected OAuth authorization server');
+}
+$server = $oauth->authorizationServerMetadata($expectedIssuer);
 
-if ($server['issuer'] !== OAuthResource::DEFAULT_ISSUER) {
+if (($server['issuer'] ?? null) !== $expectedIssuer) {
     throw new RuntimeException('Unexpected OAuth issuer');
 }
 ```
@@ -405,11 +411,15 @@ $start = $oauth->startAuthorization('https://app.example.com/integrations/assina
     OAuthResource::SCOPE_DOCUMENTS_READ,
     OAuthResource::SCOPE_DOCUMENTS_WRITE,
     OAuthResource::SCOPE_ACCOUNT_READ,
+    OAuthResource::SCOPE_OPENID,
+    OAuthResource::SCOPE_PROFILE,
+    OAuthResource::SCOPE_EMAIL,
     OAuthResource::SCOPE_OFFLINE_ACCESS,
 ], ['issuer' => $server['issuer'], 'authorization_endpoint' => $server['authorization_endpoint']]);
 
 $_SESSION['assinafy_oauth'] = $start + ['created_at' => time()];
 header('Location: ' . $start['authorization_url'], true, 302);
+exit;
 ```
 
 On the redirect URI, validate the callback and exchange the code. The code is single-use and
@@ -438,14 +448,13 @@ $hasRefreshToken = isset($tokens['refresh_token']);
 The token belongs to the one workspace the user selected. Store its ID with the connection:
 
 ```php
-$accounts = AssinafyClient::forAuth(Configuration::DEFAULT_BASE_URL)
-    ->accounts()->list($tokens['access_token']);
+$accounts = $oauthClient->accounts()->list($tokens['access_token']);
 $authorizedAccountId = $accounts['data'][0]['id'];
 
 $connected = AssinafyClient::forBearer(
     $tokens['access_token'],
     $authorizedAccountId,
-    Configuration::DEFAULT_BASE_URL,
+    $oauthBaseUrl,
 );
 $documents = $connected->documents()->list(page: 1, perPage: 20);
 ```

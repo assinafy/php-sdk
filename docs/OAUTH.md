@@ -31,9 +31,12 @@ declare(strict_types=1);
 require 'vendor/autoload.php';
 
 use Assinafy\SDK\AssinafyClient;
+use Assinafy\SDK\Configuration;
 use Assinafy\SDK\Resources\OAuthResource;
 
-$oauth = AssinafyClient::forAuth()->oauth(
+$baseUrl = Configuration::DEFAULT_BASE_URL; // Use SANDBOX_BASE_URL for sandbox.
+$oauthClient = AssinafyClient::forAuth($baseUrl);
+$oauth = $oauthClient->oauth(
     (string) getenv('ASSINAFY_OAUTH_CLIENT_ID'),
     (string) getenv('ASSINAFY_OAUTH_CLIENT_SECRET') ?: null,
 );
@@ -86,7 +89,16 @@ $resource = $oauth->protectedResourceMetadata();
 //     'bearer_methods_supported' => ['header'],
 // ]
 
-$server = $oauth->authorizationServerMetadata($resource['authorization_servers'][0]);
+$expectedIssuer = $baseUrl === Configuration::SANDBOX_BASE_URL
+    ? 'https://auth-sandbox.assinafy.com.br'
+    : OAuthResource::DEFAULT_ISSUER;
+if (($resource['authorization_servers'][0] ?? null) !== $expectedIssuer) {
+    throw new RuntimeException('Unexpected OAuth authorization server');
+}
+$server = $oauth->authorizationServerMetadata($expectedIssuer);
+if (($server['issuer'] ?? null) !== $expectedIssuer) {
+    throw new RuntimeException('Unexpected OAuth issuer');
+}
 // [
 //     'issuer' => 'https://auth.assinafy.com.br',
 //     'authorization_endpoint' => 'https://auth.assinafy.com.br/oauth/authorize',
@@ -119,11 +131,11 @@ to `OAuthResource::DEFAULT_ISSUER` when you pass nothing.
 
 | Constant | Scope | Lets your app |
 | --- | --- | --- |
-| `SCOPE_DOCUMENTS_READ` | `documents:read` | Read documents, their signers, assignments and activity |
+| `SCOPE_DOCUMENTS_READ` | `documents:read` | Read documents, signers, assignments, activity, WhatsApp notifications, webhook event types and delivery history |
 | `SCOPE_DOCUMENTS_WRITE` | `documents:write` | Create documents and send them for signature |
 | `SCOPE_TEMPLATES_READ` | `templates:read` | Read templates |
 | `SCOPE_TEMPLATES_WRITE` | `templates:write` | Create and change templates |
-| `SCOPE_ACCOUNT_READ` | `account:read` | Read the workspace profile, theme and logo |
+| `SCOPE_ACCOUNT_READ` | `account:read` | Read the workspace profile, theme, logo and webhook subscription |
 | `SCOPE_WEBHOOKS_WRITE` | `webhooks:write` | Configure and deactivate the workspace webhook subscription |
 | `SCOPE_OPENID` | `openid` | Receive an `id_token` identifying the user |
 | `SCOPE_PROFILE` | `profile` | Read the user's name |
@@ -147,6 +159,7 @@ $start = $oauth->startAuthorization('https://app.example.com/integrations/assina
     OAuthResource::SCOPE_DOCUMENTS_WRITE,
     OAuthResource::SCOPE_ACCOUNT_READ,
     OAuthResource::SCOPE_OPENID,
+    OAuthResource::SCOPE_PROFILE,
     OAuthResource::SCOPE_EMAIL,
     OAuthResource::SCOPE_OFFLINE_ACCESS,
 ], ['issuer' => $server['issuer'], 'authorization_endpoint' => $server['authorization_endpoint']]);
@@ -166,6 +179,7 @@ $start = $oauth->startAuthorization('https://app.example.com/integrations/assina
 $_SESSION['assinafy_oauth'] = $start + ['created_at' => time()];
 
 header('Location: ' . $start['authorization_url'], true, 302);
+exit;
 ```
 
 Bind the transaction to the initiating user with a short expiry, and redirect with a full page
@@ -211,7 +225,7 @@ try {
 //     'access_token' => '<access-token>',
 //     'token_type' => 'Bearer',
 //     'expires_in' => 3600,
-//     'scope' => 'documents:read documents:write account:read openid email',
+//     'scope' => 'documents:read documents:write account:read openid profile email',
 //     'refresh_token' => '<refresh-token>',
 //     'id_token' => '<signed-id-token>',
 // ]
@@ -238,13 +252,13 @@ A token belongs to the one workspace the user picked. With an OAuth token the wo
 returns exactly that workspace.
 
 ```php
-$accounts = AssinafyClient::forAuth()->accounts()->list($tokens['access_token']);
+$accounts = $oauthClient->accounts()->list($tokens['access_token']);
 $accountId = $accounts['data'][0]['id'] ?? null;
 if (!is_string($accountId) || $accountId === '') {
     throw new RuntimeException('No authorized workspace returned');
 }
 
-$connected = AssinafyClient::forBearer($tokens['access_token'], $accountId);
+$connected = AssinafyClient::forBearer($tokens['access_token'], $accountId, $baseUrl);
 $documents = $connected->documents()->list();
 ```
 

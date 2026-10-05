@@ -12,7 +12,8 @@ PHP uses annually supported release branches rather than an LTS designation. The
 SDK tests every currently supported branch; use PHP 8.5 for new deployments.
 
 The SDK includes Guzzle as its default HTTP transport. Applications do not need to
-install a separate HTTP client.
+install a separate HTTP client. The default client enforces TLS 1.2 or newer with both cURL
+and PHP streams, including Guzzle 7 installations without ext-curl.
 
 ## Install with Composer
 
@@ -33,7 +34,7 @@ composer require assinafy/php-sdk:^2.4
 To install the version described by this documentation:
 
 ```bash
-composer require assinafy/php-sdk:2.4.3
+composer require assinafy/php-sdk:2.4.4
 ```
 
 The repository's `main` can include unreleased changes. Use the documentation shipped with the

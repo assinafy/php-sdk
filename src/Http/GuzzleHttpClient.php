@@ -90,7 +90,7 @@ class GuzzleHttpClient implements HttpClientInterface
         // base_uri lacks a trailing slash, its last path segment gets *replaced* rather than
         // appended to — so `https://api.assinafy.com.br/v1` + `documents/statuses` becomes
         // `https://api.assinafy.com.br/documents/statuses` (no `/v1`). Always end with `/`.
-        return new Client([
+        $options = [
             'base_uri' => rtrim($config->getBaseUrl(), '/') . '/',
             'timeout' => $config->getTimeout(),
             'connect_timeout' => $config->getConnectTimeout(),
@@ -99,7 +99,19 @@ class GuzzleHttpClient implements HttpClientInterface
             'allow_redirects' => false,
             // TLS 1.2 minimum (1.3 allowed); Guzzle 7 sets no floor of its own.
             'crypto_method' => STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT,
-        ]);
+        ];
+
+        // Guzzle 7's stream handler ignores the top-level crypto_method option.
+        // Guzzle 8 uses that option and rejects a conflicting stream-context setting.
+        /** @var int $guzzleMajorVersion The installed Guzzle major version. */
+        $guzzleMajorVersion = ClientInterface::MAJOR_VERSION;
+        if ($guzzleMajorVersion < 8) {
+            $options['stream_context'] = ['ssl' => [
+                'crypto_method' => STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT | STREAM_CRYPTO_METHOD_TLSv1_3_CLIENT,
+            ]];
+        }
+
+        return new Client($options);
     }
 
     /** {@inheritDoc} */

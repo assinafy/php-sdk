@@ -3,11 +3,19 @@
 All notable changes to the Assinafy PHP SDK are documented here.
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## 2.4.4 - 2026-10-05
+
+- Enforce TLS 1.2 or newer when Guzzle 7 uses PHP streams without ext-curl.
+- Return a template that becomes ready during the final readiness poll and report its processing failure when that poll fails.
+- Document sandbox OAuth availability, environment-specific authorization, and the scopes required for userinfo.
+- Document API-key and OAuth document workflows, including the PAdES artifact for preserving ICP-Brasil signatures.
+- Set the SDK User-Agent version to `2.4.4`.
+
 ## 2.4.3 - 2026-09-28
 
 - Reject a `Configuration` that mixes the public placeholder with a real credential, so the reserved `__public__` value can never be transmitted as `X-Api-Key`.
 - `waitUntilReady()` honors a document that reaches a ready or failed status during the final poll before the deadline, instead of reporting a timeout while holding that document.
-- Readiness comparisons in `waitUntilReady()`, `isFullySigned()` and `getSigningProgress()` are case-insensitive, matching the documented status contract.
+- Status checks in `waitUntilReady()`, `isFullySigned()` and `getSigningProgress()` are case-insensitive, matching the documented status contract.
 - `decline()` and `declineMultiple()` reject a decline reason over 2000 characters locally, the documented API limit.
 - Document that marketplace OAuth is deployed to sandbox with issuer `https://auth-sandbox.assinafy.com.br`; the live discovery test validates the configured environment's own authorization server.
 - Complete docblock `@throws` lists, request/response examples and OAuth discovery examples; remove dead code and redundant pagination validation.
@@ -16,7 +24,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 ## 2.4.2 - 2026-09-25
 
 - OAuth docs describe the current refresh-token lifetime: every refresh returns a new refresh token valid for a fresh 30 days, and a connection only expires after 30 days without a refresh.
-- After an ambiguous token failure (timeout, reset) the docs say never to resend the same refresh token: re-read what you stored and ask the user to reconnect if it is unchanged. A test pins that a timed-out refresh is sent exactly once.
+- After an ambiguous token failure (timeout, reset) the docs say never to resend the same refresh token: re-read what you stored and ask the user to reconnect if it is unchanged.
 - `documents()->verify()` documents `agreement_code`, which may be null or absent.
 - The README refresh example saves the new refresh token and revokes the most recently stored one.
 

@@ -276,6 +276,15 @@ class SignerSessionResource extends AbstractResource
      *
      * Response: raw image bytes — not the JSON envelope.
      *
+     * Authentication: signer access code only, with no workspace credential.
+     * Example query and result:
+     * ```php
+     * ['signer-access-code' => '<signer-access-code>']
+     * // downloadSignature($accessCode, 'signature') returns the stored image bytes.
+     * // Content-Type is image/png or image/jpeg; no request body is sent.
+     * ```
+     *
+     * @param string $accessCode the current signer access code
      * @param string $type {@see self::TYPE_SIGNATURE} or {@see self::TYPE_INITIAL}
      * @return string raw PNG/JPEG bytes
      * @throws ValidationException on an unknown type or a blank access code

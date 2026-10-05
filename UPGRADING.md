@@ -4,6 +4,12 @@ Install a published 2.x release with `composer require assinafy/php-sdk:^2.4`. R
 VCS/path repository overrides if they prevent Composer from resolving the Packagist package.
 Use the documentation shipped with the installed tag; `main` may include unreleased changes.
 
+## Upgrading to 2.4.4
+
+No application code changes are required. The bundled Guzzle 7 stream transport now enforces
+TLS 1.2 or newer without ext-curl. Template readiness polling honors a ready or failed response
+from its final request. The SDK User-Agent is `Assinafy-PHP-SDK/v2.4.4`.
+
 ## Upgrading to 2.4.3
 
 `decline()` and `declineMultiple()` now throw `ValidationException` locally for a decline reason

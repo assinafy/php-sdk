@@ -142,7 +142,7 @@ notificação (como recebe o convite). O SDK valida a matriz antes de enviar a r
 | --- | --- | --- | --- |
 | `VERIFICATION_EMAIL` | `Email` | Email cadastrado no signatário | 0 |
 | `VERIFICATION_WHATSAPP` | `Whatsapp` | `whatsapp_phone_number` e assinatura paga | 0,45 |
-| `VERIFICATION_DIGITAL_CERTIFICATE` | `Email` ou `Whatsapp` | Recurso Certificado Digital na conta (planos Standard e Pro), CPF em `government_id` e o signatário sozinho na sua etapa | 2 pela assinatura, além da notificação |
+| `VERIFICATION_DIGITAL_CERTIFICATE` | `Email` ou `Whatsapp` | Recurso Certificado Digital na conta (planos Standard e Pro), CPF/CNPJ em `government_id` e o signatário sozinho na sua etapa | 2 pela assinatura, além da notificação |
 
 `DigitalCertificate` cobre os certificados ICP-Brasil **A1** (arquivo de software no dispositivo) e
 **A3** (cartão ou token). Os dois usam esse mesmo valor e o mesmo payload — mudam apenas onde a
@@ -283,7 +283,9 @@ if (!$verification['is_valid']) {
 
 Artefatos: `original`, `certificated`, `certificate-page`, `pades` e `bundle`. `bundle` contém ZIP;
 os demais são PDFs. `pades` exige documento com assinatura por certificado digital. Miniaturas e
-páginas renderizadas retornam bytes de imagem. Um hash desconhecido pode retornar HTTP 200 com
+páginas renderizadas retornam bytes de imagem. Para A1/A3, baixe `pades` para preservar as
+assinaturas criptográficas ICP-Brasil; `certificated` contém a representação achatada dessas
+assinaturas. Um hash desconhecido pode retornar HTTP 200 com
 `is_valid: false`; sempre leia esse campo.
 
 ## Campos e assinatura collect
@@ -394,28 +396,47 @@ verificação para produção.
 ```php
 use Assinafy\SDK\Resources\OAuthResource;
 
-$oauth = AssinafyClient::forAuth()->oauth(
+$oauthBaseUrl = Configuration::SANDBOX_BASE_URL;
+$expectedIssuer = 'https://auth-sandbox.assinafy.com.br';
+$oauthClient = AssinafyClient::forAuth($oauthBaseUrl);
+$oauth = $oauthClient->oauth(
     (string) getenv('ASSINAFY_OAUTH_CLIENT_ID'),
     (string) getenv('ASSINAFY_OAUTH_CLIENT_SECRET') ?: null,
 );
+
+$server = $oauth->authorizationServerMetadata($expectedIssuer);
+if (($server['issuer'] ?? null) !== $expectedIssuer) {
+    throw new RuntimeException('Unexpected OAuth issuer');
+}
 
 // 1. Envie o navegador para a Assinafy e guarde a transação na sessão do usuário.
 $start = $oauth->startAuthorization('https://app.example.com/callback', [
     OAuthResource::SCOPE_DOCUMENTS_READ,
     OAuthResource::SCOPE_DOCUMENTS_WRITE,
+    OAuthResource::SCOPE_OPENID,
+    OAuthResource::SCOPE_PROFILE,
+    OAuthResource::SCOPE_EMAIL,
     OAuthResource::SCOPE_OFFLINE_ACCESS,
-]);
-$_SESSION['assinafy_oauth'] = $start;
+], ['issuer' => $server['issuer'], 'authorization_endpoint' => $server['authorization_endpoint']]);
+$_SESSION['assinafy_oauth'] = $start + ['created_at' => time()];
 header('Location: ' . $start['authorization_url'], true, 302);
+exit;
+```
 
+Na rota de callback, reconstrua `$oauthClient` e `$oauth` com o mesmo ambiente e aplicativo:
+
+```php
 // 2. No redirect URI, valide o retorno e troque o código.
-$transaction = $_SESSION['assinafy_oauth'];
+$transaction = $_SESSION['assinafy_oauth'] ?? null;
 unset($_SESSION['assinafy_oauth']);
+if (!is_array($transaction) || time() - ($transaction['created_at'] ?? 0) > 600) {
+    throw new RuntimeException('Invalid or expired OAuth transaction');
+}
 $tokens = $oauth->exchangeCode($oauth->handleCallback($_GET, $transaction), $transaction);
 
 // 3. O token vale para a única conta escolhida pelo usuário.
-$accounts = AssinafyClient::forAuth()->accounts()->list($tokens['access_token']);
-$connected = AssinafyClient::forBearer($tokens['access_token'], $accounts['data'][0]['id']);
+$accounts = $oauthClient->accounts()->list($tokens['access_token']);
+$connected = AssinafyClient::forBearer($tokens['access_token'], $accounts['data'][0]['id'], $oauthBaseUrl);
 ```
 
 `startAuthorization()` gera um `code_verifier` e um `state` novos a cada tentativa;
@@ -429,7 +450,7 @@ supor que todo escopo pedido foi concedido. `refresh_token` só vem com `offline
 
 ```php
 $renovado = $oauth->refresh($conexao->refreshToken);     // devolve um refresh token NOVO
-$repositorio->salvarRefreshToken($renovado['refresh_token']); // guarde-o antes de qualquer outra coisa
+$repositorio->salvarTokens($renovado); // gravação atômica sob lock por conexão
 $claims   = $oauth->userinfo($renovado['access_token']); // {sub, name?, email?, email_verified?}
 // Ao desconectar, revogue o token guardado mais recentemente — nunca uma cópia aposentada.
 $oauth->revoke($repositorio->refreshTokenAtual(), OAuthResource::TOKEN_TYPE_HINT_REFRESH);
@@ -542,6 +563,28 @@ Login, troca de senha e gestão destrutiva da API key precisam de usuário desca
 Conclusão de assinatura exige os códigos do signatário; templates exigem uma função de assinatura
 configurada; OAuth exige aplicativo registrado e consentimento. Uma chave de workspace não fornece
 essas credenciais. A integração recusa produção por padrão.
+
+
+Os testes de documento também podem usar um token OAuth já autorizado para a conta configurada,
+com `documents:read`, `documents:write`, `templates:read` e `templates:write`. Os mesmos testes
+exercitam upload, preparação, busca, renomeação, atribuição, campos, tags e templates:
+
+```bash
+read -rs ASSINAFY_OAUTH_ACCESS_TOKEN
+export ASSINAFY_OAUTH_ACCESS_TOKEN
+ASSINAFY_AUTH_MODE=oauth composer test:integration -- --filter 'Document|Assignment|Collect|Template|EstimateCost|Rename|Statuses|SignerLifecycle|TagLifecycle|FieldLifecycle|OAuth'
+```
+
+Mantenha `ASSINAFY_ACCOUNT_ID`, `ASSINAFY_BASE_URL` e `ASSINAFY_INTEGRATION=1` configurados.
+O ID deve ser a única conta autorizada pelo token. Administração de conta, API keys e preferências
+de usuário ficam fora desse conjunto OAuth. A verificação offline compara as requisições e
+retornos dos dois modos; testes live exigem o token obtido após consentimento.
+
+A descoberta e as recusas OAuth podem ser testadas sem chave de conta ou aplicativo registrado:
+
+```bash
+ASSINAFY_INTEGRATION=1 composer test:integration -- --filter OAuth
+```
 
 GitLab CI é o pipeline principal; GitHub Actions recebe o espelho e executa a matriz PHP 8.2–8.5,
 dependências mínimas/atuais e verificações de qualidade. GitHub não executa testes de sandbox;

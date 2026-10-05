@@ -5,7 +5,7 @@ This reference maps every public resource method in this SDK to the Assinafy API
 - <https://api.assinafy.com.br/v1/docs>
 - <https://api.assinafy.com.br/v1/docs/openapi.json>
 
-This reference describes SDK version 2.4.3. Install published releases with
+This reference describes SDK version 2.4.4. Install published releases with
 `composer require assinafy/php-sdk` and use the documentation shipped with the selected tag.
 See [INSTALLATION.md](INSTALLATION.md) for setup.
 
@@ -292,7 +292,7 @@ both to `Email`.
 |---|---|---|---|
 | `Email` | `AssignmentResource::VERIFICATION_EMAIL` | Enters a code received by email before signing. | An email address on the signer. |
 | `Whatsapp` | `AssignmentResource::VERIFICATION_WHATSAPP` | Enters a code received over WhatsApp before signing. | A `whatsapp_phone_number` on the signer; paid subscriptions only. Requires the WhatsApp notification channel — the two always travel together. |
-| `DigitalCertificate` | `AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE` | Signs with their own ICP-Brasil certificate — **A1** (a software file on the device) or **A3** (a smart card or token) — through the Web PKI browser extension, producing a qualified PAdES signature. | The account's Digital Certificate feature (Standard and Pro plans), a CPF in the signer's `government_id`, and the signer alone in its signing step. |
+| `DigitalCertificate` | `AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE` | Signs with their own ICP-Brasil certificate — **A1** (a software file on the device) or **A3** (a smart card or token) — through the Web PKI browser extension, producing a qualified PAdES signature. | The account's Digital Certificate feature (Standard and Pro plans), a CPF/CNPJ in the signer's `government_id`, and the signer alone in its signing step. |
 
 | Notification | Constant | Delivers | Requirements |
 |---|---|---|---|
@@ -426,8 +426,9 @@ RFC code applications branch on; `getResponseData()['error_description']` holds 
 text. Userinfo is the exception — it authenticates like any other API route, so its `401`/`403`
 arrive in the ordinary envelope.
 
-OAuth is deployed to production. Sandbox answers these routes with a framework `404`, and its
-origin does not serve the protected-resource document.
+OAuth is deployed to production and sandbox. The sandbox issuer is
+`https://auth-sandbox.assinafy.com.br`; discover metadata from the selected API origin and use
+its issuer for authorization. Token exchange, refresh and revocation still need a registered app.
 
 | SDK method | Official operation | Auth | Request | SDK success return | Statuses |
 |---|---|---|---|---|---|
@@ -449,7 +450,7 @@ origin does not serve the protected-resource document.
 
 Constants: `DEFAULT_ISSUER`, `AUTHORIZATION_SERVER_METADATA_PATH`,
 `PROTECTED_RESOURCE_METADATA_PATH`, `CODE_CHALLENGE_METHOD`, `GRANT_AUTHORIZATION_CODE`,
-`GRANT_REFRESH_TOKEN`, `TOKEN_TYPE_HINT_ACCESS`, `TOKEN_TYPE_HINT_REFRESH`, the nine
+`GRANT_REFRESH_TOKEN`, `TOKEN_TYPE_HINT_ACCESS`, `TOKEN_TYPE_HINT_REFRESH`, the ten
 `SCOPE_*` values and the `SCOPES` list. `SCOPES` is supplied for autocompletion;
 `startAuthorization()` does not reject an unlisted scope, because the authorization server may
 publish new ones — it only rejects a scope that is empty or contains a space, since `scope` is a
@@ -515,7 +516,7 @@ file fails locally. The API still performs authoritative PDF parsing and enforce
 | `search($term, $page, $perPage, $filters)` | [`GET /v1/accounts/{accountId}/documents/search`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fdocuments%2Fsearch) | Workspace | Query: `search`, `status`, `page`, `per-page`. | Envelope with lightweight `Document[]` and normalized `pagination`. | `200; 401, 500` |
 | `rename($documentId, $name)` | [`PATCH /v1/documents/{documentId}`](https://api.assinafy.com.br/v1/docs/markdown?method=patch&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D) | Workspace | Required JSON `{name}`. Only valid before signing starts. | Unwrapped `Document`. | `200; 400, 401, 404, 500` |
 | `delete($documentId)` | [`DELETE /v1/documents/{documentId}`](https://api.assinafy.com.br/v1/docs/markdown?method=delete&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D) | Workspace | Path ID only. | Envelope with `data: []`. | `200; 401, 404, 500` |
-| `download($documentId, $artifact)` | [`GET /v1/documents/{documentId}/download/{artifactName}`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fdownload%2F%7BartifactName%7D) | Workspace | `artifactName`: `original`, `certificated`, `certificate-page`, `pades`, or `bundle`. `pades` exists only for a document with digital-certificate signers; `bundle` is a ZIP and includes it when present. | Raw binary bytes (published content entry is `application/pdf`). | `200; 401, 404, 500` |
+| `download($documentId, $artifact)` | [`GET /v1/documents/{documentId}/download/{artifactName}`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fdownload%2F%7BartifactName%7D) | Workspace | `artifactName`: `original`, `certificated`, `certificate-page`, `pades`, or `bundle`. `pades` preserves ICP-Brasil cryptographic signatures; `certificated` flattens them. `pades` exists only for a document with digital-certificate signers; `bundle` is a ZIP and includes it when present. | Raw binary bytes (published content entry is `application/pdf`). | `200; 401, 404, 500` |
 | `downloadThumbnail($documentId)` | [`GET /v1/documents/{documentId}/thumbnail`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fthumbnail) | Workspace | Path ID only. | Raw image bytes. | `200; 401, 404, 500` |
 | `downloadPage($documentId, $pageId)` | [`GET /v1/documents/{documentId}/pages/{pageId}/download`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fpages%2F%7BpageId%7D%2Fdownload) | Workspace | Document and page path IDs. | Raw image bytes. | `200; 401, 404, 500` |
 | `activities($documentId)` | [`GET /v1/documents/{documentId}/activities`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Factivities) | Workspace | Path ID only. | Unwrapped `DocumentActivity[]`. | `200; 401, 500` |
@@ -566,6 +567,28 @@ These public methods perform local/composite behavior rather than map one-to-one
 | `getSigningProgress($documentId)` | Calls [`GET /v1/documents/{documentId}`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D). Statuses `ready`, `certificating`, and `certificated` override item metadata to 100%; earlier statuses derive signed/total/pending/percentage from assignment items. |
 | `assertUploadable($filePath)` | Public static validator shared by document/template uploads; requires an existing readable regular `.pdf` no larger than 25 MB, a `%PDF-x.y` header in the first 1 KiB, and `%%EOF` in the final 1 KiB; returns `void`. |
 | `assertArtifact($artifact)` | Public static validator shared by workspace/signer downloads; accepts `original`, `certificated`, `certificate-page`, `pades`, or `bundle` and returns `void`. |
+
+### Document authentication and permissions
+
+Workspace document operations use the same paths, payloads, pagination and SDK return shapes
+with either `AssinafyClient::create($apiKey, $accountId, $baseUrl)` or
+`AssinafyClient::forBearer($accessToken, $authorizedAccountId, $baseUrl)`.
+OAuth changes the credential header and limits access to the approved workspace and scopes:
+
+| Operations | OAuth scope |
+| --- | --- |
+| Document get/list/search, statuses, activity, artifacts, thumbnails, rendered pages and document-tag reads | `documents:read` |
+| Upload, rename, delete, request signatures, resend, change expiration and document-tag mutations | `documents:write` |
+| Template reads and rendered pages | `templates:read` |
+| Template creation, update and deletion | `templates:write` |
+
+Request the document and template permissions needed by a template workflow. Public verification,
+public info and send-token use no workspace credential. Signer actions still require their own signer access code.
+The permission approved by consent must cover the call; inspect `WWW-Authenticate` on an
+`insufficient_scope` response and reconnect with the required permission.
+
+The [test instructions](../README.en.md#testing) show how to run the same sandbox document tests
+with each authentication mode. Token issuance still requires a registered application and consent.
 
 ## Fields (`FieldResource`)
 

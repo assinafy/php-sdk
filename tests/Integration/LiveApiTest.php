@@ -20,6 +20,8 @@ use PHPUnit\Framework\TestCase;
  *   ASSINAFY_API_KEY    – API key for the target environment
  *   ASSINAFY_ACCOUNT_ID – workspace account id
  *   ASSINAFY_BASE_URL   – optional, defaults to Configuration::SANDBOX_BASE_URL
+ *   ASSINAFY_AUTH_MODE  – api_key (default) or oauth for document-flow tests
+ *   ASSINAFY_OAUTH_ACCESS_TOKEN – consented OAuth Bearer token when AUTH_MODE=oauth
  *   ASSINAFY_NOTIFICATION_TESTS – set to 1 to enable notification flows
  *   ASSINAFY_TEST_EMAIL / ASSINAFY_TEST_EMAIL_ALT – controlled notification recipients
  *   ASSINAFY_STATEFUL_TESTS – set to 1 to modify and restore shared account settings
@@ -54,10 +56,6 @@ final class LiveApiTest extends TestCase
         $apiKey = (string) getenv('ASSINAFY_API_KEY');
         $accountId = (string) getenv('ASSINAFY_ACCOUNT_ID');
 
-        if ($apiKey === '' || $accountId === '') {
-            $this->markTestSkipped('Set ASSINAFY_API_KEY and ASSINAFY_ACCOUNT_ID to run live API tests');
-        }
-
         $baseUrl = (string) getenv('ASSINAFY_BASE_URL');
         if ($baseUrl === '') {
             $baseUrl = Configuration::SANDBOX_BASE_URL;
@@ -75,7 +73,25 @@ final class LiveApiTest extends TestCase
             );
         }
 
-        $this->client = AssinafyClient::create($apiKey, $accountId, $baseUrl);
+        if (str_starts_with($this->name(), 'testOAuth')) {
+            $this->client = AssinafyClient::forAuth($baseUrl);
+        } else {
+            $authMode = (string) (getenv('ASSINAFY_AUTH_MODE') ?: 'api_key');
+            if ($authMode === 'oauth') {
+                $accessToken = (string) getenv('ASSINAFY_OAUTH_ACCESS_TOKEN');
+                if ($accessToken === '' || $accountId === '') {
+                    $this->markTestSkipped('Set ASSINAFY_OAUTH_ACCESS_TOKEN and its authorized ASSINAFY_ACCOUNT_ID');
+                }
+                $this->client = AssinafyClient::forBearer($accessToken, $accountId, $baseUrl);
+            } elseif ($authMode === 'api_key') {
+                if ($apiKey === '' || $accountId === '') {
+                    $this->markTestSkipped('Set ASSINAFY_API_KEY and ASSINAFY_ACCOUNT_ID to run live API tests');
+                }
+                $this->client = AssinafyClient::create($apiKey, $accountId, $baseUrl);
+            } else {
+                self::fail('ASSINAFY_AUTH_MODE must be api_key or oauth');
+            }
+        }
         $this->oauthIssuer = $host === 'sandbox.assinafy.com.br'
             ? 'https://auth-sandbox.assinafy.com.br'
             : OAuthResource::DEFAULT_ISSUER;
@@ -1309,8 +1325,7 @@ final class LiveApiTest extends TestCase
     /**
      * Discovery documents are unauthenticated, read-only and live at each host's origin.
      *
-     * The production authorization-server document is environment-independent. The
-     * protected-resource document follows the configured environment and names its own
+     * The protected-resource document follows the configured environment and names its own
      * authorization server — `https://auth-sandbox.assinafy.com.br` on sandbox — whose
      * metadata is validated as well.
      */
@@ -1318,53 +1333,27 @@ final class LiveApiTest extends TestCase
     {
         $oauth = $this->probeOAuthResource();
 
-        $authorizationServer = $oauth->authorizationServerMetadata();
-        $this->assertSame(OAuthResource::DEFAULT_ISSUER, $authorizationServer['issuer']);
+        $resource = $oauth->protectedResourceMetadata();
+        $authorizationServer = $oauth->authorizationServerMetadata($this->oauthIssuer);
+        $this->assertSame($this->oauthIssuer, $authorizationServer['issuer']);
         $this->assertSame(
-            'https://auth.assinafy.com.br/oauth/authorize',
+            $this->oauthIssuer . '/oauth/authorize',
             $authorizationServer['authorization_endpoint']
         );
-        $this->assertContains(
-            OAuthResource::CODE_CHALLENGE_METHOD,
-            $authorizationServer['code_challenge_methods_supported']
-        );
-        // Assert a subset, like the scopes below: environments may advertise grant types
-        // the SDK predates (e.g. token exchange).
+        $this->assertContains('S256', $authorizationServer['code_challenge_methods_supported']);
+        $this->assertTrue($authorizationServer['authorization_response_iss_parameter_supported']);
         foreach (['authorization_code', 'refresh_token'] as $grantType) {
-            $this->assertContains(
-                $grantType,
-                $authorizationServer['grant_types_supported'],
-                "Missing OAuth grant type {$grantType}"
-            );
+            $this->assertContains($grantType, $authorizationServer['grant_types_supported']);
         }
-
-        // Every scope the server publishes must be a constant the SDK exposes. Assert a
-        // subset rather than equality: environments may publish a scope the SDK predates.
-        foreach ($authorizationServer['scopes_supported'] as $scope) {
-            $this->assertContains($scope, OAuthResource::SCOPES, "Unknown OAuth scope {$scope}");
+        foreach (OAuthResource::SCOPES as $scope) {
+            $this->assertContains($scope, $authorizationServer['scopes_supported']);
         }
-
-        try {
-            $resource = $oauth->protectedResourceMetadata();
-        } catch (ApiException $e) {
-            if (in_array($e->getStatusCode(), [403, 404], true)) {
-                $this->markTestSkipped('Protected-resource metadata is not deployed to this environment');
-            }
-            throw $e;
-        }
+        $this->assertSame($this->client->getConfig()->getBaseUrl() . '/oauth/token', $authorizationServer['token_endpoint']);
+        $this->assertSame($this->client->getConfig()->getBaseUrl() . '/oauth/revoke', $authorizationServer['revocation_endpoint']);
+        $this->assertSame($this->client->getConfig()->getBaseUrl() . '/oauth/userinfo', $authorizationServer['userinfo_endpoint']);
 
         $this->assertSame([$this->oauthIssuer], $resource['authorization_servers']);
         $this->assertSame(['header'], $resource['bearer_methods_supported']);
-
-        if ($this->oauthIssuer !== OAuthResource::DEFAULT_ISSUER) {
-            $environmentServer = $oauth->authorizationServerMetadata($this->oauthIssuer);
-            $this->assertSame($this->oauthIssuer, $environmentServer['issuer']);
-            $this->assertContains(
-                OAuthResource::CODE_CHALLENGE_METHOD,
-                $environmentServer['code_challenge_methods_supported']
-            );
-            $this->assertTrue($environmentServer['authorization_response_iss_parameter_supported']);
-        }
     }
 
     /**
@@ -1374,12 +1363,13 @@ final class LiveApiTest extends TestCase
     public function testOAuthAuthorizationUrlMatchesTheDiscoveredEndpoint(): void
     {
         $oauth = $this->probeOAuthResource();
-        $endpoint = $oauth->authorizationServerMetadata()['authorization_endpoint'];
+        $server = $oauth->authorizationServerMetadata($this->oauthIssuer);
+        $endpoint = $server['authorization_endpoint'];
 
         $start = $oauth->startAuthorization('https://app.example.com/oauth/callback', [
             OAuthResource::SCOPE_DOCUMENTS_READ,
             OAuthResource::SCOPE_OPENID,
-        ]);
+        ], ['issuer' => $server['issuer'], 'authorization_endpoint' => $endpoint]);
 
         $this->assertStringStartsWith($endpoint . '?', $start['authorization_url']);
         parse_str((string) parse_url($start['authorization_url'], PHP_URL_QUERY), $query);
@@ -1395,8 +1385,7 @@ final class LiveApiTest extends TestCase
      * `getMessage()` is the machine-readable error code applications branch on.
      *
      * A bogus client can never authenticate, which makes this safe to run anywhere: it
-     * proves the SDK's form-encoded body reaches the server and its error surfaces
-     * correctly, without needing a registered application.
+     * checks client refusal and error handling without needing a registered application.
      */
     public function testOAuthTokenAndRevocationReportFlatRfcErrors(): void
     {
@@ -1415,10 +1404,6 @@ final class LiveApiTest extends TestCase
                 $call();
                 $this->fail("An unknown OAuth client must not authenticate on {$label}");
             } catch (ApiException $e) {
-                if ($e->getStatusCode() === 404) {
-                    $this->markTestSkipped('OAuth endpoints are not deployed to this environment');
-                }
-
                 $this->assertSame(401, $e->getStatusCode(), $label);
                 $this->assertSame('invalid_client', $e->getMessage(), $label);
                 $this->assertArrayHasKey('error_description', (array) $e->getResponseData());
@@ -1431,22 +1416,21 @@ final class LiveApiTest extends TestCase
      * `grant_type` is read before client authentication, so an unsupported grant is the
      * one token-endpoint error that proves the request body itself was parsed.
      */
-    public function testOAuthTokenEndpointParsesTheFormEncodedBody(): void
+    public function testOAuthTokenEndpointParsesFormAndJsonBodies(): void
     {
-        $oauth = $this->probeOAuthResource();
-
-        try {
-            $oauth->exchangeCode('sdk-live-probe-code', [
-                'code_verifier' => OAuthResource::createCodeVerifier(),
-                'redirect_uri' => 'https://app.example.com/oauth/callback',
-            ]);
-            $this->fail('An unknown OAuth client must not exchange a code');
-        } catch (ApiException $e) {
-            if ($e->getStatusCode() === 404) {
-                $this->markTestSkipped('OAuth endpoints are not deployed to this environment');
+        foreach (['application/x-www-form-urlencoded', 'application/json'] as $contentType) {
+            $payload = ['grant_type' => 'bogus', 'client_id' => 'sdk-live-probe-client'];
+            $body = $contentType === 'application/json'
+                ? json_encode($payload, JSON_THROW_ON_ERROR)
+                : http_build_query($payload, '', '&', PHP_QUERY_RFC3986);
+            try {
+                $this->client->getHttpClient()->postRaw('oauth/token', $body, $contentType);
+                $this->fail('An unsupported grant must be rejected');
+            } catch (ApiException $e) {
+                $this->assertSame(400, $e->getStatusCode(), $contentType);
+                $this->assertSame('unsupported_grant_type', $e->getMessage(), $contentType);
+                $this->assertArrayNotHasKey('data', (array) $e->getResponseData());
             }
-
-            $this->assertContains($e->getMessage(), ['invalid_client', 'invalid_grant']);
         }
     }
 
@@ -1457,10 +1441,6 @@ final class LiveApiTest extends TestCase
             $this->probeOAuthResource()->userinfo('sdk-live-probe-access-token');
             $this->fail('A bogus access token must not authenticate');
         } catch (ApiException $e) {
-            if ($e->getStatusCode() === 404) {
-                $this->markTestSkipped('OAuth endpoints are not deployed to this environment');
-            }
-
             $this->assertSame(401, $e->getStatusCode());
             $this->assertArrayHasKey('status', (array) $e->getResponseData());
         }

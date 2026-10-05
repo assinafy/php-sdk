@@ -439,6 +439,9 @@ class DocumentResource extends AbstractResource
      * | `ARTIFACT_BUNDLE`           | `bundle`           | ZIP of every artifact above               |
      *
      * Everything except `original` exists only once the document reaches `certificated`.
+     * Use `pades` to preserve ICP-Brasil A1/A3 cryptographic signatures; `certificated`
+     * contains their flattened representation.
+     * Authentication: configured API key or workspace Bearer token (`documents:read` for OAuth).
      *
      * Request: no parameters — the artifact is a path segment.
      *
@@ -473,6 +476,13 @@ class DocumentResource extends AbstractResource
      *
      * Response: raw `image/jpeg` bytes — not the JSON envelope.
      *
+     * Authentication: configured API key or workspace Bearer token (`documents:read` for OAuth).
+     * ```php
+     * $jpeg = $client->documents()->downloadThumbnail('document-id');
+     * // $jpeg is the complete JPEG byte string; no query or request body is sent.
+     * ```
+     *
+     * @param string $documentId the prepared document ID
      * @return string raw JPEG bytes
      * @throws ValidationException when `$documentId` is empty
      * @throws \Assinafy\SDK\Exceptions\ApiException 404 before page rendering finishes
@@ -497,6 +507,14 @@ class DocumentResource extends AbstractResource
      *
      * Response: raw `image/jpeg` bytes — not the JSON envelope.
      *
+     * Authentication: configured API key or workspace Bearer token (`documents:read` for OAuth).
+     * ```php
+     * $jpeg = $client->documents()->downloadPage('document-id', 'page-id');
+     * // $jpeg is the complete JPEG byte string; no query or request body is sent.
+     * ```
+     *
+     * @param string $documentId the prepared document ID
+     * @param string $pageId an ID from the document's pages array
      * @return string raw JPEG bytes
      * @throws ValidationException when either identifier is empty
      */
@@ -1206,6 +1224,14 @@ class DocumentResource extends AbstractResource
      *
      * Request/Response: as {@see self::get()}; only `status` is read.
      *
+     * Authentication: configured API key or workspace Bearer token (`documents:read` for OAuth).
+     * ```php
+     * $fullySigned = $client->documents()->isFullySigned('document-id');
+     * // true for ready/certificating/certificated, false for a pending document.
+     * ```
+     *
+     * @param string $documentId the document ID to read
+     * @return bool whether all signers have completed
      * @throws ValidationException when `$documentId` is empty
      * @throws \Assinafy\SDK\Exceptions\ApiException 404 when the document does not exist
      */
@@ -1298,6 +1324,14 @@ class DocumentResource extends AbstractResource
      * PDF with a header and end marker, and not exceed the 25 MB API limit. Shared with
      * {@see TemplateResource::create()} so both upload paths enforce identical constraints.
      *
+     * Local only: no authentication, request or response body.
+     * ```php
+     * DocumentResource::assertUploadable('/private/documents/agreement.pdf');
+     * // Returns normally for a readable PDF within the limit; otherwise throws.
+     * ```
+     *
+     * @param string $filePath the local regular PDF file
+     * @return void
      * @throws ValidationException when the file is missing, unreadable, invalid, or too large
      */
     public static function assertUploadable(#[\SensitiveParameter] string $filePath): void
@@ -1358,6 +1392,14 @@ class DocumentResource extends AbstractResource
      * Assert that `$artifact` is one of the documented artifact names. Shared with
      * {@see SignerDocumentResource::download()} so both download paths validate identically.
      *
+     * Local only: no authentication, request or response body.
+     * ```php
+     * DocumentResource::assertArtifact(DocumentResource::ARTIFACT_PADES);
+     * // Returns normally for an allowed name; otherwise throws.
+     * ```
+     *
+     * @param string $artifact original, certificated, certificate-page, pades or bundle
+     * @return void
      * @throws ValidationException on an unknown artifact name
      */
     public static function assertArtifact(string $artifact): void

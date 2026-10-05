@@ -359,6 +359,16 @@ class SignerResource extends AbstractResource
      * Normalize explicitly international phone input into E.164 (e.g. `+5548999990000`).
      * Common visual separators are removed, but a leading `+` and country code are
      * mandatory so a local number is never silently assigned to the wrong country.
+     *
+     * Local only: no authentication, request or response body.
+     * ```php
+     * SignerResource::normalizePhoneNumber('+55 (48) 99999-0000');
+     * // '+5548999990000'
+     * ```
+     *
+     * @param string $phone international number with an explicit country code
+     * @return string the normalized phone number
+     * @throws ValidationException on an invalid or ambiguous phone number
      */
     public static function normalizePhoneNumber(#[\SensitiveParameter] string $phone): string
     {

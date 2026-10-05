@@ -142,4 +142,33 @@ final class TemplateResourceTest extends TestCase
         $this->expectException(\RuntimeException::class);
         $templates->waitUntilReady('t1', 1, 1);
     }
+
+    public function testWaitUntilReadyUsesTheStatusReturnedByTheFinalPoll(): void
+    {
+        foreach (['Ready', 'Failed', 'Processing'] as $status) {
+            $templates = $this->getMockBuilder(TemplateResource::class)
+                ->setConstructorArgs([new FakeHttpClient(), new Configuration('k', 'a')])
+                ->onlyMethods(['get'])
+                ->getMock();
+            $templates->expects($this->once())->method('get')->willReturnCallback(
+                static function () use ($status): array {
+                    usleep(1_050_000);
+
+                    return ['id' => 't1', 'status' => $status];
+                }
+            );
+
+            try {
+                $template = $templates->waitUntilReady('t1', 1, 1);
+                $this->assertSame('Ready', $status);
+                $this->assertSame('t1', $template['id']);
+            } catch (\RuntimeException $e) {
+                $this->assertNotSame('Ready', $status);
+                $this->assertStringContainsString(
+                    $status === 'Failed' ? 'processing failed' : 'Timed out',
+                    $e->getMessage()
+                );
+            }
+        }
+    }
 }

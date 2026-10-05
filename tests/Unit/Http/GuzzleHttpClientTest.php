@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Assinafy\SDK\Tests\Unit\Http;
 
 use Assinafy\SDK\Configuration;
+use Assinafy\SDK\AssinafyClient;
 use Assinafy\SDK\Exceptions\ApiException;
 use Assinafy\SDK\Exceptions\NetworkException;
 use Assinafy\SDK\Http\GuzzleHttpClient;
@@ -61,6 +62,133 @@ final class GuzzleHttpClientTest extends TestCase
 
         $this->assertInstanceOf(Client::class, $client);
         $this->assertSame(STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT, $client->getConfig('crypto_method'));
+        if (\GuzzleHttp\ClientInterface::MAJOR_VERSION < 8) {
+            $this->assertSame(
+                STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT | STREAM_CRYPTO_METHOD_TLSv1_3_CLIENT,
+                $client->getConfig('stream_context')['ssl']['crypto_method'] ?? null
+            );
+        } else {
+            $this->assertNull($client->getConfig('stream_context'));
+        }
+    }
+
+    public function testDocumentOperationsHaveApiKeyAndOAuthBearerParity(): void
+    {
+        $temporaryPath = tempnam(sys_get_temp_dir(), 'document-parity-');
+        $this->assertIsString($temporaryPath);
+        $pdf = $temporaryPath . '.pdf';
+        rename($temporaryPath, $pdf);
+        file_put_contents($pdf, "%PDF-1.4\n%%EOF\n");
+        $snapshots = [];
+
+        try {
+            foreach (['api_key', 'oauth'] as $mode) {
+                $config = $mode === 'api_key'
+                    ? new Configuration('workspace-key', 'acc', 'https://api.example.com/v1')
+                    : Configuration::forBearer('oauth-token', 'acc', 'https://api.example.com/v1');
+                $history = [];
+                $mock = new MockHandler();
+                $stack = HandlerStack::create($mock);
+                $stack->push(Middleware::history($history));
+                $guzzle = new Client(['base_uri' => 'https://api.example.com/v1/', 'handler' => $stack]);
+                $client = new AssinafyClient($config, new GuzzleHttpClient($config, null, $guzzle));
+                $documents = $client->documents();
+                $operations = [
+                    'upload' => fn () => $documents->upload($pdf),
+                    'get' => fn () => $documents->get('d1'),
+                    'list' => fn () => $documents->list(1, 20, ['status' => 'metadata_ready']),
+                    'search' => fn () => $documents->search('agreement'),
+                    'rename' => fn () => $documents->rename('d1', 'Agreement.pdf'),
+                    'delete' => fn () => $documents->delete('d1'),
+                    'download' => fn () => $documents->download('d1'),
+                    'thumbnail' => fn () => $documents->downloadThumbnail('d1'),
+                    'page' => fn () => $documents->downloadPage('d1', 'p1'),
+                    'activities' => fn () => $documents->activities('d1'),
+                    'statuses' => fn () => $documents->statuses(),
+                    'verify' => fn () => $documents->verify('signature-hash'),
+                    'publicInfo' => fn () => $documents->publicInfo('d1'),
+                    'sendToken' => fn () => $documents->sendToken('d1', 'signer@example.com'),
+                    'listTags' => fn () => $documents->listTags('d1'),
+                    'replaceTags' => fn () => $documents->replaceTags('d1', ['contracts']),
+                    'appendTags' => fn () => $documents->appendTags('d1', ['contracts']),
+                    'detachTag' => fn () => $documents->detachTag('d1', 'tag1'),
+                    'createFromTemplate' => fn () => $documents->createFromTemplate('t1', [
+                        ['id' => 's1', 'role_id' => 'r1'],
+                    ]),
+                    'estimateTemplate' => fn () => $documents->estimateCostFromTemplate('t1', [['role_id' => 'r1']]),
+                    'waitUntilReady' => fn () => $documents->waitUntilReady('d1'),
+                    'isFullySigned' => fn () => $documents->isFullySigned('d1'),
+                    'progress' => fn () => $documents->getSigningProgress('d1'),
+                    'signerSelf' => fn () => $client->signerSession()->self('signer-code'),
+                    'signerTerms' => fn () => $client->signerSession()->acceptTerms('signer-code'),
+                    'signerVerify' => fn () => $client->signerSession()->verifyCode('signer-code', '123456'),
+                    'signerConfirm' => fn () => $client->signerSession()->confirmData('d1', 'signer-code', [
+                        'full_name' => 'Example Signer', 'has_accepted_terms' => true,
+                    ]),
+                    'signerUploadImage' => fn () => $client->signerSession()->uploadSignature('signer-code', 'signature', 'png-bytes'),
+                    'signerImage' => fn () => $client->signerSession()->downloadSignature('signer-code', 'signature'),
+                    'signerCurrent' => fn () => $client->signerSession()->currentDocument('signer-code'),
+                    'signerSign' => fn () => $client->signerSession()->sign('d1', 'a1', 'signer-code', []),
+                    'signerDecline' => fn () => $client->signerSession()->decline('d1', 'a1', 'signer-code', 'Declined'),
+                    'signerDocument' => fn () => $client->signerDocuments()->current('s1', 'signer-code'),
+                    'signerList' => fn () => $client->signerDocuments()->list('s1', 'signer-code'),
+                    'signerSearch' => fn () => $client->signerDocuments()->search('s1', 'signer-code', 'agreement'),
+                    'signerSignMultiple' => fn () => $client->signerDocuments()->signMultiple('signer-code', ['d1']),
+                    'signerDeclineMultiple' => fn () => $client->signerDocuments()->declineMultiple('signer-code', ['d1'], 'Declined'),
+                    'signerDownload' => fn () => $client->signerDocuments()->download('s1', 'd1', 'signer-code'),
+                    'validateField' => fn () => $client->fields()->validate('f1', 'Example', 'signer-code'),
+                    'validateFields' => fn () => $client->fields()->validateMultiple([
+                        ['field_id' => 'f1', 'value' => 'Example'],
+                    ], 'signer-code'),
+                ];
+                foreach (['Email', 'Whatsapp', 'DigitalCertificate'] as $verification) {
+                    $signers = [['id' => 's1', 'verification_method' => $verification]];
+                    $operations['estimate' . $verification] = fn () => $client->assignments()->estimateCost('d1', $signers);
+                    $operations['assign' . $verification] = fn () => $client->assignments()->create('d1', $signers);
+                }
+
+                foreach ($operations as $name => $operation) {
+                    $data = ['id' => 'd1', 'status' => 'metadata_ready'];
+                    $body = json_encode(['status' => 200, 'message' => '', 'data' => $data], JSON_THROW_ON_ERROR);
+                    $contentType = 'application/json';
+                    if (in_array($name, ['download', 'thumbnail', 'page', 'signerImage', 'signerDownload'], true)) {
+                        $isPdf = in_array($name, ['download', 'signerDownload'], true);
+                        $body = $isPdf ? '%PDF-1.4 binary' : 'image-bytes';
+                        $contentType = $isPdf ? 'application/pdf' : 'image/jpeg';
+                    }
+                    $mock->append(new GuzzleResponse(200, ['Content-Type' => $contentType], $body));
+                    $result = $operation();
+                    $request = $history[count($history) - 1]['request'];
+                    $public = in_array($name, ['verify', 'publicInfo', 'sendToken'], true)
+                        || str_starts_with($name, 'signer');
+                    $this->assertSame(
+                        !$public && $mode === 'api_key' ? 'workspace-key' : '',
+                        $request->getHeaderLine('X-Api-Key'),
+                        $name
+                    );
+                    $this->assertSame(
+                        !$public && $mode === 'oauth' ? 'Bearer oauth-token' : '',
+                        $request->getHeaderLine('Authorization'),
+                        $name
+                    );
+                    $this->assertSame('application/json', $request->getHeaderLine('Accept'));
+                    $normalized = $request->withoutHeader('Authorization')->withoutHeader('X-Api-Key');
+                    $wireBody = (string) $request->getBody();
+                    if ($name === 'upload') {
+                        $boundary = explode('boundary=', $request->getHeaderLine('Content-Type'))[1];
+                        $wireBody = str_replace($boundary, 'multipart-boundary', $wireBody);
+                        $normalized = $normalized->withHeader('Content-Type', 'multipart/form-data; boundary=multipart-boundary');
+                    }
+                    $snapshots[$mode][$name] = [
+                        $request->getMethod(), (string) $request->getUri(),
+                        $normalized->getHeaders(), $wireBody, $result,
+                    ];
+                }
+            }
+            $this->assertSame($snapshots['api_key'], $snapshots['oauth']);
+        } finally {
+            unlink($pdf);
+        }
     }
 
     public function testGetSendsQueryStringAndParsesEnvelope(): void

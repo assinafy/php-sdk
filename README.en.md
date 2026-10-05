@@ -153,28 +153,47 @@ checklist.
 ```php
 use Assinafy\SDK\Resources\OAuthResource;
 
-$oauth = AssinafyClient::forAuth()->oauth(
+$oauthBaseUrl = Configuration::SANDBOX_BASE_URL;
+$expectedIssuer = 'https://auth-sandbox.assinafy.com.br';
+$oauthClient = AssinafyClient::forAuth($oauthBaseUrl);
+$oauth = $oauthClient->oauth(
     (string) getenv('ASSINAFY_OAUTH_CLIENT_ID'),
     (string) getenv('ASSINAFY_OAUTH_CLIENT_SECRET') ?: null,
 );
+
+$server = $oauth->authorizationServerMetadata($expectedIssuer);
+if (($server['issuer'] ?? null) !== $expectedIssuer) {
+    throw new RuntimeException('Unexpected OAuth issuer');
+}
 
 // 1. Send the browser to Assinafy, keeping the transaction in the user's session.
 $start = $oauth->startAuthorization('https://app.example.com/callback', [
     OAuthResource::SCOPE_DOCUMENTS_READ,
     OAuthResource::SCOPE_DOCUMENTS_WRITE,
+    OAuthResource::SCOPE_OPENID,
+    OAuthResource::SCOPE_PROFILE,
+    OAuthResource::SCOPE_EMAIL,
     OAuthResource::SCOPE_OFFLINE_ACCESS,
-]);
-$_SESSION['assinafy_oauth'] = $start;
+], ['issuer' => $server['issuer'], 'authorization_endpoint' => $server['authorization_endpoint']]);
+$_SESSION['assinafy_oauth'] = $start + ['created_at' => time()];
 header('Location: ' . $start['authorization_url'], true, 302);
+exit;
+```
 
+In the callback route, reconstruct `$oauthClient` and `$oauth` for the same environment and app:
+
+```php
 // 2. On the redirect URI, validate the callback and exchange the code.
-$transaction = $_SESSION['assinafy_oauth'];
+$transaction = $_SESSION['assinafy_oauth'] ?? null;
 unset($_SESSION['assinafy_oauth']);
+if (!is_array($transaction) || time() - ($transaction['created_at'] ?? 0) > 600) {
+    throw new RuntimeException('Invalid or expired OAuth transaction');
+}
 $tokens = $oauth->exchangeCode($oauth->handleCallback($_GET, $transaction), $transaction);
 
 // 3. The token belongs to the one workspace the user chose.
-$accounts = AssinafyClient::forAuth()->accounts()->list($tokens['access_token']);
-$connected = AssinafyClient::forBearer($tokens['access_token'], $accounts['data'][0]['id']);
+$accounts = $oauthClient->accounts()->list($tokens['access_token']);
+$connected = AssinafyClient::forBearer($tokens['access_token'], $accounts['data'][0]['id'], $oauthBaseUrl);
 ```
 
 `startAuthorization()` mints a fresh `code_verifier` and `state` on every attempt.
@@ -189,7 +208,7 @@ and `id_token` needs `openid`.
 
 ```php
 $renewed = $oauth->refresh($connection->refreshToken);   // returns a NEW refresh token
-$store->saveRefreshToken($renewed['refresh_token']);     // persist it before anything else
+$store->replaceTokens($connectionId, $renewed);        // atomic persistence under a connection lock
 $claims  = $oauth->userinfo($renewed['access_token']);   // {sub, name?, email?, email_verified?}
 // On disconnect, revoke the token you stored most recently — never a retired copy.
 $oauth->revoke($store->currentRefreshToken(), OAuthResource::TOKEN_TYPE_HINT_REFRESH);
@@ -332,7 +351,7 @@ before sending the request.
 | --- | --- | --- | --- |
 | `VERIFICATION_EMAIL` | `Email` | An email address on the signer | 0 |
 | `VERIFICATION_WHATSAPP` | `Whatsapp` | `whatsapp_phone_number` and a paid subscription | 0.45 |
-| `VERIFICATION_DIGITAL_CERTIFICATE` | `Email` or `Whatsapp` | The account's Digital Certificate feature (Standard and Pro plans), a CPF in `government_id`, and the signer alone in its step | 2 for the signature, on top of its notification |
+| `VERIFICATION_DIGITAL_CERTIFICATE` | `Email` or `Whatsapp` | The account's Digital Certificate feature (Standard and Pro plans), a CPF/CNPJ in `government_id`, and the signer alone in its step | 2 for the signature, on top of its notification |
 
 `DigitalCertificate` covers the ICP-Brasil **A1** (a software file on the device) and **A3** (a
 smart card or token) certificates. Both use this one value and the same payload — they differ only
@@ -541,7 +560,8 @@ if (file_put_contents('/secure/output/agreement-signed.pdf', $pdf, LOCK_EX) === 
 
 Available artifact names are `original`, `certificated`, `certificate-page`, `pades`, and
 `bundle`. `pades` applies to digital-certificate documents; `bundle` is a ZIP. Thumbnails and
-rendered pages also return binary image bytes.
+rendered pages also return binary image bytes. For A1/A3, download `pades` to preserve the
+ICP-Brasil cryptographic signatures; `certificated` contains their flattened representation.
 
 Document verification is public and uses the signature hash printed in the certificate data:
 
@@ -737,12 +757,11 @@ as WhatsApp notification and digital-certificate signing still depend on the acc
 server deployment. A 403 can indicate a plan restriction; inspect the response message before
 changing the request.
 
-Marketplace OAuth is deployed to production. Sandbox answers `/oauth/token`, `/oauth/revoke`
-and `/oauth/userinfo` with a framework 404, and its origin does not serve the protected-resource
-document, so `oauth()` calls skip rather than fail there. Read endpoint URLs from the discovery
-metadata of the intended environment, and never mix a sandbox resource URL with production
-authorization. A workspace API key cannot replace OAuth application credentials or a signer's
-access code.
+Marketplace OAuth is deployed to production and sandbox. Sandbox discovery names
+`https://auth-sandbox.assinafy.com.br` as the issuer. Use the issuer and authorization endpoint
+from the selected environment's metadata. Token exchange and refresh require a registered OAuth
+application and consent. A workspace API key cannot replace OAuth application credentials or a
+signer's access code.
 
 A framework routing 404 (`name: Not Found`) is different from a resource-not-found API envelope.
 Keep supported resource methods when an environment has not deployed a route yet.
@@ -811,6 +830,28 @@ Enable only the category whose side effects are acceptable. The live suite never
 configured account or supplied API key. Login/reset completion, OTP completion, social-provider
 flows, password changes, and API-key deletion need the corresponding disposable credentials,
 inbox access, or provider token.
+
+
+Document-flow tests also accept an OAuth token already authorized for the configured workspace,
+with `documents:read`, `documents:write`, `templates:read` and `templates:write`. The same tests
+exercise upload, readiness, search, rename, assignments, fields, tags and templates:
+
+```bash
+read -rs ASSINAFY_OAUTH_ACCESS_TOKEN
+export ASSINAFY_OAUTH_ACCESS_TOKEN
+ASSINAFY_AUTH_MODE=oauth composer test:integration -- --filter 'Document|Assignment|Collect|Template|EstimateCost|Rename|Statuses|SignerLifecycle|TagLifecycle|FieldLifecycle|OAuth'
+```
+
+Keep `ASSINAFY_ACCOUNT_ID`, `ASSINAFY_BASE_URL` and `ASSINAFY_INTEGRATION=1` configured.
+The account ID must identify the token's one authorized workspace. Account administration, API
+keys and user preferences are outside this OAuth test selection. Offline tests check wire and
+return parity under both modes; live document tests need the token issued after consent.
+
+OAuth discovery and refusal tests need neither a workspace key nor a registered application:
+
+```bash
+ASSINAFY_INTEGRATION=1 composer test:integration -- --filter OAuth
+```
 
 GitLab CI is the canonical pipeline. The mirrored GitHub Actions pipeline runs the supported PHP
 matrix, dependency ranges, unit tests, static analysis, formatting checks, coverage, dependency

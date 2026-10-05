@@ -64,7 +64,8 @@ assinafy-php-sdk/
 
 ### Client facade
 
-`AssinafyClient` owns the configuration, transport, and logger proxy. Resource accessors are lazy and return the same resource instance for the lifetime of the client.
+`AssinafyClient` owns the configuration, transport, and logger proxy. Resource accessors are lazy and return the same resource instance for the lifetime of the client,
+except `oauth()`, whose arguments select application credentials.
 
 ```php
 use Assinafy\SDK\AssinafyClient;

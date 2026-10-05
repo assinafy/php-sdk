@@ -319,8 +319,16 @@ class TemplateResource extends AbstractResource
      *
      * Response: raw `image/jpeg` bytes — not the JSON envelope.
      *
+     * Authentication: configured API key or workspace Bearer token (`templates:read` for OAuth).
+     * ```php
+     * $jpeg = $client->templates()->downloadPage('template-id', 'page-id');
+     * // $jpeg is the complete JPEG byte string; no query or request body is sent.
+     * ```
+     *
      * This route is not part of the published OpenAPI contract but exists on the live API.
      *
+     * @param string $templateId the ready template ID
+     * @param string $pageId an ID from the template's pages array
      * @return string raw JPEG bytes
      * @throws ValidationException when either identifier is empty
      * @throws \Assinafy\SDK\Exceptions\ApiException 404 before rendering finishes
@@ -406,9 +414,6 @@ class TemplateResource extends AbstractResource
         $deadline = hrtime(true) + ($maxWaitSeconds * 1_000_000_000);
         while (hrtime(true) < $deadline) {
             $template = $this->get($templateId);
-            if (hrtime(true) >= $deadline) {
-                break;
-            }
             $status = strtolower((string) ($template['status'] ?? ''));
 
             if ($status === 'ready') {
