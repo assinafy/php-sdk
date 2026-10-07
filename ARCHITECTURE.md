@@ -134,7 +134,7 @@ Each resource extends `AbstractResource`, which centralizes account paths, path-
 | `tags()` | Account tag CRUD |
 | `templates()` | Template upload, polling, retrieval, update, deletion, and page downloads |
 | `users()` | Authenticated user profile plus published notification preferences and cross-account statistics |
-| `webhooks()` | Subscription configuration, event types, delivery history, and retry |
+| `webhooks()` | Endpoints, signing secrets, legacy subscription, event types, delivery history, and retry |
 
 Workspace resources use either the configured `X-Api-Key` or the global Bearer header supplied by
 `forBearer()`. Selected bootstrap methods can override configured authentication with an explicit
@@ -182,9 +182,9 @@ Applications should still avoid logging their own raw request bodies or webhook 
 
 ### Webhook parsing
 
-The API contract has no webhook secret registration field or signature header. The SDK therefore does not expose an HMAC verification API. `WebhookEventParser` only decodes the delivery envelope and reads its type, entity data, event-specific payload, and account ID.
+Endpoints with `signing_enabled` sign each delivery following Standard Webhooks. `WebhookEventParser::verifySignature()` recomputes the HMAC-SHA256 over `{webhook-id}.{webhook-timestamp}.{raw body}` with the endpoint's `whsec_` secret, compares it in constant time, and rejects stale timestamps. The parser then decodes the delivery envelope and reads its type, entity data, event-specific payload, and account ID.
 
-Webhook bodies must be treated as untrusted input. A handler should use HTTPS, apply network controls where possible, return promptly, make processing idempotent, and re-fetch the referenced entity through an authenticated resource before acting.
+Webhook bodies must be treated as untrusted input until verified. A handler should verify the signature, deduplicate on `webhook-id`, use HTTPS, apply network controls where possible, return promptly, make processing idempotent, and re-fetch the referenced entity through an authenticated resource before acting.
 
 ### Exceptions
 
@@ -259,7 +259,7 @@ ASSINAFY_INTEGRATION=1 composer test:integration
 - SDK transport logs include metadata only; credential redaction covers OAuth codes and PKCE verifiers.
 - Exception causes retain only the Guzzle exception class and code, including when PHP records arguments.
 - Injected concrete Guzzle clients cannot carry default HTTP authentication or credential headers.
-- Incoming webhook data is parsed, not authenticated; re-fetch authoritative state before side effects.
+- Incoming webhook data is authenticated only by `verifySignature()` on a signing endpoint; re-fetch authoritative state before side effects.
 - Public clients cannot call account-scoped paths accidentally.
 
 ## Compatibility and change control

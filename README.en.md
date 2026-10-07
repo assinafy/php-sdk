@@ -127,8 +127,17 @@ $session = $public->auth()->login(
     (string) getenv('ASSINAFY_PASSWORD'),
 );
 
+// Two-factor accounts receive a challenge instead of a token; it expires in five minutes.
+if (isset($session['mfa_token'])) {
+    $session = $public->auth()->verifyMfa($session['mfa_token'], $codeFromAuthenticatorApp);
+}
+
 $accounts = $public->accounts()->list($session['access_token']);
 ```
+
+Users manage their second factor with `users()->mfaMethods()`, `startTotpEnrollment()`,
+`confirmTotpEnrollment()`, `regenerateRecoveryCodes()` and `removeMfaMethod()`; see the
+[API reference](docs/API_REFERENCE.md) for each payload.
 
 After selecting an account, a Bearer client can call account-scoped resources:
 
@@ -645,44 +654,66 @@ one signer binding per required role and include every required editor-field val
 
 ## Receive webhooks
 
-Each workspace has one webhook subscription. Registering it creates or replaces that
-configuration:
+An account can register 1 webhook endpoint, or up to 3 on paid plans. Each endpoint has its own
+URL, events, active flag and signing setting, and every active endpoint subscribed to an event
+receives it independently. Enable `signingEnabled` so each delivery carries a
+[Standard Webhooks](https://www.standardwebhooks.com) signature:
 
 ```php
 use Assinafy\SDK\Resources\WebhookResource;
 
-$subscription = $client->webhooks()->register(
-    url: 'https://hooks.example.test/assinafy/a-long-random-path',
+$endpoint = $client->webhooks()->createEndpoint(
+    url: 'https://hooks.example.test/assinafy',
     email: 'ops@example.test',
     events: WebhookResource::DEFAULT_EVENTS,
+    name: 'ERP',
+    signingEnabled: true,
 );
+
+// Store it like any credential. OAuth access tokens cannot read it.
+$secret = $client->webhooks()->endpointSecret($endpoint['id']); // 'whsec_...'
 ```
 
-Parse incoming JSON defensively and then re-fetch the referenced object with authenticated
-credentials:
+In the receiver, verify the **raw** body before decoding it:
 
 ```php
-$payload = file_get_contents('php://input');
-if ($payload === false) {
-    http_response_code(400);
+$raw = (string) file_get_contents('php://input');
+$parser = $client->webhookEvents();
+
+if (!$parser->verifySignature($raw, getallheaders(), $secret)) {
+    http_response_code(401);
     exit;
 }
 
-$event = $client->webhookEvents()->extractEvent($payload);
-
+$event = $parser->extractEvent($raw);
 if ($event === null) {
     http_response_code(400);
     exit;
 }
 
-// Deduplicate by event ID, then re-fetch the referenced Assinafy entity before acting.
+$messageId = $_SERVER['HTTP_WEBHOOK_ID']; // identical on every attempt: deduplicate on it
 ```
 
-The v1 webhook contract has no signing secret or signature header. Use HTTPS, an unguessable
-endpoint path, strict method/body limits, event-ID idempotency, and an authenticated re-fetch
-before consequential work. `deactivate()` pauses delivery without deleting the stored
-configuration; `activate()` re-enables it. Use `dispatches()` and `retryDispatch()` to inspect and
-retry deliveries.
+`verifySignature()` compares each `v1,<signature>` entry in constant time and rejects a
+`webhook-timestamp` more than 300 seconds from the local clock. `rotateEndpointSecret()` replaces
+the secret immediately, so update the receiver at the same time.
+
+Return 2xx quickly and process through an application queue. Each event gets two attempts three
+seconds apart; ten consecutive failures pause the endpoint. Do not rely on ordering between
+`assignment_created` and `document_metadata_ready`, and re-fetch the referenced object before
+acting on state that may have changed.
+
+| Method | Route |
+| --- | --- |
+| `listEndpoints()` / `getEndpoint($id)` | `GET .../webhooks/endpoints[/{id}]` |
+| `createEndpoint(...)` | `POST .../webhooks/endpoints` |
+| `updateEndpoint($id, $changes)` | `PUT .../webhooks/endpoints/{id}` (partial update) |
+| `deleteEndpoint($id)` | `DELETE .../webhooks/endpoints/{id}` |
+| `endpointSecret($id)` / `rotateEndpointSecret($id)` | `.../secret` and `.../secret/rotate` |
+| `dispatches()` / `retryDispatch($id)` | Delivery history and forced redelivery |
+
+`register()`, `get()`, `deactivate()` and `activate()` keep working and act on the account's
+oldest endpoint.
 
 ## Responses and pagination
 
@@ -748,7 +779,7 @@ or signature data.
 | `oauth()` | Marketplace authorization: PKCE, callback validation, token exchange, refresh, revocation, userinfo, and discovery |
 | `signerSession()` | Signer identity, terms, verification, signature image, sign, and decline actions |
 | `signerDocuments()` | Signer document list, search, bulk actions, and downloads |
-| `webhookEvents()` | Incoming webhook payload parsing |
+| `webhookEvents()` | Incoming webhook signature verification and payload parsing |
 
 ## Sandbox and production differences
 
@@ -762,6 +793,10 @@ Marketplace OAuth is deployed to production and sandbox. Sandbox discovery names
 from the selected environment's metadata. Token exchange and refresh require a registered OAuth
 application and consent. A workspace API key cannot replace OAuth application credentials or a
 signer's access code.
+
+Webhook endpoints (`listEndpoints()` and related methods, signing secrets) and two-factor
+authentication are deployed to production; the sandbox answers those routes with a framework 404
+until it is updated. The legacy subscription methods work in both environments.
 
 A framework routing 404 (`name: Not Found`) is different from a resource-not-found API envelope.
 Keep supported resource methods when an environment has not deployed a route yet.

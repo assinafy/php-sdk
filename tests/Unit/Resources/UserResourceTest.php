@@ -110,4 +110,59 @@ final class UserResourceTest extends TestCase
             }
         }
     }
+
+    public function testMfaMethodsUseDocumentedRoutesAndBodies(): void
+    {
+        $this->http->queueJson(200, ['methods' => [], 'recovery_codes_remaining' => 0])
+            ->queueJson(200, ['id' => 'm1', 'secret' => 'S', 'provisioning_uri' => 'otpauth://totp/x'])
+            ->queueJson(200, ['recovery_codes' => ['ABCD-EFGH-JKMN']])
+            ->queueJson(200, ['recovery_codes' => ['PQRS-TUVW-XYZ2']])
+            ->queueJson(200, ['is_mfa_enabled' => false]);
+
+        $this->users->mfaMethods();
+        $this->users->startTotpEnrollment('My phone');
+        $this->users->confirmTotpEnrollment('m1', '123456', reauthCode: '654321');
+        $this->users->regenerateRecoveryCodes(code: 'ABCD-EFGH-JKMN');
+        $this->assertSame(['is_mfa_enabled' => false], $this->users->removeMfaMethod('m1', 'current-password'));
+
+        $calls = $this->http->calls;
+        $this->assertSame([
+            'GET users/self/mfa',
+            'POST users/self/mfa/totp',
+            'PUT users/self/mfa/totp/confirm',
+            'POST users/self/mfa/recovery-codes',
+            'DELETE users/self/mfa/m1',
+        ], array_map(static fn (array $c): string => $c['method'] . ' ' . $c['uri'], $calls));
+        $this->assertSame(['label' => 'My phone'], $calls[1]['body']);
+        $this->assertSame(['id' => 'm1', 'code' => '123456', 'reauth_code' => '654321'], $calls[2]['body']);
+        $this->assertSame(['code' => 'ABCD-EFGH-JKMN'], $calls[3]['body']);
+        $this->assertSame(['password' => 'current-password'], $calls[4]['body']);
+    }
+
+    public function testFirstEnrollmentNeedsNoReauthentication(): void
+    {
+        $this->http->queueJson(200, [])->queueJson(200, []);
+
+        $this->users->startTotpEnrollment();
+        $this->assertSame([], $this->http->lastCall()['body']);
+        $this->users->confirmTotpEnrollment('m1', '123456');
+        $this->assertSame(['id' => 'm1', 'code' => '123456'], $this->http->lastCall()['body']);
+    }
+
+    public function testRemovingOrRegeneratingRequiresAProof(): void
+    {
+        foreach (
+            [
+                fn () => $this->users->removeMfaMethod('m1'),
+                fn () => $this->users->regenerateRecoveryCodes(' ', null),
+            ] as $call
+        ) {
+            try {
+                $call();
+                $this->fail('Expected ValidationException');
+            } catch (ValidationException) {
+                $this->assertSame([], $this->http->calls);
+            }
+        }
+    }
 }

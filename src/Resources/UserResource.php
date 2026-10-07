@@ -7,7 +7,8 @@ namespace Assinafy\SDK\Resources;
 use Assinafy\SDK\Exceptions\ValidationException;
 
 /**
- * Authenticated user profile and cross-account statistics.
+ * Authenticated user profile, cross-account statistics, notification preferences and
+ * two-factor authentication (TOTP authenticator plus recovery codes).
  *
  * @see https://api.assinafy.com.br/v1/docs
  */
@@ -289,5 +290,223 @@ class UserResource extends AbstractResource
         );
 
         return $this->extractData($response->getData() ?? []);
+    }
+
+    /**
+     * List the user's enrolled two-factor methods and remaining recovery codes.
+     * `GET /users/self/mfa`
+     *
+     * Request: no parameters.
+     *
+     * Example response (SDK return):
+     * ```php
+     * [
+     *     'methods' => [
+     *         [
+     *             'id' => 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
+     *             'type' => 'Totp',
+     *             'label' => 'My phone',
+     *             'confirmed_at' => '2026-09-09T14:21:03Z',
+     *             'last_used_at' => '2026-09-09T18:02:44Z',
+     *         ],
+     *     ],
+     *     'recovery_codes_remaining' => 8,
+     * ]
+     * ```
+     *
+     * @return array{methods?: array<int, array<string, mixed>>, recovery_codes_remaining?: int}
+     * @throws ValidationException when called on a public client without an access token
+     */
+    public function mfaMethods(#[\SensitiveParameter] ?string $accessToken = null): array
+    {
+        $response = $this->httpClient->get('users/self/mfa', [], $this->bearerHeaders($accessToken));
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    /**
+     * Start enrolling an authenticator app.
+     * `POST /users/self/mfa/totp`
+     *
+     * Creates an unconfirmed method and returns its shared secret — returned only by this call.
+     * Render `provisioning_uri` as a QR code, then prove one code with
+     * {@see self::confirmTotpEnrollment()}; two-factor login is not active until then.
+     *
+     * Request body:
+     * ```php
+     * ['label' => 'My phone']   // omitted when $label is null
+     * ```
+     *
+     * Example response (SDK return):
+     * ```php
+     * [
+     *     'id' => 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
+     *     'secret' => 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ',
+     *     'provisioning_uri' => 'otpauth://totp/user%40example.com?issuer=Assinafy&secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ',
+     * ]
+     * ```
+     *
+     * @return array{id?: string, secret?: string, provisioning_uri?: string}
+     * @throws ValidationException when called on a public client without an access token
+     */
+    public function startTotpEnrollment(
+        ?string $label = null,
+        #[\SensitiveParameter] ?string $accessToken = null
+    ): array {
+        $response = $this->httpClient->post(
+            'users/self/mfa/totp',
+            $label === null ? [] : ['label' => $label],
+            $this->bearerHeaders($accessToken)
+        );
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    /**
+     * Confirm an authenticator enrollment and receive the recovery codes.
+     * `PUT /users/self/mfa/totp/confirm`
+     *
+     * `$code` is a live code from the device being enrolled. From now on every login needs a
+     * second factor ({@see AuthResource::verifyMfa()}). The recovery codes are shown only
+     * once. Replacing an already confirmed authenticator also needs re-authentication:
+     * `$password`, or `$reauthCode` (a code from the current device or a recovery code). A
+     * first enrollment needs neither.
+     *
+     * Request body:
+     * ```php
+     * [
+     *     'id' => 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
+     *     'code' => '123456',
+     *     'password' => 'current-password',   // only when replacing; or 'reauth_code'
+     * ]
+     * ```
+     *
+     * Example response (SDK return):
+     * ```php
+     * ['recovery_codes' => ['ABCD-EFGH-JKMN', 'PQRS-TUVW-XYZ2']]
+     * ```
+     *
+     * @return array{recovery_codes?: list<string>}
+     * @throws ValidationException on an empty method ID or code
+     */
+    public function confirmTotpEnrollment(
+        string $methodId,
+        #[\SensitiveParameter] string $code,
+        #[\SensitiveParameter] ?string $password = null,
+        #[\SensitiveParameter] ?string $reauthCode = null,
+        #[\SensitiveParameter] ?string $accessToken = null
+    ): array {
+        if (trim($methodId) === '' || trim($code) === '') {
+            throw new ValidationException('MFA method ID and code cannot be empty');
+        }
+
+        $response = $this->httpClient->put(
+            'users/self/mfa/totp/confirm',
+            ['id' => $methodId, 'code' => $code] + $this->reauthentication($password, $reauthCode, 'reauth_code'),
+            $this->bearerHeaders($accessToken)
+        );
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    /**
+     * Issue ten new recovery codes, invalidating the previous set.
+     * `POST /users/self/mfa/recovery-codes`
+     *
+     * Requires `$password` or `$code` — a live authenticator code or an existing recovery code,
+     * which is then consumed.
+     *
+     * Request body:
+     * ```php
+     * ['password' => 'current-password']   // or ['code' => '123456']
+     * ```
+     *
+     * Example response (SDK return):
+     * ```php
+     * ['recovery_codes' => ['ABCD-EFGH-JKMN', 'PQRS-TUVW-XYZ2']]
+     * ```
+     *
+     * @return array{recovery_codes?: list<string>}
+     * @throws ValidationException when neither `$password` nor `$code` is given
+     */
+    public function regenerateRecoveryCodes(
+        #[\SensitiveParameter] ?string $password = null,
+        #[\SensitiveParameter] ?string $code = null,
+        #[\SensitiveParameter] ?string $accessToken = null
+    ): array {
+        $response = $this->httpClient->post(
+            'users/self/mfa/recovery-codes',
+            $this->requiredReauthentication($password, $code),
+            $this->bearerHeaders($accessToken)
+        );
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    /**
+     * Remove an enrolled two-factor method.
+     * `DELETE /users/self/mfa/{method_id}`
+     *
+     * Requires `$password` or `$code` (a live authenticator code or a recovery code, then
+     * consumed), so a stolen session cannot silently disable two-factor login. Removing the
+     * last method also discards the recovery codes.
+     *
+     * Request body:
+     * ```php
+     * ['password' => 'current-password']   // or ['code' => '123456']
+     * ```
+     *
+     * Example response (SDK return):
+     * ```php
+     * ['is_mfa_enabled' => false]
+     * ```
+     *
+     * @return array{is_mfa_enabled?: bool}
+     * @throws ValidationException on an empty method ID, or when neither `$password` nor
+     *     `$code` is given
+     */
+    public function removeMfaMethod(
+        string $methodId,
+        #[\SensitiveParameter] ?string $password = null,
+        #[\SensitiveParameter] ?string $code = null,
+        #[\SensitiveParameter] ?string $accessToken = null
+    ): array {
+        $response = $this->httpClient->delete(
+            'users/self/mfa/' . $this->pathSegment($methodId, 'MFA method ID'),
+            $this->bearerHeaders($accessToken),
+            [],
+            $this->requiredReauthentication($password, $code)
+        );
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    /**
+     * @return array<string, string> the non-empty proofs, keyed by their wire names
+     */
+    private function reauthentication(
+        #[\SensitiveParameter] ?string $password,
+        #[\SensitiveParameter] ?string $code,
+        string $codeField
+    ): array {
+        return array_filter(
+            ['password' => $password, $codeField => $code],
+            static fn (?string $value): bool => $value !== null && trim($value) !== ''
+        );
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function requiredReauthentication(
+        #[\SensitiveParameter] ?string $password,
+        #[\SensitiveParameter] ?string $code
+    ): array {
+        $proof = $this->reauthentication($password, $code, 'code');
+        if ($proof === []) {
+            throw new ValidationException('The current password or a two-factor code is required');
+        }
+
+        return $proof;
     }
 }

@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace Assinafy\SDK\Tests\Unit\Resources;
 
 use Assinafy\SDK\Configuration;
+use Assinafy\SDK\Exceptions\NetworkException;
 use Assinafy\SDK\Exceptions\ValidationException;
 use Assinafy\SDK\Resources\WebhookResource;
 use Assinafy\SDK\Tests\Unit\Support\FakeHttpClient;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 final class WebhookResourceTest extends TestCase
@@ -180,5 +182,116 @@ final class WebhookResourceTest extends TestCase
         $call = $http->lastCall();
         $this->assertSame('POST', $call['method']);
         $this->assertSame('accounts/a/webhooks/d1/retry', $call['uri']);
+    }
+
+    public function testEndpointCrudUsesDocumentedRoutesAndShapes(): void
+    {
+        [$http, $webhooks] = $this->build();
+        $endpoint = ['id' => 'ep1', 'url' => 'https://example.com/a', 'signing_enabled' => true];
+        $http->queueJson(200, [$endpoint])
+            ->queueJson(200, $endpoint)
+            ->queueJson(200, $endpoint)
+            ->queueJson(200, $endpoint)
+            ->queueJson(200, []);
+
+        $this->assertSame([$endpoint], $webhooks->listEndpoints());
+        $this->assertSame($endpoint, $webhooks->createEndpoint(
+            'https://example.com/a',
+            'ops@example.com',
+            [WebhookResource::EVENT_DOCUMENT_READY],
+            'ERP',
+            signingEnabled: true
+        ));
+        $this->assertSame($endpoint, $webhooks->getEndpoint('ep1'));
+        $this->assertSame($endpoint, $webhooks->updateEndpoint('ep1', ['is_active' => false]));
+        $this->assertSame([], $webhooks->deleteEndpoint('ep1'));
+
+        $routes = array_map(static fn (array $c): string => $c['method'] . ' ' . $c['uri'], $http->calls);
+        $this->assertSame([
+            'GET accounts/a/webhooks/endpoints',
+            'POST accounts/a/webhooks/endpoints',
+            'GET accounts/a/webhooks/endpoints/ep1',
+            'PUT accounts/a/webhooks/endpoints/ep1',
+            'DELETE accounts/a/webhooks/endpoints/ep1',
+        ], $routes);
+        $this->assertSame([
+            'url' => 'https://example.com/a',
+            'email' => 'ops@example.com',
+            'events' => ['document_ready'],
+            'is_active' => true,
+            'signing_enabled' => true,
+            'name' => 'ERP',
+        ], $http->calls[1]['body']);
+        $this->assertSame(['is_active' => false], $http->calls[3]['body']);
+    }
+
+    public function testCreateEndpointOmitsNullNameAndDefaultsEvents(): void
+    {
+        [$http, $webhooks] = $this->build();
+        $http->queueJson(200, []);
+
+        $webhooks->createEndpoint('https://example.com/a', 'ops@example.com');
+
+        $body = $http->lastCall()['body'];
+        $this->assertArrayNotHasKey('name', $body);
+        $this->assertSame(WebhookResource::DEFAULT_EVENTS, $body['events']);
+        $this->assertFalse($body['signing_enabled']);
+    }
+
+    public function testSecretMethodsReturnTheSecretString(): void
+    {
+        [$http, $webhooks] = $this->build();
+        $http->queueJson(200, ['secret' => 'whsec_old'])->queueJson(200, ['secret' => 'whsec_new']);
+
+        $this->assertSame('whsec_old', $webhooks->endpointSecret('ep1'));
+        $this->assertSame('whsec_new', $webhooks->rotateEndpointSecret('ep1'));
+        $this->assertSame('GET accounts/a/webhooks/endpoints/ep1/secret', $http->calls[0]['method'] . ' ' . $http->calls[0]['uri']);
+        $this->assertSame('POST accounts/a/webhooks/endpoints/ep1/secret/rotate', $http->calls[1]['method'] . ' ' . $http->calls[1]['uri']);
+    }
+
+    public function testSecretWithoutValueIsMalformedResponse(): void
+    {
+        [$http, $webhooks] = $this->build();
+        $http->queueJson(200, []);
+
+        $this->expectException(NetworkException::class);
+        $webhooks->endpointSecret('ep1');
+    }
+
+    /** @return iterable<string, array{array<string, mixed>}> */
+    public static function invalidEndpointChanges(): iterable
+    {
+        yield 'empty' => [[]];
+        yield 'unknown field' => [['secret' => 'x']];
+        yield 'relative url' => [['url' => '/hook']];
+        yield 'bad email' => [['email' => 'nope']];
+        yield 'empty events' => [['events' => []]];
+        yield 'blank event' => [['events' => [' ']]];
+        yield 'string flag' => [['signing_enabled' => 'true']];
+        yield 'numeric name' => [['name' => 3]];
+    }
+
+    /** @param array<string, mixed> $changes */
+    #[DataProvider('invalidEndpointChanges')]
+    public function testUpdateEndpointRejectsInvalidChangesLocally(array $changes): void
+    {
+        [$http, $webhooks] = $this->build();
+
+        try {
+            $webhooks->updateEndpoint('ep1', $changes);
+            $this->fail('Expected ValidationException');
+        } catch (ValidationException) {
+            $this->assertSame([], $http->calls);
+        }
+    }
+
+    public function testEndpointIdIsPathEncoded(): void
+    {
+        [$http, $webhooks] = $this->build();
+        $http->queueJson(200, []);
+
+        $webhooks->getEndpoint('../secret');
+
+        $this->assertSame('accounts/a/webhooks/endpoints/..%2Fsecret', $http->lastCall()['uri']);
     }
 }

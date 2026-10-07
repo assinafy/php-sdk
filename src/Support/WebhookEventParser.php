@@ -4,20 +4,106 @@ declare(strict_types=1);
 
 namespace Assinafy\SDK\Support;
 
+use Assinafy\SDK\Exceptions\ValidationException;
+
 /**
- * Parses Assinafy webhook deliveries into their component parts.
+ * Verifies and parses Assinafy webhook deliveries.
  *
- * The webhook contract provides no signing secret or signature header. The subscription
- * endpoint (`PUT /accounts/{id}/webhooks/subscriptions`) accepts `events`, `is_active`, `url`,
- * and `email`, so this parser decodes payloads without claiming HMAC verification.
+ * An endpoint created with `signing_enabled: true` signs every delivery following the
+ * Standard Webhooks specification: the `webhook-id`, `webhook-timestamp` and
+ * `webhook-signature` headers carry an HMAC-SHA256 over `{id}.{timestamp}.{raw body}`, keyed
+ * by the endpoint's `whsec_` secret. Check it with {@see self::verifySignature()} before
+ * decoding the body. Unsigned endpoints send `webhook-id` and `webhook-timestamp` only.
  *
- * Authenticate deliveries by other means: keep the endpoint URL secret and unguessable, and
- * re-fetch the referenced entity through the API before acting on it.
+ * Deduplicate by the `webhook-id` header: it is identical on every attempt of the same event
+ * to the same endpoint, and distinct per endpoint.
  *
  * @see https://api.assinafy.com.br/v1/docs
+ * @see https://www.standardwebhooks.com
  */
 class WebhookEventParser
 {
+    /** Maximum distance, in seconds, between `webhook-timestamp` and the local clock. */
+    public const SIGNATURE_TOLERANCE_SECONDS = 300;
+
+    /**
+     * Check a signed delivery's `webhook-signature` against the endpoint secret.
+     *
+     * Local verification only — makes no HTTP request. Pass the **raw** body exactly as
+     * received (never a re-encoded copy) and the request headers. Header names are matched
+     * case-insensitively, and `$_SERVER`-style keys (`HTTP_WEBHOOK_ID`) are accepted, so
+     * `getallheaders()`, `$_SERVER` and PSR-7 `getHeaders()` all work unchanged.
+     *
+     * Request (the delivery your endpoint receives):
+     * ```php
+     * $headers = [
+     *     'webhook-id' => 'msg_p5jXN8AQM9LWM0D4loKWxJek',
+     *     'webhook-timestamp' => '1614265330',
+     *     'webhook-signature' => 'v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE=',
+     * ];
+     * $rawBody = '{"test": 2432232314}';
+     * $secret = 'whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw';   // WebhookResource::endpointSecret()
+     * ```
+     *
+     * Response: `true` when any space-separated `v1,<signature>` entry matches (compared in
+     * constant time) and the timestamp lies within `$toleranceSeconds` of `$now`; otherwise
+     * `false` — including when a header is missing. Answer `false` with HTTP 401 and do not
+     * process the body:
+     * ```php
+     * $raw = (string) file_get_contents('php://input');
+     * $parser = $client->webhookEvents();
+     * if (!$parser->verifySignature($raw, getallheaders(), $secret)) {
+     *     http_response_code(401);
+     *     return;
+     * }
+     * $event = $parser->extractEvent($raw);
+     * ```
+     *
+     * A rotated secret takes effect immediately, so read it from your configuration on each
+     * request rather than caching it for the process lifetime.
+     *
+     * @param string $payload raw request body, exactly as received
+     * @param array<array-key, mixed> $headers request headers; values may be strings or
+     *     lists of strings
+     * @param string $secret the endpoint's `whsec_` signing secret
+     * @param int $toleranceSeconds accepted clock distance, in seconds
+     * @param int|null $now Unix time to compare against; defaults to `time()`
+     * @return bool whether the delivery is authentic and fresh
+     * @throws ValidationException when `$secret` is not a `whsec_` base64 secret
+     */
+    public function verifySignature(
+        #[\SensitiveParameter] string $payload,
+        array $headers,
+        #[\SensitiveParameter] string $secret,
+        int $toleranceSeconds = self::SIGNATURE_TOLERANCE_SECONDS,
+        ?int $now = null
+    ): bool {
+        $key = str_starts_with($secret, 'whsec_') ? base64_decode(substr($secret, 6), true) : false;
+        if ($key === false || $key === '') {
+            throw new ValidationException('Webhook secret must be the whsec_ value issued for the endpoint');
+        }
+
+        $id = self::header($headers, 'webhook-id');
+        $timestamp = self::header($headers, 'webhook-timestamp');
+        $signatures = self::header($headers, 'webhook-signature');
+        if ($id === null || $signatures === null || $timestamp === null || !ctype_digit($timestamp)) {
+            return false;
+        }
+        if (abs(($now ?? time()) - (int) $timestamp) > $toleranceSeconds) {
+            return false;
+        }
+
+        $expected = base64_encode(hash_hmac('sha256', "{$id}.{$timestamp}.{$payload}", $key, true));
+        foreach (explode(' ', $signatures) as $entry) {
+            [$version, $signature] = array_pad(explode(',', $entry, 2), 2, '');
+            if ($version === 'v1' && hash_equals($expected, $signature)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /**
      * Decode a raw webhook body into an event array, or null when it is not valid JSON.
      *
@@ -122,8 +208,8 @@ class WebhookEventParser
      * ```
      *
      * Returns `[]` rather than null when the key is missing, so the result is always safe to
-     * iterate. Treat it as a hint, not as truth: deliveries are unsigned, so re-fetch the
-     * entity through the API before acting on it.
+     * iterate. The snapshot reflects the moment the event fired; re-fetch the entity through the API
+     * before acting on state that may have changed since.
      *
      * @param array<string, mixed>|null $event the decoded envelope
      * @return array<string, mixed> the `object` entity, or `[]` when absent
@@ -181,5 +267,25 @@ class WebhookEventParser
         $accountId = $event['account_id'] ?? null;
 
         return is_string($accountId) ? $accountId : null;
+    }
+
+    /**
+     * Case-insensitive header lookup that also accepts `$_SERVER` keys (`HTTP_WEBHOOK_ID`).
+     *
+     * @param array<array-key, mixed> $headers
+     */
+    private static function header(array $headers, string $name): ?string
+    {
+        foreach ($headers as $key => $value) {
+            $key = str_replace('_', '-', strtolower((string) $key));
+            if ($key !== $name && $key !== 'http-' . $name) {
+                continue;
+            }
+            $value = is_array($value) ? reset($value) : $value;
+
+            return is_string($value) && $value !== '' ? $value : null;
+        }
+
+        return null;
     }
 }

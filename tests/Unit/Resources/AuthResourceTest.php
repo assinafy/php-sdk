@@ -151,4 +151,20 @@ final class AuthResourceTest extends TestCase
             $this->http->lastCall()['body']
         );
     }
+
+    public function testVerifyMfaPostsChallengeAndCode(): void
+    {
+        $this->http->queueJson(200, ['access_token' => 'tok']);
+
+        $this->assertSame(['access_token' => 'tok'], $this->auth->verifyMfa('mfa-token', '123456'));
+        $call = $this->http->lastCall();
+        $this->assertSame('POST authentication/mfa/verify', $call['method'] . ' ' . $call['uri']);
+        $this->assertSame(['mfa_token' => 'mfa-token', 'code' => '123456'], $call['body']);
+    }
+
+    public function testVerifyMfaRejectsEmptyCodeLocally(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->auth->verifyMfa('mfa-token', ' ');
+    }
 }

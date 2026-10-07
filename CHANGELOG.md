@@ -3,6 +3,15 @@
 All notable changes to the Assinafy PHP SDK are documented here.
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## 2.5.0 - 2026-10-07
+
+- Manage multiple webhook endpoints (1, or up to 3 on paid plans) with `webhooks()->listEndpoints()`, `createEndpoint()`, `getEndpoint()`, `updateEndpoint()` and `deleteEndpoint()`.
+- Read and rotate an endpoint's signing secret with `endpointSecret()` and `rotateEndpointSecret()`.
+- Verify Standard Webhooks signatures on incoming deliveries with `webhookEvents()->verifySignature()`.
+- Complete two-factor logins with `auth()->verifyMfa()`, and manage authenticator methods and recovery codes through `users()->mfaMethods()`, `startTotpEnrollment()`, `confirmTotpEnrollment()`, `regenerateRecoveryCodes()` and `removeMfaMethod()`.
+- The webhook subscription methods continue to work and act on the account's oldest endpoint.
+- Set the SDK User-Agent version to `2.5.0`.
+
 ## 2.4.4 - 2026-10-05
 
 - Enforce TLS 1.2 or newer when Guzzle 7 uses PHP streams without ext-curl.

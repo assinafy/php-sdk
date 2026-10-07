@@ -34,7 +34,7 @@ composer require assinafy/php-sdk:^2.4
 To install the version described by this documentation:
 
 ```bash
-composer require assinafy/php-sdk:2.4.4
+composer require assinafy/php-sdk:2.5.0
 ```
 
 The repository's `main` can include unreleased changes. Use the documentation shipped with the

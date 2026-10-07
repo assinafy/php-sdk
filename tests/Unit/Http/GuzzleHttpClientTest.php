@@ -233,7 +233,11 @@ final class GuzzleHttpClientTest extends TestCase
             new GuzzleResponse(200, [], '{"status":200,"data":{}}'),
             new GuzzleResponse(200, [], '{"status":200,"data":{}}'),
             new GuzzleResponse(200, [], '{"status":200,"data":{}}'),
+            new GuzzleResponse(200, [], '{"status":200,"data":{}}'),
         ]);
+
+        $client->post('authentication/mfa/verify', ['mfa_token' => 't', 'code' => '123456']);
+        $this->assertFalse($this->lastRequest()->hasHeader('X-Api-Key'));
 
         $client->get('public/documents/d1');
         $this->assertFalse($this->lastRequest()->hasHeader('X-Api-Key'));

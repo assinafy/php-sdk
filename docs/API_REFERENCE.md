@@ -5,11 +5,11 @@ This reference maps every public resource method in this SDK to the Assinafy API
 - <https://api.assinafy.com.br/v1/docs>
 - <https://api.assinafy.com.br/v1/docs/openapi.json>
 
-This reference describes SDK version 2.4.4. Install published releases with
+This reference describes SDK version 2.5.0. Install published releases with
 `composer require assinafy/php-sdk` and use the documentation shipped with the selected tag.
 See [INSTALLATION.md](INSTALLATION.md) for setup.
 
-Resource classes map all 93 operations in the current production OpenAPI document, including the
+Resource classes map all 106 operations in the current production OpenAPI document, including the
 four OAuth and discovery operations under
 [Marketplace OAuth](#marketplace-oauth-oauthresource). Five working template-management routes
 and two legacy social URL builders exist at runtime outside OpenAPI and are documented with their
@@ -18,7 +18,9 @@ resources.
 Production: `https://api.assinafy.com.br/v1`; sandbox: `https://sandbox.assinafy.com.br/v1`.
 Statistics and notification preferences work in sandbox. Marketplace OAuth is deployed to
 production and sandbox (issuer `https://auth-sandbox.assinafy.com.br` there), and plan-gated
-features can differ between environments. Origin-level discovery
+features can differ between environments. Webhook endpoints, their signing secrets and two-factor
+authentication are deployed to production; sandbox answers those routes with a framework 404 until
+it is updated. Origin-level discovery
 uses a separate public client without the `/v1` prefix.
 
 ## Conventions
@@ -229,6 +231,7 @@ An application-supplied `HttpClientInterface` owns its wire behavior and must se
 
 | Class / public method | Behavior / return |
 |---|---|
+| `WebhookEventParser::verifySignature(string $payload, array $headers, string $secret, int $toleranceSeconds = 300, ?int $now = null): bool` | Standard Webhooks check: HMAC-SHA256 of `{webhook-id}.{webhook-timestamp}.{raw body}` keyed by the base64 key after `whsec_`, compared in constant time against every `v1,` entry of `webhook-signature`; also rejects a timestamp outside the tolerance and missing headers. Header names are case-insensitive and `$_SERVER` keys are accepted. Throws `ValidationException` for a secret without the `whsec_` base64 form. Local; no request. |
 | `WebhookEventParser::extractEvent(string $payload): ?array` | Decodes a JSON object/array-shaped webhook body or returns `null`. |
 | `WebhookEventParser::getEventType(?array $event): ?string` | Returns `event`. |
 | `WebhookEventParser::getEventData(?array $event): array` | Returns the polymorphic `object` entity. |
@@ -396,7 +399,8 @@ Use `AssinafyClient::forAuth()` for public bootstrap operations and pass the log
 
 | SDK method | Official operation | Auth | Request | SDK success return | Statuses |
 |---|---|---|---|---|---|
-| `login($email, $password)` | [`POST /v1/login`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Flogin) | Public | Required JSON `{email, password}`. | Unwrapped `AuthSession`. | `200; 400, 500` |
+| `login($email, $password)` | [`POST /v1/login`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Flogin) | Public | Required JSON `{email, password}`. | Unwrapped `AuthSession`, or a two-factor challenge carrying `mfa_token` for `verifyMfa()`. | `200; 400, 500` |
+| `verifyMfa($mfaToken, $code)` | [`POST /v1/authentication/mfa/verify`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Fauthentication%2Fmfa%2Fverify) | Public | Required JSON `{mfa_token, code}`; `code` is a 6-digit authenticator code or a recovery code. The challenge is single-use and expires five minutes after login. | Unwrapped `AuthSession`. | `200; 400, 401, 500` |
 | `socialLogin($provider, $token, $hasAcceptedTerms)` | [`POST /v1/authentication/social-login`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Fauthentication%2Fsocial-login) | Public | Required JSON `{provider: "google", token, has_accepted_terms}`. | Unwrapped `AuthSession`. | `200; 400, 500` |
 | `linkSocialLogin($provider, $token, $accessToken)` | [`POST /v1/auth/link-social-login`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Fauth%2Flink-social-login) | Workspace | Required JSON `{provider: "google", token}`; optional Bearer token, otherwise configured API key. | Success envelope fields. | `200; 400, 401, 500` |
 | `socialLoginUrl($provider)` | Runtime-only `GET /v1/auth/authenticate` | Public | Builds `?authclient={provider}`; it does not request the redirect. Route is outside OpenAPI. | Absolute URL string only. Compatibility URL builder; distinct from marketplace OAuth. | Outside OpenAPI. |
@@ -478,6 +482,15 @@ rather than retry.
 | `stats(string $granularity = "monthly", ?string $month = null, ?string $accessToken = null)` | [`GET /v1/users/self/stats`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fusers%2Fself%2Fstats) | Workspace | Optional `granularity: monthly\|daily`; SDK requires valid `month: YYYY-MM` for daily; optional Bearer override. | Unwrapped `DocumentStatsRow[]`, summed across the user's accounts. | `200; 400, 401, 500`. |
 | `notificationPreferences(?string $accessToken = null)` | [`GET /v1/users/self/notification-preferences`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fusers%2Fself%2Fnotification-preferences) | Workspace | No parameters; optional Bearer override. | Full unwrapped map `{DocumentCompleted, SignerDeclined, DocumentCancelled, DocumentAboutToExpire, DocumentExpired, DocumentExpirationReset, DocumentProcessingFailed, TemplateProcessingFailed, SignerWhatsappFailed}`, all boolean. | `200; 401, 500`. |
 | `updateNotificationPreferences(array $preferences, ?string $accessToken = null)` | [`PUT /v1/users/self/notification-preferences`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Fusers%2Fself%2Fnotification-preferences) | Workspace | Non-empty partial JSON map containing any of the nine documented keys with boolean values; omitted keys remain unchanged. | Full unwrapped nine-key boolean map. | `200; 400, 401, 500`. |
+
+| `mfaMethods(?string $accessToken = null)` | [`GET /v1/users/self/mfa`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fusers%2Fself%2Fmfa) | Workspace | No parameters; optional Bearer override. | Unwrapped `{methods: MfaMethod[], recovery_codes_remaining: integer}`. | `200; 401, 500` |
+| `startTotpEnrollment(?string $label = null, ?string $accessToken = null)` | [`POST /v1/users/self/mfa/totp`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Fusers%2Fself%2Fmfa%2Ftotp) | Workspace | Optional JSON `{label}`. | Unwrapped `{id, secret, provisioning_uri}`; the secret is returned only here. | `200; 401, 500` |
+| `confirmTotpEnrollment($methodId, $code, ?$password = null, ?$reauthCode = null, ?$accessToken = null)` | [`PUT /v1/users/self/mfa/totp/confirm`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Fusers%2Fself%2Fmfa%2Ftotp%2Fconfirm) | Workspace | Required JSON `{id, code}`; replacing a confirmed authenticator also needs `password` or `reauth_code`. | Unwrapped `{recovery_codes: string[]}`, shown only once. | `200; 400, 401, 500` |
+| `regenerateRecoveryCodes(?$password = null, ?$code = null, ?$accessToken = null)` | [`POST /v1/users/self/mfa/recovery-codes`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Fusers%2Fself%2Fmfa%2Frecovery-codes) | Workspace | JSON `{password}` or `{code}`; the SDK requires one. A recovery code used here is consumed. | Unwrapped `{recovery_codes: string[]}` (ten codes); the previous set stops working. | `200; 400, 401, 500` |
+| `removeMfaMethod($methodId, ?$password = null, ?$code = null, ?$accessToken = null)` | [`DELETE /v1/users/self/mfa/{customId}`](https://api.assinafy.com.br/v1/docs/markdown?method=delete&path=%2Fv1%2Fusers%2Fself%2Fmfa%2F%7BcustomId%7D) | Workspace | JSON `{password}` or `{code}`; the SDK requires one. | Unwrapped `{is_mfa_enabled: boolean}`. Removing the last method also discards the recovery codes. | `200; 400, 401, 404, 500` |
+
+`MfaMethod` is `{id, type: "Totp", label, confirmed_at, last_used_at}`. Two-factor operations are
+deployed to production.
 
 All nine preferences default to `true`. They control owner-facing document email only; welcome,
 password-reset, invitation, account-deletion, and other account/security emails are not
@@ -693,8 +706,19 @@ the corresponding single-template operation is absent from OpenAPI.
 
 ## Webhooks (`WebhookResource`)
 
+An account can register 1 endpoint, or up to 3 on paid plans; every active endpoint subscribed to
+an event receives it independently. The subscription methods (`register`, `get`, `deactivate`,
+`activate`) act on the account's oldest endpoint.
+
 | SDK method | Official operation | Auth | Request | SDK success return | Statuses |
 |---|---|---|---|---|---|
+| `listEndpoints()` | [`GET /v1/accounts/{accountId}/webhooks/endpoints`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Fendpoints) | Workspace (`account:read`) | Account path only. | Unwrapped `WebhookEndpoint[]`, oldest first. | `200; 401, 500` |
+| `createEndpoint($url, $email, $events = [], ?$name = null, $isActive = true, $signingEnabled = false)` | [`POST /v1/accounts/{accountId}/webhooks/endpoints`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Fendpoints) | Workspace (`webhooks:write`) | Required JSON `{url, email, events}`, plus `is_active`, `signing_enabled` and, when not null, `name`. Empty SDK events selects `DEFAULT_EVENTS`. | Unwrapped `WebhookEndpoint`. | `200; 400 duplicate URL, 401, 403 past the plan's endpoint limit, 500` |
+| `getEndpoint($endpointId)` | [`GET /v1/accounts/{accountId}/webhooks/endpoints/{endpointId}`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Fendpoints%2F%7BendpointId%7D) | Workspace (`account:read`) | Endpoint path ID. | Unwrapped `WebhookEndpoint`. | `200; 401, 404, 500` |
+| `updateEndpoint($endpointId, $changes)` | [`PUT /v1/accounts/{accountId}/webhooks/endpoints/{endpointId}`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Fendpoints%2F%7BendpointId%7D) | Workspace (`webhooks:write`) | Non-empty partial JSON of `url`, `email`, `events`, `name`, `is_active`, `signing_enabled`; validated locally. Enabling signing creates a secret only when none exists; disabling discards it. | Unwrapped `WebhookEndpoint`. | `200; 400, 401, 404, 500` |
+| `deleteEndpoint($endpointId)` | [`DELETE /v1/accounts/{accountId}/webhooks/endpoints/{endpointId}`](https://api.assinafy.com.br/v1/docs/markdown?method=delete&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Fendpoints%2F%7BendpointId%7D) | Workspace (`webhooks:write`) | Endpoint path ID. | `[]`. | `200; 401, 404, 500` |
+| `endpointSecret($endpointId)` | [`GET /v1/accounts/{accountId}/webhooks/endpoints/{endpointId}/secret`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Fendpoints%2F%7BendpointId%7D%2Fsecret) | API key or user token; not OAuth | Endpoint path ID. | The `whsec_` secret string from `data.secret`. | `200; 400 signing disabled, 401, 404, 500` |
+| `rotateEndpointSecret($endpointId)` | [`POST /v1/accounts/{accountId}/webhooks/endpoints/{endpointId}/secret/rotate`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Fendpoints%2F%7BendpointId%7D%2Fsecret%2Frotate) | API key or user token; not OAuth | No body. The previous secret stops working immediately. | The new `whsec_` secret string. | `200; 400 signing disabled, 401, 404, 500` |
 | `register($url, $email, $events, $isActive)` | [`PUT /v1/accounts/{accountId}/webhooks/subscriptions`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Fsubscriptions) | Workspace | Required JSON `{events: string[], is_active: boolean, url: URI, email: email}`. The URL must be absolute and use HTTP or HTTPS; HTTPS is recommended. Empty SDK events selects `DEFAULT_EVENTS`. | Unwrapped `WebhookSubscription`. | `200; 400, 401, 500` |
 | `get()` | [`GET /v1/accounts/{accountId}/webhooks/subscriptions`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Fsubscriptions) | Workspace | Account path only. | Unwrapped `WebhookSubscription`, or null when the returned data is empty. | `200; 401, 500` |
 | `deactivate()` | [`PUT /v1/accounts/{accountId}/webhooks/inactivate`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Finactivate) | Workspace | No body. | Unwrapped `WebhookSubscription`. | `200; 401, 500` |
@@ -808,6 +832,7 @@ Template status is one of `Uploading`, `Uploaded`, `Processing`, `Ready`, or `Fa
 
 | Schema | Fields |
 |---|---|
+| `WebhookEndpoint` | `id`, `name: string?`, `url`, `email`, `events: string[]`, `is_active`, `signing_enabled`, `created_at`, `updated_at`. |
 | `WebhookSubscription` | `events: string[]`, `is_active`, `url?`, `email?`, `updated_at?`. |
 | `WebhookDispatch` | `resource`, `id`, `event`, `activity_id: integer`, `endpoint?`, `payload: object?`, `delivered`, `http_status: integer?`, `response_body?`, `error?`, `created_at`, `updated_at`. Stored response body is truncated to 2,000 characters. |
 | `WebhookEventType` | `id`, `description`. |
@@ -827,7 +852,7 @@ These response data objects are defined directly on operations rather than as re
 
 ## Incoming webhook delivery contract
 
-Webhook deliveries are outbound requests from Assinafy to the configured subscription URL. They are separate from the webhook-management operations above.
+Webhook deliveries are outbound requests from Assinafy to every active endpoint subscribed to the event; each endpoint is delivered to independently with its own failure count. They are separate from the webhook-management operations above.
 
 | Property | Published behavior |
 |---|---|
@@ -836,12 +861,14 @@ Webhook deliveries are outbound requests from Assinafy to the configured subscri
 | Attempts | Initial attempt plus one retry (two total), with three seconds between attempts. |
 | Circuit breaker | After ten consecutive failed events, delivery pauses and approximately 5% of events are probed until one succeeds. Manual retry forces another delivery. |
 | Response capture | First 2,000 response-body characters are stored in dispatch history. |
-| Signing | No webhook signature or registration secret is documented. Do not claim HMAC verification unless the platform adds a real signing contract. |
+| `webhook-id` header | Message ID, identical on every attempt of the same event to the same endpoint; the deduplication key. |
+| `webhook-timestamp` header | Unix timestamp (seconds) of the attempt. |
+| `webhook-signature` header | Present when the endpoint has `signing_enabled`: space-separated `v1,<base64 HMAC-SHA256>` entries following Standard Webhooks. Verify with `WebhookEventParser::verifySignature()`. |
 
 ### Incoming body
 
 ```text
-id          integer activity ID; useful as a deduplication key
+id          integer activity ID; prefer the webhook-id header for deduplication
 event       event code
 message     string|null
 payload     object|null, event-specific

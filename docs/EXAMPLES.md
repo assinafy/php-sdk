@@ -680,14 +680,15 @@ objects; detach takes a tag ID. Template
 create/get/update/delete and page download are separate runtime-supported compatibility methods
 outside the published OpenAPI path inventory.
 
-## Webhook subscription and receiver
+## Webhook endpoints and signed receiver
 
-The API maintains one subscription per account. Registration is an upsert; deactivation pauses delivery without deleting the stored configuration.
+An account can register 1 endpoint, or up to 3 on paid plans. Each endpoint has its own URL,
+events and signing setting.
 
 ```php
 use Assinafy\SDK\Resources\WebhookResource;
 
-$subscription = $client->webhooks()->register(
+$endpoint = $client->webhooks()->createEndpoint(
     url: requiredEnv('ASSINAFY_TEST_WEBHOOK_URL'),
     email: requiredEnv('ASSINAFY_TEST_NOTIFICATION_EMAIL'),
     events: [
@@ -695,29 +696,36 @@ $subscription = $client->webhooks()->register(
         WebhookResource::EVENT_SIGNER_SIGNED,
         WebhookResource::EVENT_SIGNER_REJECTED,
     ],
+    name: 'ERP',
+    signingEnabled: true,
 );
+$secret = $client->webhooks()->endpointSecret($endpoint['id']);   // 'whsec_...'
 
+$client->webhooks()->updateEndpoint($endpoint['id'], ['is_active' => false]);  // pause
+$endpoints = $client->webhooks()->listEndpoints();
 $eventTypes = $client->webhooks()->eventTypes();
 $dispatches = $client->webhooks()->dispatches(['delivered' => 'false']);
 ```
 
-The current API contract does not define a webhook signature or secret. `webhookEvents()` parses an event; it does not authenticate it. Re-fetch the referenced entity before any side effect.
+The receiver verifies the signature over the raw body, deduplicates on `webhook-id`, and re-fetches
+state before side effects:
 
 ```php
-$rawBody = file_get_contents('php://input');
-if (!is_string($rawBody)) {
-    http_response_code(400);
+$rawBody = (string) file_get_contents('php://input');
+$parser = $client->webhookEvents();
+
+if (!$parser->verifySignature($rawBody, getallheaders(), requiredEnv('ASSINAFY_WEBHOOK_SECRET'))) {
+    http_response_code(401);
     exit;
 }
 
-$parser = $client->webhookEvents();
 $event = $parser->extractEvent($rawBody);
-
 if ($event === null) {
     http_response_code(400);
     exit;
 }
 
+$messageId = (string) $_SERVER['HTTP_WEBHOOK_ID'];   // store it; skip a repeated ID
 $eventType = $parser->getEventType($event);
 $entity = $parser->getEventData($event);
 
@@ -727,6 +735,30 @@ if ($eventType === WebhookResource::EVENT_DOCUMENT_READY && isset($entity['id'])
 }
 
 http_response_code(200);
+```
+
+After `rotateEndpointSecret()`, deliveries are signed only with the new secret, so update the
+receiver's stored value at once. The subscription methods `register()`, `get()`, `deactivate()` and
+`activate()` act on the account's oldest endpoint.
+
+## Two-factor login
+
+```php
+$public = AssinafyClient::forAuth(Configuration::DEFAULT_BASE_URL);
+$session = $public->auth()->login('developer@example.test', requiredEnv('ASSINAFY_PASSWORD'));
+
+if (isset($session['mfa_token'])) {
+    $session = $public->auth()->verifyMfa($session['mfa_token'], requiredEnv('ASSINAFY_TOTP_CODE'));
+}
+
+$token = $session['access_token'];
+$users = $public->users();
+
+$enrollment = $users->startTotpEnrollment('Work phone', $token);   // render provisioning_uri as a QR code
+$codes = $users->confirmTotpEnrollment($enrollment['id'], requiredEnv('ASSINAFY_TOTP_CODE'), accessToken: $token);
+// Show $codes['recovery_codes'] once; they cannot be read again.
+
+$status = $users->mfaMethods($token);   // ['methods' => [...], 'recovery_codes_remaining' => 10]
 ```
 
 ## Logging and redaction

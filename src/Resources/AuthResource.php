@@ -7,7 +7,8 @@ namespace Assinafy\SDK\Resources;
 use Assinafy\SDK\Exceptions\ValidationException;
 
 /**
- * Authentication resource — every endpoint under `/login`, `/authentication/*`
+ * Authentication resource — every endpoint under `/login`, `/authentication/*` (including
+ * the two-factor login step)
  * and `/users/api-keys`.
  *
  * These endpoints are mostly used to bootstrap a user session. The Assinafy
@@ -65,7 +66,12 @@ class AuthResource extends AbstractResource
      * Feed `access_token` and one of the `accounts[].id` values into
      * {@see \Assinafy\SDK\AssinafyClient::forBearer()} to get a workspace-scoped client.
      *
-     * @return array<string, mixed> `{ access_token, user, accounts }`
+     * When the user has two-factor authentication enabled, the response carries an
+     * `mfa_token` instead of an `access_token`; complete the login with
+     * {@see self::verifyMfa()} within five minutes.
+     *
+     * @return array<string, mixed> `{ access_token, user, accounts }`, or a two-factor
+     *     challenge carrying `mfa_token`
      * @throws ValidationException on a malformed email or empty password
      * @throws \Assinafy\SDK\Exceptions\ApiException 401 on wrong credentials
      */
@@ -78,6 +84,65 @@ class AuthResource extends AbstractResource
         $response = $this->httpClient->post('login', [
             'email' => $email,
             'password' => $password,
+        ]);
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    /**
+     * Complete a two-factor login.
+     * `POST /authentication/mfa/verify`
+     *
+     * Exchanges the `mfa_token` from {@see self::login()} plus the user's second factor for an
+     * access token. `$code` is the 6-digit authenticator code or one of the recovery codes
+     * issued at enrollment (consumed on use). The challenge is single-use and expires five
+     * minutes after login. Credentialless: no workspace key or Bearer token is sent.
+     *
+     * Request body:
+     * ```php
+     * ['mfa_token' => '<mfa-token>', 'code' => '123456']
+     * ```
+     *
+     * Example response (SDK return):
+     * ```php
+     * [
+     *     'access_token' => '<access-token>',
+     *     'user' => [
+     *         'id' => 'auth-user-id',
+     *         'name' => 'John Smith',
+     *         'email' => 'person@example.com',
+     *         'telephone' => null,
+     *         'government_id' => null,
+     *         'is_email_verified' => true,
+     *         'has_accepted_terms' => true,
+     *         'created_at' => '2023-03-03T11:51:34Z',
+     *         'to_be_deleted_at' => null,
+     *     ],
+     *     'accounts' => [
+     *         [
+     *             'id' => 'auth-account-id',
+     *             'name' => 'JS',
+     *             'roles' => ['owner'],
+     *             'is_delete_allowed' => true,
+     *             'created_at' => '2023-03-03T11:51:34Z',
+     *         ],
+     *     ],
+     * ]
+     * ```
+     *
+     * @return array<string, mixed> `{ access_token, user, accounts }`
+     * @throws ValidationException on an empty token or code
+     * @throws \Assinafy\SDK\Exceptions\ApiException 401 on a wrong, used or expired challenge
+     */
+    public function verifyMfa(
+        #[\SensitiveParameter] string $mfaToken,
+        #[\SensitiveParameter] string $code
+    ): array {
+        $this->assertNotEmpty('MFA token', $mfaToken);
+        $this->assertNotEmpty('MFA code', $code);
+        $response = $this->httpClient->post('authentication/mfa/verify', [
+            'mfa_token' => $mfaToken,
+            'code' => $code,
         ]);
 
         return $this->extractData($response->getData() ?? []);

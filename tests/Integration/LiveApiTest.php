@@ -1048,6 +1048,55 @@ final class LiveApiTest extends TestCase
         }
     }
 
+    public function testWebhookEndpointsAndSigningSecret(): void
+    {
+        $webhooks = $this->client->webhooks();
+        try {
+            $endpoints = $webhooks->listEndpoints();
+        } catch (ApiException $e) {
+            if ($e->getStatusCode() === 404) {
+                $this->markTestSkipped('Documented webhook endpoint routes are not deployed to this environment');
+            }
+            throw $e;
+        }
+        $this->assertIsList($endpoints);
+        foreach ($endpoints as $endpoint) {
+            $this->assertSame($endpoint, $webhooks->getEndpoint((string) $endpoint['id']));
+        }
+
+        if (getenv('ASSINAFY_STATEFUL_TESTS') !== '1') {
+            return;
+        }
+        try {
+            $created = $webhooks->createEndpoint(
+                'https://example.com/assinafy-sdk-live/' . bin2hex(random_bytes(8)),
+                'webhooks@example.com',
+                [WebhookResource::EVENT_DOCUMENT_READY],
+                'SDK live test',
+                false,
+                true
+            );
+        } catch (ApiException $e) {
+            if ($e->getStatusCode() === 403) {
+                $this->markTestSkipped('The account has no free webhook endpoint slot on its plan');
+            }
+            throw $e;
+        }
+
+        try {
+            $this->assertTrue($created['signing_enabled']);
+            $secret = $webhooks->endpointSecret((string) $created['id']);
+            $this->assertStringStartsWith('whsec_', $secret);
+            $rotated = $webhooks->rotateEndpointSecret((string) $created['id']);
+            $this->assertNotSame($secret, $rotated);
+            $this->assertFalse(
+                $webhooks->updateEndpoint((string) $created['id'], ['signing_enabled' => false])['signing_enabled']
+            );
+        } finally {
+            $webhooks->deleteEndpoint((string) $created['id']);
+        }
+    }
+
     public function testUserProfile(): void
     {
         $user = $this->client->users()->get();

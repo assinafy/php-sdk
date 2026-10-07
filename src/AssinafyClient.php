@@ -229,10 +229,10 @@ class AssinafyClient
     }
 
     /**
-     * Webhooks: the workspace's single event subscription and its delivery history.
+     * Webhooks: the workspace's endpoints (1, or up to 3 on paid plans), their signing
+     * secrets, the legacy subscription routes and the delivery history.
      *
-     * Deliveries are unsigned — see {@see self::webhookEvents()} for how to handle that.
-     * Account-scoped.
+     * Verify signed deliveries with {@see self::webhookEvents()}. Account-scoped.
      */
     public function webhooks(): WebhookResource
     {
@@ -336,10 +336,10 @@ class AssinafyClient
     }
 
     /**
-     * Helpers for decoding incoming webhook deliveries.
+     * Helpers for verifying and decoding incoming webhook deliveries.
      *
-     * The webhook contract provides no signing secret or signature header. Secure the
-     * endpoint as described by {@see WebhookEventParser}.
+     * Check signed deliveries with {@see WebhookEventParser::verifySignature()} before
+     * decoding them. Local only; makes no HTTP request.
      */
     public function webhookEvents(): WebhookEventParser
     {

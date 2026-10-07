@@ -71,6 +71,21 @@ $configuration = new Configuration(
 $client = new AssinafyClient($configuration, logger: new \Psr\Log\NullLogger());
 ```
 
+Para operar como usuário (e-mail e senha), faça login por um cliente sem credenciais. Contas com
+autenticação em dois fatores recebem um desafio `mfa_token`, válido por cinco minutos:
+
+```php
+$public = AssinafyClient::forAuth(Configuration::DEFAULT_BASE_URL);
+$session = $public->auth()->login('developer@example.com', (string) getenv('ASSINAFY_PASSWORD'));
+if (isset($session['mfa_token'])) {
+    $session = $public->auth()->verifyMfa($session['mfa_token'], $codigoDoAplicativoAutenticador);
+}
+$bearer = AssinafyClient::forBearer($session['access_token'], $session['accounts'][0]['id']);
+```
+
+O usuário gerencia o segundo fator com `users()->mfaMethods()`, `startTotpEnrollment()`,
+`confirmTotpEnrollment()`, `regenerateRecoveryCodes()` e `removeMfaMethod()`.
+
 O transporte envia `Assinafy-PHP-SDK/v{SDK_VERSION}` como User-Agent em todas as requisições.
 Implementações próprias de `HttpClientInterface` devem enviar o mesmo cabeçalho.
 
@@ -358,30 +373,68 @@ As tags padrão do template são combinadas com as tags informadas.
 
 ## Webhooks
 
-Cada conta possui uma assinatura de webhook; `register()` cria ou substitui a configuração.
+Uma conta pode ter 1 endpoint de webhook, ou até 3 nos planos pagos. Cada endpoint tem URL,
+eventos, estado e assinatura próprios, e todo endpoint ativo inscrito em um evento o recebe de forma
+independente. Ative `signingEnabled` para que cada entrega seja assinada no padrão
+[Standard Webhooks](https://www.standardwebhooks.com).
 
 ```php
 use Assinafy\SDK\Resources\WebhookResource;
 
-$client->webhooks()->register(
-    'https://hooks.example.com/assinafy/caminho-aleatorio-longo',
-    'ops@example.com',
-    WebhookResource::DEFAULT_EVENTS,
+$endpoint = $client->webhooks()->createEndpoint(
+    url: 'https://hooks.example.com/assinafy',
+    email: 'ops@example.com',
+    events: WebhookResource::DEFAULT_EVENTS,
+    name: 'ERP',
+    signingEnabled: true,
 );
+
+// Guarde o segredo como qualquer credencial; ele não está disponível para tokens OAuth.
+$secret = $client->webhooks()->endpointSecret($endpoint['id']); // 'whsec_...'
 ```
 
+No receptor, verifique a assinatura com o corpo **bruto** antes de decodificá-lo:
+
+```php
+$raw = (string) file_get_contents('php://input');
+$parser = $client->webhookEvents();
+
+if (!$parser->verifySignature($raw, getallheaders(), $secret)) {
+    http_response_code(401);
+    exit;
+}
+
+$event = $parser->extractEvent($raw);
+if ($event === null) {
+    http_response_code(400);
+    exit;
+}
+
+$messageId = $_SERVER['HTTP_WEBHOOK_ID']; // idêntico em todas as tentativas: use para deduplicar
+```
+
+`verifySignature()` compara cada entrada `v1,<assinatura>` em tempo constante e rejeita
+`webhook-timestamp` a mais de 300 segundos do relógio local. `rotateEndpointSecret()` troca o
+segredo imediatamente; atualize o receptor na mesma hora.
+
 O envelope contém `id`, `event`, `message`, `subject`, `origin`, `account_id`, `created_at`, `object`
-e `payload`. `webhookEvents()->extractEvent($json)` retorna o evento ou `null` para conteúdo inválido;
-`getEventData()` lê `object`, e `getEventPayload()` lê `payload`.
+e `payload`. `getEventData()` lê `object`, e `getEventPayload()` lê `payload`. Retorne 2xx
+rapidamente e processe por uma fila da aplicação. Há duas tentativas, separadas por três segundos;
+dez falhas consecutivas pausam o endpoint. Não dependa da ordem entre `assignment_created` e
+`document_metadata_ready`, e consulte o objeto pela API antes de agir sobre um estado que pode ter
+mudado.
 
-As entregas não têm assinatura criptográfica. Use HTTPS, caminho imprevisível, limites de tamanho,
-idempotência por evento e uma consulta autenticada ao objeto antes de agir. Retorne 2xx rapidamente
-e processe por uma fila da aplicação. Há duas tentativas, separadas por três segundos; falhas
-consecutivas podem pausar entregas. Não dependa da ordem entre `assignment_created` e
-`document_metadata_ready`.
+| Método | Rota |
+| --- | --- |
+| `listEndpoints()` / `getEndpoint($id)` | `GET .../webhooks/endpoints[/{id}]` |
+| `createEndpoint(...)` | `POST .../webhooks/endpoints` |
+| `updateEndpoint($id, $campos)` | `PUT .../webhooks/endpoints/{id}` (atualização parcial) |
+| `deleteEndpoint($id)` | `DELETE .../webhooks/endpoints/{id}` |
+| `endpointSecret($id)` / `rotateEndpointSecret($id)` | `.../secret` e `.../secret/rotate` |
+| `dispatches()` / `retryDispatch($id)` | Histórico de entregas e reenvio |
 
-`deactivate()` pausa, `activate()` retoma, `dispatches()` lista o histórico e `retryDispatch()`
-solicita outra entrega. O [catálogo completo](docs/API_REFERENCE.md#event-catalog) descreve os eventos.
+`register()`, `get()`, `deactivate()` e `activate()` continuam funcionando e atuam sobre o endpoint
+mais antigo da conta. O [catálogo completo](docs/API_REFERENCE.md#event-catalog) descreve os eventos.
 
 ## Aplicativos de marketplace e OAuth
 
@@ -520,14 +573,16 @@ credenciais. Respostas e contextos de exceção podem conter dados pessoais: nã
 | `assignments()` | Estimativa, atribuição, reenvio, prazo e histórico WhatsApp |
 | `templates()` | Upload, consulta, edição, processamento e páginas de templates |
 | `tags()` / `fields()` | Organização, definições de campos e validação de valores |
-| `webhooks()` / `webhookEvents()` | Configuração, histórico, retry e leitura de eventos |
-| `auth()` | Login, conta de usuário, API key e senha |
+| `webhooks()` / `webhookEvents()` | Endpoints, segredos de assinatura, histórico, retry, verificação e leitura de eventos |
+| `auth()` | Login (incluindo o segundo fator com `verifyMfa()`), conta de usuário, API key e senha |
 | `oauth()` | Autorização de marketplace: PKCE, callback, token, renovação, revogação, userinfo e descoberta |
 | `signerSession()` / `signerDocuments()` | Ações e documentos acessíveis ao signatário |
 
 Estatísticas de conta/usuário e preferências de notificação estão disponíveis no sandbox.
 Recursos sujeitos ao plano, como notificações WhatsApp e Certificado Digital, podem responder 403.
 OAuth está publicado em produção e no sandbox; confirme o issuer pela descoberta do ambiente escolhido.
+Endpoints de webhook, segredos de assinatura e autenticação em dois fatores estão publicados em
+produção; o sandbox responde a essas rotas com 404 de roteamento até ser atualizado.
 
 ## Testes e desenvolvimento
 

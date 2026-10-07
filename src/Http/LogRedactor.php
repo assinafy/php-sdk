@@ -37,6 +37,10 @@ final class LogRedactor
         'code',
         'codeverifier',
         'webhooksecret',
+        'mfatoken',
+        'reauthcode',
+        'recoverycodes',
+        'provisioninguri',
         'secret',
     ];
 

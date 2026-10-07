@@ -4,16 +4,24 @@ declare(strict_types=1);
 
 namespace Assinafy\SDK\Resources;
 
+use Assinafy\SDK\Exceptions\NetworkException;
 use Assinafy\SDK\Exceptions\ValidationException;
+use Assinafy\SDK\Http\Response;
 
 /**
- * Webhooks resource — the workspace's single webhook subscription plus the
- * delivery-history (dispatch) endpoints.
+ * Webhooks resource — the workspace's webhook endpoints, the legacy single-subscription
+ * routes, the event catalog and the delivery history (dispatches).
  *
- * The subscription is an upsert: {@see register()} (`PUT`) creates or replaces it,
- * {@see get()} returns the current configuration, and {@see deactivate()} pauses
- * delivery via the dedicated `inactivate` route. There is no `DELETE` route — the
- * way to stop receiving events is to inactivate the subscription.
+ * An account can register 1 endpoint, or up to 3 on paid plans. Each endpoint has its own
+ * URL, events, active flag and optional Standard Webhooks signing; every active endpoint
+ * subscribed to an event receives it independently. Manage them with
+ * {@see listEndpoints()}, {@see createEndpoint()}, {@see getEndpoint()},
+ * {@see updateEndpoint()} and {@see deleteEndpoint()}; read or rotate the signing secret with
+ * {@see endpointSecret()} and {@see rotateEndpointSecret()}, and check deliveries with
+ * {@see \Assinafy\SDK\Support\WebhookEventParser::verifySignature()}.
+ *
+ * The subscription methods ({@see register()}, {@see get()}, {@see deactivate()},
+ * {@see activate()}) keep working and act on the account's oldest endpoint.
  *
  * @see https://api.assinafy.com.br/v1/docs
  */
@@ -47,11 +55,12 @@ class WebhookResource extends AbstractResource
     ];
 
     /**
-     * Register or replace the workspace webhook subscription.
+     * Register or replace the workspace webhook subscription (the oldest endpoint).
      * `PUT /accounts/{account_id}/webhooks/subscriptions`
      *
-     * A workspace has exactly one subscription, and this call is an upsert — it creates the
-     * subscription or replaces it wholesale. All four body fields are mandatory, so a
+     * This call is an upsert on the account's oldest endpoint — it creates it or replaces it
+     * wholesale. Use {@see self::createEndpoint()} to add further endpoints or to enable
+     * signing. All four body fields are mandatory, so a
      * partial update is not possible; read the current values with {@see self::get()} first
      * if you only mean to change one.
      *
@@ -79,8 +88,8 @@ class WebhookResource extends AbstractResource
      * ]
      * ```
      *
-     * Deliveries are **unsigned** — there is no secret to register and no signature header.
-     * Secure the endpoint as described by {@see \Assinafy\SDK\Support\WebhookEventParser}.
+     * The subscription body has no signing field; enable signing on the endpoint with
+     * {@see self::updateEndpoint()}.
      *
      * @param string            $url    absolute HTTP(S) endpoint to POST deliveries to
      * @param string            $email  address alerted when delivery fails
@@ -96,28 +105,9 @@ class WebhookResource extends AbstractResource
         array $events = [],
         bool $isActive = true
     ): array {
-        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
-        if (
-            filter_var($url, FILTER_VALIDATE_URL) === false
-            || !in_array($scheme, ['http', 'https'], true)
-            || parse_url($url, PHP_URL_HOST) === null
-        ) {
-            throw new ValidationException(
-                'Webhook URL must be an absolute HTTP or HTTPS URL'
-            );
-        }
-
-        if (filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
-            throw new ValidationException('Webhook email must be valid', ['email' => $email]);
-        }
-
-        foreach ($events as $event) {
-            if (!is_string($event) || trim($event) === '') {
-                throw new ValidationException('Webhook events must be non-empty strings', [
-                    'event' => $event,
-                ]);
-            }
-        }
+        $this->assertUrl($url);
+        $this->assertEmail($email);
+        $this->assertEvents($events);
 
         $payload = [
             'url' => $url,
@@ -135,7 +125,7 @@ class WebhookResource extends AbstractResource
     }
 
     /**
-     * Get the current webhook subscription (or null if none has ever been configured).
+     * Get the current webhook subscription — the oldest endpoint (or null if none exists).
      * `GET /accounts/{account_id}/webhooks/subscriptions`
      *
      * Request: no parameters.
@@ -236,6 +226,288 @@ class WebhookResource extends AbstractResource
                 : self::DEFAULT_EVENTS,
             true
         );
+    }
+
+    /**
+     * List the account's webhook endpoints, oldest first.
+     * `GET /accounts/{account_id}/webhooks/endpoints`
+     *
+     * Request: no parameters. OAuth scope: `account:read`.
+     *
+     * Example response (SDK return; a direct list, no pagination):
+     * ```php
+     * [
+     *     [
+     *         'id' => '65f1c2a9b3e4d5f60718293a4b5c6d7e',
+     *         'name' => 'ERP',
+     *         'url' => 'https://example.com/webhooks/assinafy',
+     *         'email' => 'ops@example.com',
+     *         'events' => ['document_ready', 'signer_signed_document'],
+     *         'is_active' => true,
+     *         'signing_enabled' => true,
+     *         'created_at' => '2026-10-01T12:00:00Z',
+     *         'updated_at' => '2026-10-01T12:00:00Z',
+     *     ],
+     * ]
+     * ```
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function listEndpoints(): array
+    {
+        $response = $this->httpClient->get($this->accountPath('webhooks/endpoints'));
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    /**
+     * Register an additional webhook endpoint.
+     * `POST /accounts/{account_id}/webhooks/endpoints`
+     *
+     * An account holds 1 endpoint, or up to 3 on paid plans; one past the limit returns
+     * `403`. Each endpoint needs a distinct `url` (`400` otherwise). With `$signingEnabled`,
+     * the API generates a `whsec_` secret — read it with {@see self::endpointSecret()}.
+     * OAuth scope: `webhooks:write`.
+     *
+     * Request body:
+     * ```php
+     * [
+     *     'url' => 'https://example.com/webhooks/assinafy',   // required
+     *     'email' => 'ops@example.com',                      // required, failure notices
+     *     'events' => ['document_ready', 'signer_signed_document'],  // required
+     *     'name' => 'ERP',                                   // sent when not null
+     *     'is_active' => true,
+     *     'signing_enabled' => true,
+     * ]
+     * ```
+     *
+     * Example response (SDK return):
+     * ```php
+     * [
+     *     'id' => '65f1c2a9b3e4d5f60718293a4b5c6d7e',
+     *     'name' => 'ERP',
+     *     'url' => 'https://example.com/webhooks/assinafy',
+     *     'email' => 'ops@example.com',
+     *     'events' => ['document_ready', 'signer_signed_document'],
+     *     'is_active' => true,
+     *     'signing_enabled' => true,
+     *     'created_at' => '2026-10-01T12:00:00Z',
+     *     'updated_at' => '2026-10-01T12:00:00Z',
+     * ]
+     * ```
+     *
+     * @param string            $url    absolute HTTP(S) URL that receives deliveries
+     * @param string            $email  address alerted when deliveries fail
+     * @param array<int, mixed> $events event type IDs; when empty, {@see DEFAULT_EVENTS} is sent
+     * @param string|null       $name   label telling endpoints apart
+     * @return array<string, mixed> the created endpoint
+     * @throws ValidationException on a non-absolute URL, a malformed email or a non-string event
+     * @throws \Assinafy\SDK\Exceptions\ApiException 403 past the plan's endpoint limit,
+     *     400 on a duplicate URL
+     */
+    public function createEndpoint(
+        #[\SensitiveParameter] string $url,
+        #[\SensitiveParameter] string $email,
+        array $events = [],
+        ?string $name = null,
+        bool $isActive = true,
+        bool $signingEnabled = false
+    ): array {
+        $this->assertUrl($url);
+        $this->assertEmail($email);
+        $this->assertEvents($events);
+
+        $payload = [
+            'url' => $url,
+            'email' => $email,
+            'events' => $events !== [] ? array_values($events) : self::DEFAULT_EVENTS,
+            'is_active' => $isActive,
+            'signing_enabled' => $signingEnabled,
+        ];
+        if ($name !== null) {
+            $payload['name'] = $name;
+        }
+
+        $response = $this->httpClient->post($this->accountPath('webhooks/endpoints'), $payload);
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    /**
+     * Retrieve one webhook endpoint.
+     * `GET /accounts/{account_id}/webhooks/endpoints/{endpoint_id}`
+     *
+     * Request: no parameters. OAuth scope: `account:read`.
+     *
+     * Example response (SDK return):
+     * ```php
+     * [
+     *     'id' => '65f1c2a9b3e4d5f60718293a4b5c6d7e',
+     *     'name' => 'ERP',
+     *     'url' => 'https://example.com/webhooks/assinafy',
+     *     'email' => 'ops@example.com',
+     *     'events' => ['document_ready', 'signer_signed_document'],
+     *     'is_active' => true,
+     *     'signing_enabled' => true,
+     *     'created_at' => '2026-10-01T12:00:00Z',
+     *     'updated_at' => '2026-10-01T12:00:00Z',
+     * ]
+     * ```
+     *
+     * @return array<string, mixed>
+     * @throws \Assinafy\SDK\Exceptions\ApiException 404 when the endpoint does not exist
+     */
+    public function getEndpoint(string $endpointId): array
+    {
+        $response = $this->httpClient->get($this->endpointPath($endpointId));
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    /**
+     * Change selected fields of a webhook endpoint.
+     * `PUT /accounts/{account_id}/webhooks/endpoints/{endpoint_id}`
+     *
+     * A partial update: only the keys sent change. `url` cannot repeat another endpoint's
+     * (`400`). Turning `signing_enabled` on generates a secret when the endpoint has none and
+     * keeps the existing one otherwise; turning it off discards the secret.
+     * OAuth scope: `webhooks:write`.
+     *
+     * Request body (any subset, at least one key):
+     * ```php
+     * [
+     *     'url' => 'https://example.com/webhooks/assinafy',
+     *     'email' => 'ops@example.com',
+     *     'events' => ['document_ready'],
+     *     'name' => 'ERP',
+     *     'is_active' => false,
+     *     'signing_enabled' => true,
+     * ]
+     * ```
+     *
+     * Example response (SDK return, the updated endpoint):
+     * ```php
+     * [
+     *     'id' => '65f1c2a9b3e4d5f60718293a4b5c6d7e',
+     *     'name' => 'ERP',
+     *     'url' => 'https://example.com/webhooks/assinafy',
+     *     'email' => 'ops@example.com',
+     *     'events' => ['document_ready', 'signer_signed_document'],
+     *     'is_active' => true,
+     *     'signing_enabled' => true,
+     *     'created_at' => '2026-10-01T12:00:00Z',
+     *     'updated_at' => '2026-10-01T12:00:00Z',
+     * ]
+     * ```
+     *
+     * @param array<string, mixed> $changes subset of `url`, `email`, `events`, `name`,
+     *     `is_active`, `signing_enabled`
+     * @return array<string, mixed> the updated endpoint
+     * @throws ValidationException when `$changes` is empty, has an unknown key, or a value of
+     *     the wrong type
+     */
+    public function updateEndpoint(string $endpointId, #[\SensitiveParameter] array $changes): array
+    {
+        if ($changes === []) {
+            throw new ValidationException('At least one webhook endpoint field is required');
+        }
+        foreach ($changes as $field => $value) {
+            $valid = match ($field) {
+                'url', 'email', 'name' => is_string($value),
+                'events' => is_array($value) && $value !== [],
+                'is_active', 'signing_enabled' => is_bool($value),
+                default => throw new ValidationException("Unknown webhook endpoint field: {$field}"),
+            };
+            if (!$valid) {
+                throw new ValidationException("Webhook endpoint {$field} has an invalid value");
+            }
+        }
+        if (isset($changes['url'])) {
+            $this->assertUrl($changes['url']);
+        }
+        if (isset($changes['email'])) {
+            $this->assertEmail($changes['email']);
+        }
+        if (isset($changes['events'])) {
+            $this->assertEvents($changes['events']);
+        }
+
+        $response = $this->httpClient->put($this->endpointPath($endpointId), $changes);
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    /**
+     * Delete a webhook endpoint, stopping its deliveries and freeing its slot.
+     * `DELETE /accounts/{account_id}/webhooks/endpoints/{endpoint_id}`
+     *
+     * Request: no body. OAuth scope: `webhooks:write`.
+     *
+     * Example response (SDK return, the unwrapped empty `data`):
+     * ```php
+     * []
+     * ```
+     *
+     * @return array<array-key, mixed>
+     * @throws \Assinafy\SDK\Exceptions\ApiException 404 when the endpoint does not exist
+     */
+    public function deleteEndpoint(string $endpointId): array
+    {
+        $response = $this->httpClient->delete($this->endpointPath($endpointId));
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    /**
+     * Read the secret that signs deliveries to an endpoint.
+     * `GET /accounts/{account_id}/webhooks/endpoints/{endpoint_id}/secret`
+     *
+     * Pass it to {@see \Assinafy\SDK\Support\WebhookEventParser::verifySignature()}. Store
+     * it like any credential. Not available to OAuth applications; requires an API key or a
+     * user access token.
+     *
+     * Request: no parameters.
+     *
+     * Wire response `data`: `['secret' => 'whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw']`.
+     *
+     * Example response (SDK return, the secret itself):
+     * ```php
+     * 'whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw'
+     * ```
+     *
+     * @return string `whsec_` followed by the base64-encoded key
+     * @throws \Assinafy\SDK\Exceptions\ApiException 400 when signing is disabled, 404 when
+     *     the endpoint does not exist
+     * @throws NetworkException when a successful response carries no secret
+     */
+    public function endpointSecret(string $endpointId): string
+    {
+        return $this->secretFrom($this->httpClient->get($this->endpointPath($endpointId, '/secret')));
+    }
+
+    /**
+     * Replace an endpoint's signing secret and return the new one.
+     * `POST /accounts/{account_id}/webhooks/endpoints/{endpoint_id}/secret/rotate`
+     *
+     * The old secret stops working immediately: deliveries sent afterwards are signed only
+     * with the new one, so update the receiver's stored secret right away. Not available to
+     * OAuth applications.
+     *
+     * Request: no body.
+     *
+     * Example response (SDK return, the new secret):
+     * ```php
+     * 'whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw'
+     * ```
+     *
+     * @return string the new `whsec_` secret
+     * @throws \Assinafy\SDK\Exceptions\ApiException 400 when signing is disabled, 404 when
+     *     the endpoint does not exist
+     * @throws NetworkException when a successful response carries no secret
+     */
+    public function rotateEndpointSecret(string $endpointId): string
+    {
+        return $this->secretFrom($this->httpClient->post($this->endpointPath($endpointId, '/secret/rotate')));
     }
 
     /**
@@ -443,5 +715,51 @@ class WebhookResource extends AbstractResource
         $response = $this->httpClient->post($this->accountPath("webhooks/{$dispatchId}/retry"));
 
         return $this->extractData($response->getData() ?? []);
+    }
+
+    private function endpointPath(string $endpointId, string $suffix = ''): string
+    {
+        return $this->accountPath('webhooks/endpoints/' . $this->pathSegment($endpointId, 'endpoint ID') . $suffix);
+    }
+
+    private function secretFrom(Response $response): string
+    {
+        $secret = $this->extractData($response->getData() ?? [])['secret'] ?? null;
+        if (!is_string($secret) || $secret === '') {
+            throw new NetworkException('Webhook secret response did not contain a secret');
+        }
+
+        return $secret;
+    }
+
+    private function assertUrl(#[\SensitiveParameter] string $url): void
+    {
+        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+        if (
+            filter_var($url, FILTER_VALIDATE_URL) === false
+            || !in_array($scheme, ['http', 'https'], true)
+            || parse_url($url, PHP_URL_HOST) === null
+        ) {
+            throw new ValidationException('Webhook URL must be an absolute HTTP or HTTPS URL');
+        }
+    }
+
+    private function assertEmail(#[\SensitiveParameter] string $email): void
+    {
+        if (filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            throw new ValidationException('Webhook email must be valid', ['email' => $email]);
+        }
+    }
+
+    /** @param array<array-key, mixed> $events */
+    private function assertEvents(array $events): void
+    {
+        foreach ($events as $event) {
+            if (!is_string($event) || trim($event) === '') {
+                throw new ValidationException('Webhook events must be non-empty strings', [
+                    'event' => $event,
+                ]);
+            }
+        }
     }
 }

@@ -1,8 +1,17 @@
 # Upgrading
 
-Install a published 2.x release with `composer require assinafy/php-sdk:^2.4`. Remove obsolete
+Install a published 2.x release with `composer require assinafy/php-sdk:^2.5`. Remove obsolete
 VCS/path repository overrides if they prevent Composer from resolving the Packagist package.
 Use the documentation shipped with the installed tag; `main` may include unreleased changes.
+
+## Upgrading to 2.5.0
+
+No application code changes are required. Existing `register()`, `get()`, `deactivate()` and
+`activate()` calls act on the account's oldest webhook endpoint. To receive signed deliveries,
+enable `signing_enabled` on the endpoint, store the secret from `endpointSecret()`, and call
+`webhookEvents()->verifySignature()` with the raw body before decoding it. Logins for users with
+two-factor authentication return `mfa_token`; complete them with `auth()->verifyMfa()`. The SDK
+User-Agent is `Assinafy-PHP-SDK/v2.5.0`.
 
 ## Upgrading to 2.4.4
 

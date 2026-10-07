@@ -510,6 +510,7 @@ class GuzzleHttpClient implements HttpClientInterface
                 'POST oauth/token',
                 'POST oauth/revoke',
                 'POST authentication/social-login',
+                'POST authentication/mfa/verify',
                 'PUT authentication/request-password-reset',
                 'PUT authentication/reset-password',
                 'GET sign',
