@@ -165,4 +165,21 @@ final class UserResourceTest extends TestCase
             }
         }
     }
+
+    public function testConfirmTotpEnrollmentRejectsEmptyIdOrCode(): void
+    {
+        foreach (
+            [
+                fn () => $this->users->confirmTotpEnrollment('', '123456'),
+                fn () => $this->users->confirmTotpEnrollment('m1', ' '),
+            ] as $call
+        ) {
+            try {
+                $call();
+                $this->fail('Expected ValidationException');
+            } catch (ValidationException) {
+                $this->assertSame([], $this->http->calls);
+            }
+        }
+    }
 }

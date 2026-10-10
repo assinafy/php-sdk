@@ -405,7 +405,8 @@ class OAuthResource extends AbstractResource
      * @throws ValidationException on an empty code or a transaction missing its verifier
      *     or redirect URI
      * @throws ApiException `invalid_grant` (expired, replayed, or mismatched code),
-     *     `invalid_client`, `invalid_target`
+     *     `invalid_client`, `invalid_target`; 429 when rate-limited — wait the `Retry-After`
+     *     seconds, readable via {@see ApiException::getResponseHeaderLine()}
      */
     public function exchangeCode(
         #[\SensitiveParameter] string $code,
@@ -474,7 +475,8 @@ class OAuthResource extends AbstractResource
      * @throws ValidationException on an empty refresh token
      * @throws ApiException `invalid_grant` when the token was already used, has expired,
      *     lost `offline_access`, or the user reconnected with different permissions —
-     *     reconnect rather than retry
+     *     reconnect rather than retry; 429 when rate-limited — wait the `Retry-After`
+     *     seconds, readable via {@see ApiException::getResponseHeaderLine()}
      */
     public function refresh(#[\SensitiveParameter] string $refreshToken): array
     {
@@ -616,7 +618,7 @@ class OAuthResource extends AbstractResource
      *
      * @return array<string, mixed> `{ resource, authorization_servers, scopes_supported,
      *     bearer_methods_supported }`
-     * @throws ApiException when the deployment does not serve OAuth — sandbox does not
+     * @throws ApiException when the deployment does not serve OAuth
      */
     public function protectedResourceMetadata(): array
     {

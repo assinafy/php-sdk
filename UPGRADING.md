@@ -1,8 +1,15 @@
 # Upgrading
 
-Install a published 2.x release with `composer require assinafy/php-sdk:^2.5`. Remove obsolete
+Install a published 2.x release with `composer require assinafy/php-sdk:^2.6`. Remove obsolete
 VCS/path repository overrides if they prevent Composer from resolving the Packagist package.
 Use the documentation shipped with the installed tag; `main` may include unreleased changes.
+
+## Upgrading to 2.6.0
+
+No application code changes are required. `signers()->create()` gains an optional fourth argument
+for the signer's `government_id`, and `assignments()->resetExpiration()` now also accepts `null`
+to remove the expiration; existing calls keep working unchanged. The SDK User-Agent is
+`Assinafy-PHP-SDK/v2.6.0`.
 
 ## Upgrading to 2.5.0
 

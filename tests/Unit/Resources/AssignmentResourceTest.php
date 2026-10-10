@@ -203,6 +203,30 @@ final class AssignmentResourceTest extends TestCase
         $this->assertSame(['expires_at' => '2027-01-01T00:00:00Z'], $call['body']);
     }
 
+    public function testResetExpirationAcceptsNullToRemoveTheDeadline(): void
+    {
+        $this->http->queueJson(200, ['id' => 'a1', 'expires_at' => null]);
+
+        $result = $this->assignments->resetExpiration('doc1', 'a1', null);
+
+        $call = $this->http->lastCall();
+        $this->assertSame('PUT', $call['method']);
+        $this->assertSame('documents/doc1/assignments/a1/reset-expiration', $call['uri']);
+        $this->assertSame(['expires_at' => null], $call['body']);
+        $this->assertNull($result['expires_at']);
+    }
+
+    public function testResetExpirationStillRejectsAnInvalidDateTimeBeforeRequest(): void
+    {
+        $this->expectException(ValidationException::class);
+
+        try {
+            $this->assignments->resetExpiration('doc1', 'a1', 'tomorrow');
+        } finally {
+            $this->assertSame([], $this->http->calls, 'No HTTP request should be attempted');
+        }
+    }
+
     public function testCreateRejectsInvalidExpirationBeforeRequest(): void
     {
         $this->expectException(ValidationException::class);

@@ -65,7 +65,7 @@ class WebhookResource extends AbstractResource
      * if you only mean to change one.
      *
      * `email` is the address the platform notifies when deliveries start failing; it is not
-     * a delivery target.
+     * a delivery target. OAuth scope: `webhooks:write`.
      *
      * Request body:
      * ```
@@ -128,7 +128,7 @@ class WebhookResource extends AbstractResource
      * Get the current webhook subscription — the oldest endpoint (or null if none exists).
      * `GET /accounts/{account_id}/webhooks/subscriptions`
      *
-     * Request: no parameters.
+     * Request: no parameters. OAuth scope: `account:read`.
      *
      * Example response (SDK return; optional fields depend on state):
      * ```php
@@ -165,13 +165,13 @@ class WebhookResource extends AbstractResource
      * later with {@see activate()} without re-supplying them. This is the only way to stop
      * deliveries — the API has no `DELETE` route for subscriptions.
      *
-     * Request: no body.
+     * Request: no body. OAuth scope: `webhooks:write`.
      *
      * Example response (SDK return; optional fields depend on state):
      * ```php
      * [
      *     'events' => ['document_ready', 'document_prepared'],
-     *     'is_active' => true,
+     *     'is_active' => false,
      *     'url' => 'https://example.com/hooks/assinafy',
      *     'email' => 'person@example.com',
      *     'updated_at' => '2023-05-10T14:58:24Z',
@@ -516,7 +516,7 @@ class WebhookResource extends AbstractResource
      *
      * The authoritative vocabulary for the `events` array of {@see self::register()}. The
      * `EVENT_*` constants mirror these IDs; prefer this call over hard-coding if you render
-     * a picker, since the platform can add types.
+     * a picker, since the platform can add types. OAuth scope: `documents:read`.
      *
      * Request: no parameters.
      *
@@ -606,13 +606,13 @@ class WebhookResource extends AbstractResource
      * exact `payload` that was POSTed, so a failed delivery can be replayed or inspected
      * without reproducing the original event.
      *
-     * Request (query string): `event`, `delivered` (`true`/`false`), `from` and `to` (Unix
-     * timestamps), `page`, `per-page`.
+     * Request (query string): `endpoint_id`, `event`, `delivered` (`true`/`false`), `from`
+     * and `to` (Unix timestamps), `page`, `per-page`. OAuth scope: `documents:read`.
      *
      * Example query (no request body):
      * ```php
      * [
-     *     'event' => 'document_ready', 'delivered' => 'false',
+     *     'endpoint_id' => 'endpoint-id', 'event' => 'document_ready', 'delivered' => 'false',
      *     'from' => 1788220800, 'to' => 1790812800, 'page' => 1, 'per-page' => 20,
      * ]
      * ```
@@ -651,8 +651,8 @@ class WebhookResource extends AbstractResource
      * they record what your endpoint actually answered. On a successful delivery `delivered`
      * is true and `error` is empty.
      *
-     * @param array<string, scalar> $filters optional `event`, `delivered`, `from`, `to`,
-     *     `page`, `per-page`
+     * @param array<string, scalar> $filters optional `endpoint_id`, `event`, `delivered`,
+     *     `from`, `to`, `page`, `per-page`
      * @return array{status?: int, message?: string, data?: array<int, array<string, mixed>>,
      *     pagination?: array{current_page: int, page_count: int, per_page: int, total_count: int}}
      *     full envelope with pagination lifted from response headers
@@ -693,7 +693,7 @@ class WebhookResource extends AbstractResource
      *     'resource' => 'activity_dispatching_history',
      *     'id' => 'webhook-dispatch-id',
      *     'event' => 'document_ready',
-     *     'activity_id' => 'activity-id',
+     *     'activity_id' => 456,
      *     'endpoint' => 'https://example.com/webhook',
      *     'payload' => null,
      *     'delivered' => true,
@@ -707,7 +707,8 @@ class WebhookResource extends AbstractResource
      *
      * @return array<string, mixed> the new dispatch record
      * @throws ValidationException when `$dispatchId` is empty
-     * @throws \Assinafy\SDK\Exceptions\ApiException 404 when the dispatch does not exist
+     * @throws \Assinafy\SDK\Exceptions\ApiException 400 when the webhook subscription is
+     *     inactive or the event type is not subscribed; 404 when the dispatch does not exist
      */
     public function retryDispatch(string $dispatchId): array
     {

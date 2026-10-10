@@ -283,7 +283,9 @@ final class LiveApiTest extends TestCase
 
         $created = $signers->create(
             'SDK Test ' . uniqid(),
-            'sdk-test+' . uniqid() . '@example.com'
+            'sdk-test+' . uniqid() . '@example.com',
+            null,
+            '52998224725'
         );
 
         $this->assertNotEmpty($created['id']);
@@ -291,6 +293,7 @@ final class LiveApiTest extends TestCase
 
         $fetched = $signers->get($created['id']);
         $this->assertSame($created['id'], $fetched['id']);
+        $this->assertSame('52998224725', $fetched['government_id'] ?? null);
 
         $updated = $signers->update($created['id'], [
             'full_name' => 'SDK Updated',
@@ -565,13 +568,17 @@ final class LiveApiTest extends TestCase
         $resend = $this->client->assignments()->resend($doc['id'], $assignmentId, $signer['id']);
         $this->assertIsArray($resend);
 
-        // 5. Extend the assignment deadline.
+        // 5. Extend the assignment deadline, then remove it entirely.
         $reset = $this->client->assignments()->resetExpiration(
             $doc['id'],
             $assignmentId,
             '2100-01-31T23:59:00Z'
         );
         $this->assertSame('2100-01-31T23:59:00Z', $reset['expires_at'] ?? null);
+
+        $cleared = $this->client->assignments()->resetExpiration($doc['id'], $assignmentId, null);
+        $this->assertArrayHasKey('expires_at', $cleared);
+        $this->assertNull($cleared['expires_at']);
 
         // 6. The WhatsApp notification log — empty for an email-notified signer, but the
         //    endpoint must answer rather than 404.
@@ -1061,7 +1068,12 @@ final class LiveApiTest extends TestCase
         }
         $this->assertIsList($endpoints);
         foreach ($endpoints as $endpoint) {
-            $this->assertSame($endpoint, $webhooks->getEndpoint((string) $endpoint['id']));
+            // The list payload is a compact subset of the single-endpoint payload
+            // (e.g. getEndpoint() additionally returns the resource key).
+            $fetched = $webhooks->getEndpoint((string) $endpoint['id']);
+            foreach ($endpoint as $key => $value) {
+                $this->assertSame($value, $fetched[$key] ?? null, "Endpoint field {$key} differs between list and get");
+            }
         }
 
         if (getenv('ASSINAFY_STATEFUL_TESTS') !== '1') {

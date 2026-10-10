@@ -90,6 +90,25 @@ final class SignerResourceTest extends TestCase
         $this->assertSame([], $this->http->calls);
     }
 
+    public function testCreateAcceptsGovernmentId(): void
+    {
+        $this->http->queueJson(201, ['id' => 's1', 'government_id' => '52998224725']);
+
+        $result = $this->signers->create('Alice', 'a@example.com', null, '52998224725');
+
+        $this->assertSame(
+            ['full_name' => 'Alice', 'email' => 'a@example.com', 'government_id' => '52998224725'],
+            $this->http->lastCall()['body']
+        );
+        $this->assertSame('52998224725', $result['government_id']);
+    }
+
+    public function testCreateRejectsBlankGovernmentId(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->signers->create('Alice', 'a@example.com', null, '   ');
+    }
+
     public function testListUsesHyphenatedPerPage(): void
     {
         $this->http->queueJson(200, []);
@@ -132,6 +151,40 @@ final class SignerResourceTest extends TestCase
     {
         $this->expectException(ValidationException::class);
         $this->signers->update('s1', ['government_id' => '']);
+    }
+
+    public function testUpdateRejectsEmptyData(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->signers->update('s1', []);
+    }
+
+    public function testUpdateNormalizesPhoneToE164(): void
+    {
+        $this->http->queueJson(200, ['id' => 's1']);
+
+        $this->signers->update('s1', ['whatsapp_phone_number' => '+55 (48) 99999-0000']);
+
+        $this->assertSame('+5548999990000', $this->http->lastCall()['body']['whatsapp_phone_number']);
+    }
+
+    public function testFindByEmailTraversesEveryPageBeforeGivingUp(): void
+    {
+        $headers = static fn (int $page, int $pageCount): array => [
+            'x-pagination-current-page' => [(string) $page],
+            'x-pagination-page-count' => [(string) $pageCount],
+            'x-pagination-per-page' => ['100'],
+            'x-pagination-total-count' => ['101'],
+        ];
+        $this->http->queueJson(200, [['id' => 's1', 'email' => 'other@example.com']], $headers(1, 2));
+        $this->http->queueJson(200, [['id' => 's2', 'email' => 'Wanted@example.com']], $headers(2, 2));
+
+        $hit = $this->signers->findByEmail('wanted@example.com');
+
+        $this->assertNotNull($hit);
+        $this->assertSame('s2', $hit['id']);
+        $this->assertCount(2, $this->http->calls);
+        $this->assertSame(2, $this->http->lastCall()['query']['page']);
     }
 
     public function testFindByEmailReturnsExactMatch(): void

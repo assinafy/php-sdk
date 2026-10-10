@@ -144,10 +144,11 @@ if (!($estimate['has_sufficient_resources'] ?? false)) {
 ### Digital-certificate assignments
 
 The current contract accepts `DigitalCertificate` for ordinary and template assignment creation
-and estimation. Each certificate signer costs two credits in addition to notification cost,
+and estimation. Each certificate signer costs 0.5 credits in addition to notification cost,
 requires the account's Digital Certificate feature, must have a CPF/CNPJ in `government_id`, and
-must be alone in its signing step. Signer creation has no `government_id` field, so update an
-existing signer first. Formatted CPF/CNPJ input is accepted and normalized to digits by the
+must be alone in its signing step. Pass `government_id` when creating the signer
+(`signers()->create($name, $email, null, $governmentId)`), or update an existing signer first.
+Formatted CPF/CNPJ input is accepted and normalized to digits by the
 server. The update response may omit or mask `government_id`; do not require it to echo the identifier.
 Run the following only when the feature and certificate completion flow are enabled for the
 target account and environment:

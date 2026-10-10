@@ -231,7 +231,8 @@ class DocumentResource extends AbstractResource
      * ```
      *
      * @param array<string, scalar> $filters optional `status`, `method`, `search`, `tags`,
-     *     and `sort` (`sort` accepts `name` or `updated_at`)
+     *     and `sort` (`sort` accepts `name` or `updated_at`; `tags` takes comma-separated tag
+     *     IDs and returns documents having ALL listed tags)
      * @return array{status?: int, message?: string, data?: array<int, array<string, mixed>>,
      *     pagination?: array{current_page: int, page_count: int, per_page: int, total_count: int}}
      */
@@ -280,16 +281,6 @@ class DocumentResource extends AbstractResource
      *             'tags' => [],
      *             'created_at' => '2026-09-01T12:00:00Z',
      *             'updated_at' => '2026-09-01T12:00:00Z',
-     *             'assignment' => null,
-     *             'pages' => [
-     *                 [
-     *                     'id' => 'page-id',
-     *                     'number' => 1,
-     *                     'height' => 1651,
-     *                     'width' => 1275,
-     *                     'download_url' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/pages/page-id/download',
-     *                 ],
-     *             ],
      *         ],
      *     ],
      *     'pagination' => [
@@ -738,24 +729,19 @@ class DocumentResource extends AbstractResource
      * strings are rejected up front so a typo never reaches the API. The recipient is validated
      * as an email address locally for the same reason.
      *
-     * The published description claims "email/WhatsApp", but the schema declares no `channel`
-     * property at all and the running API answers `400 "Canal inválido"` for `whatsapp` — the
-     * same error a nonsense channel gets. A lowercase `sms` does pass the API's channel check,
-     * yet always fails with `404 "Solicitação de entrada do signatário não encontrada."`: it
-     * needs an SMS signer entry, and none can be created, because `verification_method` accepts
-     * only Email/Whatsapp/DigitalCertificate and `notification_methods` only Email/Whatsapp.
+     * The published OpenAPI schema matches the contract below: `channel` (required, enum
+     * `["email"]`, "Only email is supported") and `recipient` (required). Live-verified:
+     * `whatsapp` draws `400 "Canal inválido"` from the API — the same error a nonsense channel
+     * gets — and a lowercase `sms` passes the channel check but always fails with
+     * `404 "Solicitação de entrada do signatário não encontrada."`: it needs an SMS signer
+     * entry, and none can be created, because `verification_method` accepts only
+     * Email/Whatsapp/DigitalCertificate and `notification_methods` only Email/Whatsapp.
      * The single-channel list is deliberate and live-verified; do not widen it.
      *
-     * Request body:
+     * Request body (both keys are mandatory):
      * ```
      * ['recipient' => 'jane@example.com', 'channel' => 'email']
      * ```
-     *
-     * Both keys are mandatory. The published OpenAPI schema for this operation shows a
-     * single optional `email` property instead; that body is rejected by the running API
-     * with `400 "O atributo \"channel\" é obrigatório."`, so the SDK sends the pair above,
-     * which the server accepts. Verified against the live API — do not "correct" this
-     * toward the published schema without re-testing it.
      *
      * The document must be in `pending_signature`; otherwise the API answers
      * `400 "O documento não está com status de assinatura pendente."`
@@ -1196,10 +1182,6 @@ class DocumentResource extends AbstractResource
 
             if (in_array($status, self::FAILURE_STATUSES, true)) {
                 throw new \RuntimeException("Document processing failed with status: {$status}");
-            }
-
-            if (hrtime(true) >= $deadline) {
-                break;
             }
 
             $remainingNanoseconds = $deadline - hrtime(true);

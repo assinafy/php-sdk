@@ -316,7 +316,8 @@ $signer = $client->signers()->create(
 ```
 
 Digital-certificate assignments require an account with that feature enabled and an existing
-signer whose `government_id` has been set with `signers()->update()`. A certificate signer must
+signer whose `government_id` has been set — pass it as the optional fourth argument of
+`signers()->create()` or set it later with `signers()->update()`. A certificate signer must
 be alone in its signing step. The v1 signer-session methods do not expose a certificate
 start/complete protocol; use the completion flow provided by Assinafy for the account.
 
@@ -360,7 +361,7 @@ before sending the request.
 | --- | --- | --- | --- |
 | `VERIFICATION_EMAIL` | `Email` | An email address on the signer | 0 |
 | `VERIFICATION_WHATSAPP` | `Whatsapp` | `whatsapp_phone_number` and a paid subscription | 0.45 |
-| `VERIFICATION_DIGITAL_CERTIFICATE` | `Email` or `Whatsapp` | The account's Digital Certificate feature (Standard and Pro plans), a CPF/CNPJ in `government_id`, and the signer alone in its step | 2 for the signature, on top of its notification |
+| `VERIFICATION_DIGITAL_CERTIFICATE` | `Email` or `Whatsapp` | The account's Digital Certificate feature (Standard and Pro plans), a CPF/CNPJ in `government_id`, and the signer alone in its step | 0.5 for the signature, on top of its notification |
 
 `DigitalCertificate` covers the ICP-Brasil **A1** (a software file on the device) and **A3** (a
 smart card or token) certificates. Both use this one value and the same payload — they differ only
@@ -408,8 +409,9 @@ if ($resendEstimate['has_sufficient_credits'] ?? false) {
 }
 ```
 
-Use `resetExpiration()` to change the assignment deadline and
-`whatsappNotifications()` to inspect rendered WhatsApp delivery history.
+Use `resetExpiration()` to change the assignment deadline — pass `null` instead of a date to
+remove the expiration entirely — and `whatsappNotifications()` to inspect rendered WhatsApp
+delivery history.
 
 For the standard virtual flow, the high-level helper performs upload, readiness polling, signer
 lookup/creation, and assignment creation:

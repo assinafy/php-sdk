@@ -8,7 +8,8 @@ use Assinafy\SDK\Exceptions\ValidationException;
 use Assinafy\SDK\Support\Iso8601;
 
 /**
- * Assignments resource — every endpoint under `/documents/{document_id}/assignments`.
+ * Assignments resource — the endpoints under `/documents/{document_id}/assignments`
+ * plus the cross-document `GET /assignments` listing.
  *
  * @see https://api.assinafy.com.br/v1/docs
  */
@@ -34,7 +35,7 @@ class AssignmentResource extends AbstractResource
      *
      * A1 and A3 differ only in where the private key lives; both use this one value and the
      * same payload. Needs the account's Digital Certificate feature, a CPF in the signer's
-     * `government_id`, and the signer alone in its signing step. Costs 2 credits per signer
+     * `government_id`, and the signer alone in its signing step. Costs 0.5 credits per signer
      * under the `SignatureDigitalCertificate` breakdown code, on top of its notification.
      * Pairs with either notification method. The browser completes the signature, so
      * {@see SignerSessionResource::sign()} cannot finish it.
@@ -65,8 +66,11 @@ class AssignmentResource extends AbstractResource
      * Create an assignment (signature request).
      * `POST /documents/{document_id}/assignments`
      *
-     * This is the call that actually notifies signers. The document must have finished
-     * processing first — see {@see DocumentResource::waitUntilReady()}.
+     * This is the call that actually notifies signers. A `virtual` assignment may be created
+     * while the document is in `uploaded`, `metadata_processing` or `metadata_ready` — it is
+     * promoted to `pending_signature` automatically once metadata processing completes. Only
+     * `collect` requires `metadata_ready`, because its fields reference specific pages — see
+     * {@see DocumentResource::waitUntilReady()}.
      *
      * `virtual` collects a click-to-sign consent from each signer. `collect` additionally
      * places named input fields on the pages, so it requires `entries`.
@@ -516,6 +520,9 @@ class AssignmentResource extends AbstractResource
      * ]
      * ```
      *
+     * Breakdown items may also carry `quantity` and `unit_cost` (per the published
+     * `CostEstimateBreakdownItem`), e.g. two WhatsApp notifications at 0.45 each.
+     *
      * The live-verified resend response uses `total` and `has_sufficient_credits`;
      * the published `CostEstimate` schema describes assignment creation instead.
      *
@@ -538,13 +545,17 @@ class AssignmentResource extends AbstractResource
      * Reset the expiration date of an assignment.
      * `PUT /documents/{document_id}/assignments/{assignment_id}/reset-expiration`
      *
-     * Use this to revive an assignment whose deadline has passed, or to extend one still
-     * running. `$expiresAt` is validated locally before the request is sent, so a malformed
-     * value never reaches the API.
+     * Use this to revive an assignment whose deadline has passed, to extend one still
+     * running, or — by passing `null` — to remove the expiration entirely (the `expires_at`
+     * key itself is always required by the API). A new expiration must be at least one hour
+     * in the future, and the route is not allowed once the document is closed. A non-null
+     * `$expiresAt` is validated locally before the request is sent, so a malformed value
+     * never reaches the API.
      *
      * Request body:
      * ```
      * ['expires_at' => '2026-12-31T23:59:59Z']  // ISO 8601; a Z or ±HH:MM offset is mandatory
+     * ['expires_at' => null]                    // removes the expiration
      * ```
      *
      * Example response (SDK return; optional fields depend on state):
@@ -635,13 +646,16 @@ class AssignmentResource extends AbstractResource
      * ]
      * ```
      *
-     * @param string $expiresAt ISO 8601 date-time ending in `Z` or an explicit `±HH:MM` offset
+     * @param string|null $expiresAt ISO 8601 date-time ending in `Z` or an explicit `±HH:MM`
+     *     offset, or null to remove the expiration
      * @return array<string, mixed>
      * @throws ValidationException when `$expiresAt` is not a valid ISO 8601 date-time
      */
-    public function resetExpiration(string $documentId, string $assignmentId, string $expiresAt): array
+    public function resetExpiration(string $documentId, string $assignmentId, ?string $expiresAt): array
     {
-        $this->assertDateTime($expiresAt);
+        if ($expiresAt !== null) {
+            $this->assertDateTime($expiresAt);
+        }
         $documentId = $this->pathSegment($documentId, 'document ID');
         $assignmentId = $this->pathSegment($assignmentId, 'assignment ID');
         $response = $this->httpClient->put(

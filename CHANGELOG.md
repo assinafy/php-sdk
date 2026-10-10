@@ -3,6 +3,15 @@
 All notable changes to the Assinafy PHP SDK are documented here.
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## 2.6.0 - 2026-10-10
+
+- Register a signer's `government_id` (CPF or CNPJ) directly at creation with the optional fourth argument of `signers()->create()`, so digital-certificate signers no longer need a separate update call.
+- Remove an assignment's expiration by passing `null` to `assignments()->resetExpiration()`.
+- Correct the digital-certificate pricing in the documentation: 0.5 credits per signer, on top of the notification cost.
+- Correct request/response documentation across resources: the send-token schema (`recipient` plus `channel: email`), compact document and signer search results, webhook dispatch filters and OAuth scopes, webhook retry errors, MFA challenge error codes, and the token endpoint's `429` rate-limit response with `Retry-After`.
+- Expand unit and integration coverage for validation branches, signer `government_id` round trips and expiration clearing.
+- Set the SDK User-Agent version to `2.6.0`.
+
 ## 2.5.0 - 2026-10-07
 
 - Manage multiple webhook endpoints (1, or up to 3 on paid plans) with `webhooks()->listEndpoints()`, `createEndpoint()`, `getEndpoint()`, `updateEndpoint()` and `deleteEndpoint()`.

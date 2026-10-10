@@ -37,9 +37,10 @@ interface HttpClientInterface
 
     /**
      * @param array<string, string>   $headers
-     * @param array<string, scalar>   $query   optional query-string parameters (e.g. `force`)
+     * @param array<string, scalar>   $query
      * @param array<array-key, mixed> $data    optional JSON body — a few DELETE endpoints
-     *                                          (e.g. `DELETE /accounts/{id}`) document one
+     *                                          document one (e.g. `DELETE /accounts/{id}`
+     *                                          takes `force` in the body)
      */
     public function delete(string $uri, array $headers = [], array $query = [], array $data = []): Response;
 

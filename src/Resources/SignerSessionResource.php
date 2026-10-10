@@ -146,8 +146,10 @@ class SignerSessionResource extends AbstractResource
      * goes in the JSON body.
      *
      * A digital-certificate signer must send `has_accepted_terms: true` here before it
-     * can open the document. The SDK forwards the field in the JSON request body; the
-     * published OpenAPI declares it as a query parameter on this operation.
+     * can open the document. The published `/sign` narrative documents the field as part of
+     * the confirm-data body even though the published OpenAPI body schema for this operation
+     * lists only `full_name`, `email` and `government_id`; the SDK forwards it in the JSON
+     * request body.
      *
      * The signer confirms the identity details that will be printed on the certificate page.
      *

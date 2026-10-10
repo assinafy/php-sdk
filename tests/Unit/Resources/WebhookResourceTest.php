@@ -35,7 +35,7 @@ final class WebhookResourceTest extends TestCase
         $this->assertSame('a@example.com', $call['body']['email']);
         $this->assertTrue(
             $call['body']['is_active'],
-            'is_active is required by the live API even though it is not in the public docs'
+            'is_active is required by the API contract'
         );
     }
 
@@ -182,6 +182,22 @@ final class WebhookResourceTest extends TestCase
         $call = $http->lastCall();
         $this->assertSame('POST', $call['method']);
         $this->assertSame('accounts/a/webhooks/d1/retry', $call['uri']);
+    }
+
+    public function testDispatchesRejectsNonIntegerPage(): void
+    {
+        [, $webhooks] = $this->build();
+
+        $this->expectException(ValidationException::class);
+        $webhooks->dispatches(['page' => '2']);
+    }
+
+    public function testRetryDispatchRejectsAnEmptyId(): void
+    {
+        [, $webhooks] = $this->build();
+
+        $this->expectException(ValidationException::class);
+        $webhooks->retryDispatch('');
     }
 
     public function testEndpointCrudUsesDocumentedRoutesAndShapes(): void

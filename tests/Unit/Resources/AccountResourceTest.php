@@ -140,6 +140,23 @@ final class AccountResourceTest extends TestCase
         }
     }
 
+    public function testCreateRejectsAnEmptyName(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->accounts->create('');
+    }
+
+    public function testUpdateRejectsAnEmptyName(): void
+    {
+        $this->expectException(ValidationException::class);
+
+        try {
+            $this->accounts->update('');
+        } finally {
+            $this->assertSame([], $this->http->calls, 'No HTTP request should be attempted');
+        }
+    }
+
     public function testDeleteSendsNoBodyWhenNotForced(): void
     {
         $this->http->queueJson(200, []);

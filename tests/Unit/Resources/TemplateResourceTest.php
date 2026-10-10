@@ -95,6 +95,30 @@ final class TemplateResourceTest extends TestCase
         $this->assertSame('Renamed', $updated['document_name']);
     }
 
+    public function testUpdateRejectsEmptyData(): void
+    {
+        $http = new FakeHttpClient();
+        $templates = $this->resource($http);
+
+        $this->expectException(ValidationException::class);
+        $templates->update('t1', []);
+    }
+
+    public function testWaitUntilReadyRejectsNonPositiveIntervals(): void
+    {
+        $http = new FakeHttpClient();
+        $templates = $this->resource($http);
+
+        foreach ([[0, 1], [5, 0]] as [$maxWait, $pollInterval]) {
+            try {
+                $templates->waitUntilReady('t1', $maxWait, $pollInterval);
+                $this->fail('Expected ValidationException');
+            } catch (ValidationException) {
+                $this->assertSame([], $http->calls);
+            }
+        }
+    }
+
     public function testDelete(): void
     {
         $http = new FakeHttpClient();

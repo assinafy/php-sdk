@@ -132,7 +132,8 @@ class AuthResource extends AbstractResource
      *
      * @return array<string, mixed> `{ access_token, user, accounts }`
      * @throws ValidationException on an empty token or code
-     * @throws \Assinafy\SDK\Exceptions\ApiException 401 on a wrong, used or expired challenge
+     * @throws \Assinafy\SDK\Exceptions\ApiException 400 on a wrong or already-used code;
+     *     401 when the challenge expired, was already used, or too many codes were tried
      */
     public function verifyMfa(
         #[\SensitiveParameter] string $mfaToken,

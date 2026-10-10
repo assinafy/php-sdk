@@ -579,6 +579,56 @@ final class DocumentResourceTest extends TestCase
         $this->documents->list();
     }
 
+    public function testSendTokenRejectsMalformedRecipientEmail(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->documents->sendToken('doc1', 'not-an-email');
+    }
+
+    public function testCreateFromTemplateRejectsEmptySigners(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->documents->createFromTemplate('tmpl1', []);
+    }
+
+    public function testCreateFromTemplateRejectsASignerMissingId(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->expectExceptionMessage('requires an id');
+        $this->documents->createFromTemplate('tmpl1', [['role_id' => 'r1']]);
+    }
+
+    public function testWaitUntilReadyRejectsNonPositiveIntervals(): void
+    {
+        foreach ([[0, 1], [5, 0]] as [$maxWait, $pollInterval]) {
+            try {
+                $this->documents->waitUntilReady('doc1', $maxWait, $pollInterval);
+                $this->fail('Expected ValidationException');
+            } catch (ValidationException) {
+                $this->assertSame([], $this->http->calls);
+            }
+        }
+    }
+
+    public function testTagMutationRejectsNonStringTagNames(): void
+    {
+        foreach ([123, ['nested']] as $name) {
+            try {
+                $this->documents->appendTags('doc1', [$name]);
+                $this->fail('Expected ValidationException');
+            } catch (ValidationException) {
+                $this->addToAssertionCount(1);
+            }
+
+            try {
+                $this->documents->replaceTags('doc1', [$name]);
+                $this->fail('Expected ValidationException');
+            } catch (ValidationException) {
+                $this->assertSame([], $this->http->calls);
+            }
+        }
+    }
+
     private function writeFixturePdf(): string
     {
         $temporaryPath = tempnam(sys_get_temp_dir(), 'asn');

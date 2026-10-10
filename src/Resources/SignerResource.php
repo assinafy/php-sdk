@@ -35,6 +35,7 @@ class SignerResource extends AbstractResource
      *   'full_name'             => 'Jane Doe',        // required
      *   'email'                 => 'jane@example.com',
      *   'whatsapp_phone_number' => '+5548999990000',  // E.164
+     *   'government_id'         => '52998224725',     // CPF (11 digits) or CNPJ (14 characters)
      * ]
      * ```
      *
@@ -46,22 +47,25 @@ class SignerResource extends AbstractResource
      *     'full_name' => 'Jane Doe',
      *     'email' => 'jane@example.com',
      *     'whatsapp_phone_number' => '+5548999990000',
-     *     'government_id' => null,
+     *     'government_id' => '52998224725',
      *     'has_accepted_terms' => false,
      * ]
      * ```
      *
-     * `government_id` cannot be set here — add it afterwards with {@see self::update()},
-     * which digital-certificate signing requires.
+     * `government_id` is a CPF (11 digits) or a CNPJ (14 characters, possibly alphanumeric);
+     * the API normalises it on save. Digital-certificate signing requires it — it may also be
+     * added later with {@see self::update()}, but must be present **before** such an
+     * assignment is created for the signer.
      *
      * @return array<string, mixed> the created signer
-     * @throws ValidationException on an empty name, a malformed email, or a phone number
-     *     without a country code
+     * @throws ValidationException on an empty name, a malformed email, a phone number
+     *     without a country code, or a blank government ID
      */
     public function create(
         #[\SensitiveParameter] string $fullName,
         #[\SensitiveParameter] ?string $email = null,
-        #[\SensitiveParameter] ?string $whatsappPhoneNumber = null
+        #[\SensitiveParameter] ?string $whatsappPhoneNumber = null,
+        #[\SensitiveParameter] ?string $governmentId = null
     ): array {
         if (trim($fullName) === '') {
             throw new ValidationException('full_name is required', ['full_name' => $fullName]);
@@ -69,6 +73,10 @@ class SignerResource extends AbstractResource
 
         if ($email !== null) {
             $this->validateEmail($email);
+        }
+
+        if ($governmentId !== null && trim($governmentId) === '') {
+            throw new ValidationException('government_id must be a non-empty string');
         }
 
         $payload = ['full_name' => $fullName];
@@ -79,6 +87,10 @@ class SignerResource extends AbstractResource
 
         if ($whatsappPhoneNumber !== null) {
             $payload['whatsapp_phone_number'] = self::normalizePhoneNumber($whatsappPhoneNumber);
+        }
+
+        if ($governmentId !== null) {
+            $payload['government_id'] = $governmentId;
         }
 
         $response = $this->httpClient->post($this->accountPath('signers'), $payload);
@@ -178,9 +190,14 @@ class SignerResource extends AbstractResource
      * Update a signer.
      * `PUT /accounts/{account_id}/signers/{signer_id}`
      *
-     * Send only the keys you want to change. This is the only way to set `government_id`,
-     * which must be present **before** a digital-certificate assignment can be created for
-     * this signer.
+     * Send only the keys you want to change. `government_id` may be supplied here or at
+     * {@see self::create()} time; either way it must be present **before** a
+     * digital-certificate assignment can be created for this signer.
+     *
+     * Verification integrity: changing `email` or `whatsapp_phone_number` returns `400` while
+     * the signer has verified that channel on an in-flight (not yet certificated) document;
+     * changing a channel that has only unverified in-flight requests rotates their
+     * access/verification codes, invalidating previously sent links and OTPs.
      *
      * `whatsapp_phone_number` is normalised to E.164 locally, exactly as in
      * {@see self::create()}.

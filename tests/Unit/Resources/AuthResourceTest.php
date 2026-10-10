@@ -152,6 +152,54 @@ final class AuthResourceTest extends TestCase
         );
     }
 
+    public function testLoginRejectsAnEmptyPassword(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->auth->login('a@example.com', '');
+    }
+
+    public function testGenerateApiKeyRejectsAnEmptyPassword(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->auth->generateApiKey('TOKEN', ' ');
+    }
+
+    public function testResetPasswordValidatesLocally(): void
+    {
+        foreach (
+            [
+                fn () => $this->auth->resetPassword('not-an-email', 'token', 'newpw'),
+                fn () => $this->auth->resetPassword('a@example.com', '', 'newpw'),
+                fn () => $this->auth->resetPassword('a@example.com', 'token', ''),
+            ] as $call
+        ) {
+            try {
+                $call();
+                $this->fail('Expected ValidationException');
+            } catch (ValidationException) {
+                $this->assertSame([], $this->http->calls);
+            }
+        }
+    }
+
+    public function testChangePasswordValidatesLocally(): void
+    {
+        foreach (
+            [
+                fn () => $this->auth->changePassword(null, 'not-an-email', 'old', 'new'),
+                fn () => $this->auth->changePassword(null, 'a@example.com', '', 'new'),
+                fn () => $this->auth->changePassword(null, 'a@example.com', 'old', ' '),
+            ] as $call
+        ) {
+            try {
+                $call();
+                $this->fail('Expected ValidationException');
+            } catch (ValidationException) {
+                $this->assertSame([], $this->http->calls);
+            }
+        }
+    }
+
     public function testVerifyMfaPostsChallengeAndCode(): void
     {
         $this->http->queueJson(200, ['access_token' => 'tok']);

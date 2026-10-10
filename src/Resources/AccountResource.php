@@ -7,7 +7,9 @@ namespace Assinafy\SDK\Resources;
 use Assinafy\SDK\Exceptions\ValidationException;
 
 /**
- * Accounts (workspaces) resource — covers every documented endpoint under `/accounts`.
+ * Accounts (workspaces) resource — the workspace endpoints under `/accounts`, excluding
+ * the webhook routes under `/accounts/{account_id}/webhooks`, which live in
+ * {@see WebhookResource}.
  *
  * An "account" is a workspace: the container every document, signer, tag and field belongs to.
  * Each account-scoped resource in this SDK sends the account ID configured on

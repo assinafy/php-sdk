@@ -125,6 +125,9 @@ $signerId = $signer['id'];
 `findByEmail()` percorre a busca paginada e retorna a correspondência exata, ignorando maiúsculas,
 ou `null`. Reutilizar um signatário não altera seu nome ou telefone; use `update()` para isso.
 Números de WhatsApp precisam incluir `+` e o código do país, com 8–15 dígitos.
+`create()` aceita um quarto argumento opcional `governmentId` (CPF ou CNPJ; a formatação é
+aceita e o valor é normalizado no servidor) — informe-o já na criação de signatários que usarão
+`VERIFICATION_DIGITAL_CERTIFICATE`.
 
 ### 3. Estimar os recursos necessários
 
@@ -157,7 +160,7 @@ notificação (como recebe o convite). O SDK valida a matriz antes de enviar a r
 | --- | --- | --- | --- |
 | `VERIFICATION_EMAIL` | `Email` | Email cadastrado no signatário | 0 |
 | `VERIFICATION_WHATSAPP` | `Whatsapp` | `whatsapp_phone_number` e assinatura paga | 0,45 |
-| `VERIFICATION_DIGITAL_CERTIFICATE` | `Email` ou `Whatsapp` | Recurso Certificado Digital na conta (planos Standard e Pro), CPF/CNPJ em `government_id` e o signatário sozinho na sua etapa | 2 pela assinatura, além da notificação |
+| `VERIFICATION_DIGITAL_CERTIFICATE` | `Email` ou `Whatsapp` | Recurso Certificado Digital na conta (planos Standard e Pro), CPF/CNPJ em `government_id` e o signatário sozinho na sua etapa | 0,5 pela assinatura, além da notificação |
 
 `DigitalCertificate` cobre os certificados ICP-Brasil **A1** (arquivo de software no dispositivo) e
 **A3** (cartão ou token). Os dois usam esse mesmo valor e o mesmo payload — mudam apenas onde a
@@ -198,6 +201,9 @@ $client->assignments()->resetExpiration(
     (new DateTimeImmutable('+14 days'))->format(DateTimeInterface::ATOM),
 );
 ```
+
+Passe `null` como terceiro argumento de `resetExpiration()` para remover o prazo de expiração
+por completo.
 
 Para a sequência padrão, o helper reúne upload, preparação, resolução dos signatários e atribuição virtual:
 

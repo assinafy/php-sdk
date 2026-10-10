@@ -19,14 +19,16 @@ use Assinafy\SDK\Exceptions\ValidationException;
 class SignerDocumentResource extends AbstractResource
 {
     /**
-     * Get the document tied to the signer's access code, without page content.
+     * Get the document tied to the signer's access code, with the signer's assignment items.
      * `GET /signers/{signer_id}/document?signer-access-code={code}`
      *
-     * Useful right after the signer opens the link, to show which document is about
-     * to be signed before asking them to verify their code. Does not require the
-     * signer to have verified or confirmed their data yet — that is what distinguishes it
-     * from {@see SignerSessionResource::currentDocument()}, which needs a verified session
-     * and returns the assignment items too.
+     * Returns the full document record, including the assignment `items` the signer must
+     * complete and the page list. Useful right after the signer opens the link, to show
+     * which document is about to be signed before asking them to verify their code. Does
+     * not require the signer to have verified or confirmed their data yet — that is what
+     * distinguishes it from {@see SignerSessionResource::currentDocument()}, which needs a
+     * verified session, marks the document as viewed, and enforces the DigitalCertificate
+     * confirm-data gate.
      *
      * Request (query string): `signer-access-code`.
      *
@@ -292,16 +294,6 @@ class SignerDocumentResource extends AbstractResource
      *             [
      *                 'id' => 'document-id',
      *                 'name' => 'Example',
-     *             ],
-     *         ],
-     *         'assignment' => null,
-     *         'pages' => [
-     *             [
-     *                 'id' => 'document-page-id',
-     *                 'number' => 1,
-     *                 'height' => 2100,
-     *                 'width' => 1275,
-     *                 'download_url' => 'https://api.assinafy.com.br/v1/documents/document-id/pages/1a/download',
      *             ],
      *         ],
      *         'created_at' => '2026-06-03T03:54:16Z',

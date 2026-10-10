@@ -84,6 +84,47 @@ final class TagResourceTest extends TestCase
         $this->tags->update('t1', []);
     }
 
+    public function testUpdateRejectsMalformedColor(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->tags->update('t1', ['color' => 'zzzzzz']);
+    }
+
+    public function testUpdateRejectsNonStringNameOrColor(): void
+    {
+        foreach ([['name' => 42], ['color' => 7]] as $data) {
+            try {
+                $this->tags->update('t1', $data);
+                $this->fail('Expected ValidationException');
+            } catch (ValidationException) {
+                $this->assertSame([], $this->http->calls);
+            }
+        }
+    }
+
+    public function testUpdateRejectsNameOver64Characters(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->tags->update('t1', ['name' => str_repeat('a', 65)]);
+    }
+
+    public function testEmptyTagIdIsRejected(): void
+    {
+        foreach (
+            [
+                fn () => $this->tags->update('', ['name' => 'x']),
+                fn () => $this->tags->delete('  '),
+            ] as $call
+        ) {
+            try {
+                $call();
+                $this->fail('Expected ValidationException');
+            } catch (ValidationException) {
+                $this->assertSame([], $this->http->calls);
+            }
+        }
+    }
+
     public function testDeleteWithoutForce(): void
     {
         $this->http->queueJson(200, ['deleted' => true]);

@@ -407,6 +407,15 @@ final class OAuthResourceTest extends TestCase
         $this->oauth->refresh('');
     }
 
+    public function testTokenEndpointReturningAListIsRejectedAsMalformed(): void
+    {
+        // A JSON list is not a token object: the flat-data guard must trip.
+        $this->http->queueRaw(200, '["access_token","Bearer"]');
+
+        $this->expectException(NetworkException::class);
+        $this->oauth->refresh('current-refresh');
+    }
+
     public function testRevokePostsTheTokenAndOptionalHint(): void
     {
         $this->http->queueRaw(200, '');

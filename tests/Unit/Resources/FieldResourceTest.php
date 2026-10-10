@@ -79,6 +79,24 @@ final class FieldResourceTest extends TestCase
         $this->assertSame('DELETE', $this->http->lastCall()['method']);
     }
 
+    public function testUpdateRejectsEmptyData(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->fields->update('f1', []);
+    }
+
+    public function testEmptyFieldIdIsRejected(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->fields->get('');
+    }
+
+    public function testValidateRejectsBlankSignerAccessCode(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->fields->validate('f1', 'x', '   ');
+    }
+
     public function testValidateAsUserSendsNoAccessCode(): void
     {
         $this->http->queueJson(200, ['success' => true]);

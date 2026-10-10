@@ -157,4 +157,29 @@ final class SignerDocumentResourceTest extends TestCase
         $this->expectException(ValidationException::class);
         $this->docs->download('s1', 'd1', 'CODE', 'nope');
     }
+
+    public function testBlankAccessCodeIsRejectedEverywhere(): void
+    {
+        foreach (
+            [
+                fn () => $this->docs->current('s1', '  '),
+                fn () => $this->docs->list('s1', ' '),
+                fn () => $this->docs->download('s1', 'd1', ''),
+                fn () => $this->docs->search('s1', "\t", 'contract'),
+            ] as $call
+        ) {
+            try {
+                $call();
+                $this->fail('Expected ValidationException');
+            } catch (ValidationException) {
+                $this->assertSame([], $this->http->calls);
+            }
+        }
+    }
+
+    public function testDeclineMultipleRejectsEmptyDocumentIds(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->docs->declineMultiple('CODE', [], 'Bad terms');
+    }
 }
