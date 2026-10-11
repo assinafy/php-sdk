@@ -1,6 +1,7 @@
 {
     "name": "assinafy/php-sdk",
     "description": "Modern, framework-agnostic PHP SDK for the Assinafy digital signature API",
+    "homepage": "https://www.assinafy.com.br",
     "type": "library",
     "license": "MIT",
     "keywords": ["assinafy", "digital-signature", "e-signature", "sdk", "api-client"],
