@@ -71,31 +71,55 @@ final class SignerDocumentResourceTest extends TestCase
         $this->docs->list('s1', 'CODE', ['page' => 0]);
     }
 
-    public function testListAndSearchWithoutAccessCodeUseWorkspaceCredentials(): void
+    public function testWorkspaceListAndSearchSendNoAccessCode(): void
     {
         $this->http->queueJson(200, ['data' => []]);
-        $this->docs->list('s1', null);
+        $this->docs->listAsWorkspace('s1');
         $this->assertSame('signers/s1/documents', $this->http->lastCall()['uri']);
         $this->assertSame(['page' => 1, 'per-page' => 20], $this->http->lastCall()['query']);
 
         $this->http->queueJson(200, ['data' => []]);
-        $this->docs->search('s1', null, 'contract');
+        $this->docs->searchAsWorkspace('s1', 'contract');
         $this->assertSame('signers/s1/documents/search', $this->http->lastCall()['uri']);
         $this->assertSame(['search' => 'contract'], $this->http->lastCall()['query']);
     }
 
-    public function testPublicClientRequiresAccessCodeForListAndSearch(): void
+    public function testWorkspaceListIgnoresAnAccessCodeSmuggledInFilters(): void
+    {
+        $this->http->queueJson(200, ['data' => []]);
+        $this->docs->listAsWorkspace('s1', ['signer-access-code' => 'CODE']);
+        $this->assertArrayNotHasKey('signer-access-code', $this->http->lastCall()['query']);
+    }
+
+    public function testPublicClientCannotUseWorkspaceListOrSearch(): void
     {
         $public = new SignerDocumentResource($this->http, Configuration::forPublic());
 
         try {
-            $public->list('s1', null);
+            $public->listAsWorkspace('s1');
             $this->fail('Expected a validation exception');
         } catch (ValidationException) {
         }
 
         $this->expectException(ValidationException::class);
-        $public->search('s1', null, 'contract');
+        $public->searchAsWorkspace('s1', 'contract');
+    }
+
+    public function testListAndSearchNeverFallBackToWorkspaceCredentialsWithoutAnAccessCode(): void
+    {
+        foreach (
+            [
+                fn () => $this->docs->list('s1', null), // @phpstan-ignore argument.type
+                fn () => $this->docs->search('s1', null, 'contract'), // @phpstan-ignore argument.type
+            ] as $call
+        ) {
+            try {
+                $call();
+                $this->fail('Expected a TypeError for a null access code');
+            } catch (\TypeError) {
+            }
+        }
+        $this->assertSame([], $this->http->calls);
     }
 
     public function testListRejectsNonIntegerPagination(): void

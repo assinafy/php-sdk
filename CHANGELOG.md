@@ -5,6 +5,12 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.6.2] - 2026-10-11
+
+### Changed
+
+- `signerDocuments()->list()` and `search()` require a signer access code again, as in 2.6.0; passing `null` is a type error instead of switching to the workspace credentials. Use the new `listAsWorkspace()` and `searchAsWorkspace()` to list or search a workspace signer's documents with the API key or Bearer token.
+
 ## [2.6.1] - 2026-10-11
 
 ### Added

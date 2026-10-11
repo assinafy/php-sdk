@@ -180,15 +180,14 @@ class SignerDocumentResource extends AbstractResource
      * List the signer's documents.
      * `GET /signers/{signer_id}/documents?signer-access-code={code}`
      *
-     * Authentication: the signer access code, or — when `$accessCode` is `null` — the
-     * client's workspace API key or Bearer token. With workspace credentials the signer
-     * must belong to the configured workspace.
+     * Authentication: the signer access code. To list with the workspace API key or Bearer
+     * token instead, call {@see self::listAsWorkspace()}.
      *
      * Everything this signer has been asked to sign across the workspace — the backing call
      * for a "my documents" inbox. Combine with {@see self::signMultiple()} to let a signer
      * clear several at once.
      *
-     * Request (query string): `page`, `per-page`, and `signer-access-code` when given.
+     * Request (query string): `page`, `per-page`, and `signer-access-code`.
      *
      * Example query (no request body):
      * ```php
@@ -239,33 +238,41 @@ class SignerDocumentResource extends AbstractResource
      * ]
      * ```
      *
-     * @param string|null           $accessCode signer access code; `null` authenticates with
-     *     the workspace credentials instead
+     * @param string                $accessCode signer access code
      * @param array<string, scalar> $filters optional `page` and `per-page`
      * @return array{status?: int, message?: string, data?: array<int, array<string, mixed>>,
      *     pagination?: array{current_page: int, page_count: int, per_page: int, total_count: int}}
-     * @throws ValidationException when `page`/`per-page` are not integers, the access code
-     *     is blank, or it is `null` on a {@see \Assinafy\SDK\Configuration::forPublic()} client
+     * @throws ValidationException when `page`/`per-page` are not integers or the access code
+     *     is blank
      * @throws \Assinafy\SDK\Exceptions\ApiException 401 on invalid credentials
      */
     public function list(
         string $signerId,
-        #[\SensitiveParameter] ?string $accessCode,
+        #[\SensitiveParameter] string $accessCode,
         array $filters = []
     ): array {
-        $signerId = $this->pathSegment($signerId, 'signer ID');
-        unset($filters['signer-access-code']);
-        $page = $filters['page'] ?? 1;
-        $perPage = $filters['per-page'] ?? 20;
-        if (!is_int($page) || !is_int($perPage)) {
-            throw new ValidationException('Signer document page and per-page filters must be integers');
-        }
-        $params = array_merge(
-            $this->paginationQuery($page, $perPage, $filters),
-            $this->signerOrWorkspaceQuery($accessCode)
-        );
+        return $this->listDocuments($signerId, $this->accessCodeQuery($accessCode), $filters);
+    }
 
-        return $this->withPagination($this->httpClient->get("signers/{$signerId}/documents", $params));
+    /**
+     * List a workspace signer's documents with the workspace API key or Bearer token.
+     * `GET /signers/{signer_id}/documents`
+     *
+     * Same request and response as {@see self::list()}, authenticated with the client's
+     * workspace credentials instead of a signer access code. The signer must belong to the
+     * configured workspace.
+     *
+     * @param array<string, scalar> $filters optional `page` and `per-page`
+     * @return array{status?: int, message?: string, data?: array<int, array<string, mixed>>,
+     *     pagination?: array{current_page: int, page_count: int, per_page: int, total_count: int}}
+     * @throws ValidationException when `page`/`per-page` are not integers, or the client was
+     *     built with {@see \Assinafy\SDK\Configuration::forPublic()}
+     * @throws \Assinafy\SDK\Exceptions\ApiException 401 on invalid credentials, 404 when the
+     *     signer is not in the workspace
+     */
+    public function listAsWorkspace(string $signerId, array $filters = []): array
+    {
+        return $this->listDocuments($signerId, $this->workspaceQuery(), $filters);
     }
 
     /**
@@ -275,10 +282,10 @@ class SignerDocumentResource extends AbstractResource
      * Matches `$term` against the document name. Unlike {@see self::list()} this route is
      * not paginated and returns a flat array rather than the paginated envelope.
      *
-     * Authentication: the signer access code, or — when `$accessCode` is `null` — the
-     * client's workspace API key or Bearer token (the signer must belong to the workspace).
+     * Authentication: the signer access code. To search with the workspace API key or
+     * Bearer token instead, call {@see self::searchAsWorkspace()}.
      *
-     * Request (query string): `search`, and `signer-access-code` when given.
+     * Request (query string): `search` and `signer-access-code`.
      *
      * Example query (no request body):
      * ```php
@@ -314,26 +321,38 @@ class SignerDocumentResource extends AbstractResource
      * ]
      * ```
      *
-     * @param string|null $accessCode signer access code; `null` authenticates with the
-     *     workspace credentials instead
-     * @param string      $term       substring to match against the document name
+     * @param string $accessCode signer access code
+     * @param string $term       substring to match against the document name
      * @return array<int, array<string, mixed>>
-     * @throws ValidationException when the signer ID or access code is blank, or the code is
-     *     `null` on a {@see \Assinafy\SDK\Configuration::forPublic()} client
+     * @throws ValidationException when the signer ID or access code is blank
      * @throws \Assinafy\SDK\Exceptions\ApiException 401 on invalid credentials
      */
     public function search(
         string $signerId,
-        #[\SensitiveParameter] ?string $accessCode,
+        #[\SensitiveParameter] string $accessCode,
         string $term
     ): array {
-        $signerId = $this->pathSegment($signerId, 'signer ID');
-        $response = $this->httpClient->get(
-            "signers/{$signerId}/documents/search",
-            array_merge(['search' => $term], $this->signerOrWorkspaceQuery($accessCode))
-        );
+        return $this->searchDocuments($signerId, $this->accessCodeQuery($accessCode), $term);
+    }
 
-        return $this->extractData($response->getData() ?? []);
+    /**
+     * Search a workspace signer's documents with the workspace API key or Bearer token.
+     * `GET /signers/{signer_id}/documents/search`
+     *
+     * Same request and response as {@see self::search()}, authenticated with the client's
+     * workspace credentials instead of a signer access code. The signer must belong to the
+     * configured workspace.
+     *
+     * @param string $term substring to match against the document name
+     * @return array<int, array<string, mixed>>
+     * @throws ValidationException when the signer ID is blank, or the client was built with
+     *     {@see \Assinafy\SDK\Configuration::forPublic()}
+     * @throws \Assinafy\SDK\Exceptions\ApiException 401 on invalid credentials, 404 when the
+     *     signer is not in the workspace
+     */
+    public function searchAsWorkspace(string $signerId, string $term): array
+    {
+        return $this->searchDocuments($signerId, $this->workspaceQuery(), $term);
     }
 
     /**
@@ -482,15 +501,55 @@ class SignerDocumentResource extends AbstractResource
      *
      * @return array{signer-access-code: string}|array{}
      */
-    private function signerOrWorkspaceQuery(#[\SensitiveParameter] ?string $accessCode): array
+    /**
+     * @param array<string, string>  $authQuery signer access code query, or empty for workspace credentials
+     * @param array<string, scalar> $filters
+     * @return array{status?: int, message?: string, data?: array<int, array<string, mixed>>,
+     *     pagination?: array{current_page: int, page_count: int, per_page: int, total_count: int}}
+     */
+    private function listDocuments(string $signerId, array $authQuery, array $filters): array
     {
-        if ($accessCode === null && $this->config->isPublic()) {
+        $signerId = $this->pathSegment($signerId, 'signer ID');
+        unset($filters['signer-access-code']);
+        $page = $filters['page'] ?? 1;
+        $perPage = $filters['per-page'] ?? 20;
+        if (!is_int($page) || !is_int($perPage)) {
+            throw new ValidationException('Signer document page and per-page filters must be integers');
+        }
+        $params = array_merge($this->paginationQuery($page, $perPage, $filters), $authQuery);
+
+        return $this->withPagination($this->httpClient->get("signers/{$signerId}/documents", $params));
+    }
+
+    /**
+     * @param array<string, string> $authQuery signer access code query, or empty for workspace credentials
+     * @return array<int, array<string, mixed>>
+     */
+    private function searchDocuments(string $signerId, array $authQuery, string $term): array
+    {
+        $signerId = $this->pathSegment($signerId, 'signer ID');
+        $response = $this->httpClient->get(
+            "signers/{$signerId}/documents/search",
+            array_merge(['search' => $term], $authQuery)
+        );
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    /**
+     * Empty query: the request is authenticated with the client's workspace credentials.
+     *
+     * @return array<string, string>
+     */
+    private function workspaceQuery(): array
+    {
+        if ($this->config->isPublic()) {
             throw new ValidationException(
-                'A signer access code is required when the client has no workspace credentials'
+                'Workspace credentials are required; this client was built for public signer access'
             );
         }
 
-        return $this->accessCodeQuery($accessCode);
+        return [];
     }
 
     /**

@@ -1456,9 +1456,9 @@ final class LiveApiTest extends TestCase
         $this->assertSame($email, $sent['recipient'] ?? null);
         $this->assertSame($documentId, $sent['document']['id'] ?? null);
 
-        $listed = $this->client->signerDocuments()->list((string) $signer['id'], null);
+        $listed = $this->client->signerDocuments()->listAsWorkspace((string) $signer['id']);
         $this->assertContains($documentId, array_column($listed['data'] ?? [], 'id'));
-        $found = $this->client->signerDocuments()->search((string) $signer['id'], null, (string) $document['name']);
+        $found = $this->client->signerDocuments()->searchAsWorkspace((string) $signer['id'], (string) $document['name']);
         $this->assertContains($documentId, array_column($found, 'id'));
 
         $this->assertStringStartsWith(
