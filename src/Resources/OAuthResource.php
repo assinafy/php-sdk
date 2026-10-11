@@ -406,7 +406,7 @@ class OAuthResource extends AbstractResource
      *     or redirect URI
      * @throws ApiException `invalid_grant` (expired, replayed, or mismatched code),
      *     `invalid_client`, `invalid_target`; 429 when rate-limited — wait the `Retry-After`
-     *     seconds, readable via {@see ApiException::getResponseHeaderLine()}
+     *     seconds, readable via {@see ApiException::getRetryAfter()}
      */
     public function exchangeCode(
         #[\SensitiveParameter] string $code,
@@ -476,7 +476,7 @@ class OAuthResource extends AbstractResource
      * @throws ApiException `invalid_grant` when the token was already used, has expired,
      *     lost `offline_access`, or the user reconnected with different permissions —
      *     reconnect rather than retry; 429 when rate-limited — wait the `Retry-After`
-     *     seconds, readable via {@see ApiException::getResponseHeaderLine()}
+     *     seconds, readable via {@see ApiException::getRetryAfter()}
      */
     public function refresh(#[\SensitiveParameter] string $refreshToken): array
     {

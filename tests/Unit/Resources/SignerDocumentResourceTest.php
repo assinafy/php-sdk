@@ -71,6 +71,33 @@ final class SignerDocumentResourceTest extends TestCase
         $this->docs->list('s1', 'CODE', ['page' => 0]);
     }
 
+    public function testListAndSearchWithoutAccessCodeUseWorkspaceCredentials(): void
+    {
+        $this->http->queueJson(200, ['data' => []]);
+        $this->docs->list('s1', null);
+        $this->assertSame('signers/s1/documents', $this->http->lastCall()['uri']);
+        $this->assertSame(['page' => 1, 'per-page' => 20], $this->http->lastCall()['query']);
+
+        $this->http->queueJson(200, ['data' => []]);
+        $this->docs->search('s1', null, 'contract');
+        $this->assertSame('signers/s1/documents/search', $this->http->lastCall()['uri']);
+        $this->assertSame(['search' => 'contract'], $this->http->lastCall()['query']);
+    }
+
+    public function testPublicClientRequiresAccessCodeForListAndSearch(): void
+    {
+        $public = new SignerDocumentResource($this->http, Configuration::forPublic());
+
+        try {
+            $public->list('s1', null);
+            $this->fail('Expected a validation exception');
+        } catch (ValidationException) {
+        }
+
+        $this->expectException(ValidationException::class);
+        $public->search('s1', null, 'contract');
+    }
+
     public function testListRejectsNonIntegerPagination(): void
     {
         $this->expectException(ValidationException::class);

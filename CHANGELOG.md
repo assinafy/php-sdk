@@ -3,6 +3,15 @@
 All notable changes to the Assinafy PHP SDK are documented here.
 Versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+## [2.6.1] - 2026-10-11
+
+### Added
+
+- Read rate-limit information from `ApiException`: `isRateLimited()` detects `429 Too Many Requests`, `getRetryAfter()` returns the `Retry-After` wait in seconds, and `getRateLimit()` returns the `X-Rate-Limit-Limit`, `-Remaining` and `-Reset` values.
+- List and search a signer's documents with the workspace API key or Bearer token by passing `null` as the access code to `signerDocuments()->list()` and `signerDocuments()->search()`; the signer must belong to the workspace.
+
 ## 2.6.0 - 2026-10-10
 
 - Register a signer's `government_id` (CPF or CNPJ) directly at creation with the optional fourth argument of `signers()->create()`, so digital-certificate signers no longer need a separate update call.

@@ -66,6 +66,54 @@ class ApiException extends AssinafyException
         return '';
     }
 
+    /** True for `429 Too Many Requests`; wait {@see self::getRetryAfter()} seconds before retrying. */
+    public function isRateLimited(): bool
+    {
+        return $this->statusCode === 429;
+    }
+
+    /**
+     * Seconds to wait before retrying, from the `Retry-After` header the API sends with `429`.
+     * An HTTP-date value is converted to the remaining seconds (never negative).
+     *
+     * @return int|null `null` when the header is absent or unreadable
+     */
+    public function getRetryAfter(): ?int
+    {
+        $value = trim($this->getResponseHeaderLine('Retry-After'));
+        if (preg_match('/^\d+$/D', $value) === 1) {
+            return (int) $value;
+        }
+
+        $timestamp = $value === '' ? false : strtotime($value);
+
+        return $timestamp === false ? null : max(0, $timestamp - time());
+    }
+
+    /**
+     * The rate-limit window reported by the `X-Rate-Limit-*` response headers.
+     *
+     * ```php
+     * ['limit' => 120, 'remaining' => 0, 'reset' => 42] // reset: seconds until the window resets
+     * ```
+     *
+     * @return array{limit: int, remaining: int, reset: int}|null `null` unless all three
+     *     headers are present and numeric
+     */
+    public function getRateLimit(): ?array
+    {
+        $values = [];
+        foreach (['limit', 'remaining', 'reset'] as $key) {
+            $value = trim($this->getResponseHeaderLine('X-Rate-Limit-' . ucfirst($key)));
+            if (preg_match('/^\d+$/D', $value) !== 1) {
+                return null;
+            }
+            $values[$key] = (int) $value;
+        }
+
+        return $values;
+    }
+
     /**
      * @param array<string, mixed> $responseData
      * @param array<array-key, array<int, string>|string> $responseHeaders

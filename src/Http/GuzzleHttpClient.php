@@ -469,7 +469,11 @@ class GuzzleHttpClient implements HttpClientInterface
             );
         }
 
-        $credentialless = self::isCredentiallessRequest($method, $uri);
+        $credentialless = self::isCredentiallessRequest(
+            $method,
+            $uri,
+            is_array($options['query'] ?? null) && isset($options['query']['signer-access-code'])
+        );
         foreach ($this->defaultHeaders as $name => $value) {
             if (
                 $credentialless
@@ -496,10 +500,15 @@ class GuzzleHttpClient implements HttpClientInterface
     /**
      * Public bootstrap, verification, and signer-code requests must not inherit a
      * workspace credential from a client that is also used for private resources.
-     * Explicit per-request headers remain untouched.
+     * Explicit per-request headers remain untouched. The signer document list and search
+     * accept either a signer access code or workspace credentials, so they are
+     * credentialless only when the access code is present.
      */
-    private static function isCredentiallessRequest(string $method, string $uri): bool
-    {
+    private static function isCredentiallessRequest(
+        string $method,
+        string $uri,
+        bool $hasSignerAccessCode
+    ): bool {
         $path = parse_url($uri, PHP_URL_PATH);
         $path = is_string($path) ? ltrim($path, '/') : '';
         $route = strtoupper($method) . ' ' . $path;
@@ -542,10 +551,11 @@ class GuzzleHttpClient implements HttpClientInterface
                 $route
             ) === 1
             || preg_match('~^GET signers/[^/]+/document$~', $route) === 1
-            || preg_match(
-                '~^GET signers/[^/]+/documents(?:/search|/[^/]+/download/[^/]+)?$~',
-                $route
-            ) === 1;
+            || preg_match('~^GET signers/[^/]+/documents/[^/]+/download/[^/]+$~', $route) === 1
+            || (
+                $hasSignerAccessCode
+                && preg_match('~^GET signers/[^/]+/documents(?:/search)?$~', $route) === 1
+            );
     }
 
     /**

@@ -10,9 +10,11 @@ use Assinafy\SDK\Exceptions\ValidationException;
  * Signer Documents resource — the signer-facing document list/sign/decline/download
  * endpoints under `/signers/{signer_id}/...` and `/signers/documents/...`.
  *
- * Every call is authenticated by a `signer-access-code` (the code embedded in the
- * link a signer receives), not by the workspace API key — so these work on a
- * {@see \Assinafy\SDK\Configuration::forPublic()} client too.
+ * Calls are authenticated by a `signer-access-code` (the code embedded in the link a
+ * signer receives), not by the workspace API key — so these work on a
+ * {@see \Assinafy\SDK\Configuration::forPublic()} client too. {@see self::list()} and
+ * {@see self::search()} also accept the workspace credentials (API key or Bearer token)
+ * when no access code is given; the signer must then belong to that workspace.
  *
  * @see https://api.assinafy.com.br/v1/docs
  */
@@ -178,11 +180,15 @@ class SignerDocumentResource extends AbstractResource
      * List the signer's documents.
      * `GET /signers/{signer_id}/documents?signer-access-code={code}`
      *
+     * Authentication: the signer access code, or — when `$accessCode` is `null` — the
+     * client's workspace API key or Bearer token. With workspace credentials the signer
+     * must belong to the configured workspace.
+     *
      * Everything this signer has been asked to sign across the workspace — the backing call
      * for a "my documents" inbox. Combine with {@see self::signMultiple()} to let a signer
      * clear several at once.
      *
-     * Request (query string): `page`, `per-page`, `signer-access-code`.
+     * Request (query string): `page`, `per-page`, and `signer-access-code` when given.
      *
      * Example query (no request body):
      * ```php
@@ -233,15 +239,18 @@ class SignerDocumentResource extends AbstractResource
      * ]
      * ```
      *
+     * @param string|null           $accessCode signer access code; `null` authenticates with
+     *     the workspace credentials instead
      * @param array<string, scalar> $filters optional `page` and `per-page`
      * @return array{status?: int, message?: string, data?: array<int, array<string, mixed>>,
      *     pagination?: array{current_page: int, page_count: int, per_page: int, total_count: int}}
-     * @throws ValidationException when `page`/`per-page` are not integers, or the access
-     *     code is blank
+     * @throws ValidationException when `page`/`per-page` are not integers, the access code
+     *     is blank, or it is `null` on a {@see \Assinafy\SDK\Configuration::forPublic()} client
+     * @throws \Assinafy\SDK\Exceptions\ApiException 401 on invalid credentials
      */
     public function list(
         string $signerId,
-        #[\SensitiveParameter] string $accessCode,
+        #[\SensitiveParameter] ?string $accessCode,
         array $filters = []
     ): array {
         $signerId = $this->pathSegment($signerId, 'signer ID');
@@ -253,7 +262,7 @@ class SignerDocumentResource extends AbstractResource
         }
         $params = array_merge(
             $this->paginationQuery($page, $perPage, $filters),
-            $this->accessCodeQuery($accessCode)
+            $this->signerOrWorkspaceQuery($accessCode)
         );
 
         return $this->withPagination($this->httpClient->get("signers/{$signerId}/documents", $params));
@@ -266,7 +275,10 @@ class SignerDocumentResource extends AbstractResource
      * Matches `$term` against the document name. Unlike {@see self::list()} this route is
      * not paginated and returns a flat array rather than the paginated envelope.
      *
-     * Request (query string): `search`, `signer-access-code`.
+     * Authentication: the signer access code, or — when `$accessCode` is `null` — the
+     * client's workspace API key or Bearer token (the signer must belong to the workspace).
+     *
+     * Request (query string): `search`, and `signer-access-code` when given.
      *
      * Example query (no request body):
      * ```php
@@ -302,19 +314,23 @@ class SignerDocumentResource extends AbstractResource
      * ]
      * ```
      *
-     * @param string $term substring to match against the document name
+     * @param string|null $accessCode signer access code; `null` authenticates with the
+     *     workspace credentials instead
+     * @param string      $term       substring to match against the document name
      * @return array<int, array<string, mixed>>
-     * @throws ValidationException when the signer ID or access code is blank
+     * @throws ValidationException when the signer ID or access code is blank, or the code is
+     *     `null` on a {@see \Assinafy\SDK\Configuration::forPublic()} client
+     * @throws \Assinafy\SDK\Exceptions\ApiException 401 on invalid credentials
      */
     public function search(
         string $signerId,
-        #[\SensitiveParameter] string $accessCode,
+        #[\SensitiveParameter] ?string $accessCode,
         string $term
     ): array {
         $signerId = $this->pathSegment($signerId, 'signer ID');
         $response = $this->httpClient->get(
             "signers/{$signerId}/documents/search",
-            array_merge(['search' => $term], $this->accessCodeQuery($accessCode))
+            array_merge(['search' => $term], $this->signerOrWorkspaceQuery($accessCode))
         );
 
         return $this->extractData($response->getData() ?? []);
@@ -459,6 +475,22 @@ class SignerDocumentResource extends AbstractResource
         );
 
         return $response->getBody();
+    }
+
+    /**
+     * Query for routes that accept a signer access code or the workspace credentials.
+     *
+     * @return array{signer-access-code: string}|array{}
+     */
+    private function signerOrWorkspaceQuery(#[\SensitiveParameter] ?string $accessCode): array
+    {
+        if ($accessCode === null && $this->config->isPublic()) {
+            throw new ValidationException(
+                'A signer access code is required when the client has no workspace credentials'
+            );
+        }
+
+        return $this->accessCodeQuery($accessCode);
     }
 
     /**

@@ -750,10 +750,14 @@ try {
 } catch (ApiException $exception) {
     $status = $exception->getStatusCode();
     $details = $exception->getResponseData();
+    $retryAfter = $exception->getRetryAfter(); // seconds to wait after HTTP 429
 } catch (NetworkException $exception) {
     // Connection, timeout, malformed response, or transport failure.
 }
 ```
+
+On HTTP 429 (`isRateLimited()`), wait `Retry-After` (`getRetryAfter()`) before retrying;
+`getRateLimit()` returns `limit`, `remaining` and `reset` from the `X-Rate-Limit-*` headers.
 
 The default transport rejects unsuccessful HTTP responses and unsuccessful API envelopes.
 Redirect following is disabled so custom credentials are not forwarded to another origin.

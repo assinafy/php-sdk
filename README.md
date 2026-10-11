@@ -557,14 +557,15 @@ try {
     $errors = $exception->getErrors();
 } catch (ApiException $exception) {
     $status = $exception->getStatusCode();
-    $retryAfter = $exception->getResponseHeaderLine('Retry-After');
+    $retryAfter = $exception->getRetryAfter(); // segundos de espera após HTTP 429
 } catch (NetworkException $exception) {
     // A aplicação decide como recuperar uma falha de transporte ou resposta inválida.
 }
 ```
 
 O SDK não repete automaticamente mutações. Após um timeout, confirme o estado remoto antes de
-reenviar upload, atribuição ou renovação OAuth. Em HTTP 429, respeite `Retry-After` quando presente.
+reenviar upload, atribuição ou renovação OAuth. Em HTTP 429 (`isRateLimited()`), respeite `Retry-After`
+(`getRetryAfter()`); `getRateLimit()` retorna `limit`, `remaining` e `reset` dos cabeçalhos `X-Rate-Limit-*`.
 O transporte desabilita redirecionamentos e registra apenas metadados, sem corpos ou valores de
 credenciais. Respostas e contextos de exceção podem conter dados pessoais: não registre tudo.
 

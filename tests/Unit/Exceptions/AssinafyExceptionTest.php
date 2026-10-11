@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Assinafy\SDK\Tests\Unit\Exceptions;
 
+use Assinafy\SDK\Exceptions\ApiException;
 use Assinafy\SDK\Exceptions\AssinafyException;
 use PHPUnit\Framework\TestCase;
 
@@ -36,5 +37,29 @@ final class AssinafyExceptionTest extends TestCase
             $setterContext->getAttributes(\SensitiveParameter::class),
             'setContext() $context must be #[\SensitiveParameter] so stack traces redact it'
         );
+    }
+
+    public function testRetryAfterAndRateLimitParsing(): void
+    {
+        $none = new ApiException('Not found', 404);
+        $this->assertFalse($none->isRateLimited());
+        $this->assertNull($none->getRetryAfter());
+        $this->assertNull($none->getRateLimit());
+
+        $date = new ApiException('Slow down', 429, null, null, [
+            'retry-after' => gmdate('D, d M Y H:i:s \\G\\M\\T', time() + 120),
+            'x-rate-limit-limit' => '120',
+            'x-rate-limit-remaining' => '0',
+        ]);
+        $this->assertTrue($date->isRateLimited());
+        $this->assertGreaterThanOrEqual(118, $date->getRetryAfter());
+        $this->assertLessThanOrEqual(120, $date->getRetryAfter());
+        $this->assertNull($date->getRateLimit(), 'all three headers are required');
+
+        $past = new ApiException('Slow down', 429, null, null, ['Retry-After' => 'Thu, 01 Jan 1970 00:00:00 GMT']);
+        $this->assertSame(0, $past->getRetryAfter());
+
+        $garbage = new ApiException('Slow down', 429, null, null, ['Retry-After' => 'soon-ish']);
+        $this->assertNull($garbage->getRetryAfter());
     }
 }

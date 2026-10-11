@@ -261,6 +261,32 @@ final class GuzzleHttpClientTest extends TestCase
         );
     }
 
+    public function testSignerDocumentListAndSearchUseWorkspaceCredentialsWithoutAccessCode(): void
+    {
+        $client = $this->client([
+            new GuzzleResponse(200, [], '{"status":200,"data":[]}'),
+            new GuzzleResponse(200, [], '{"status":200,"data":[]}'),
+            new GuzzleResponse(200, [], '{"status":200,"data":[]}'),
+            new GuzzleResponse(200, [], '{"status":200,"data":[]}'),
+            new GuzzleResponse(200, ['Content-Type' => 'application/pdf'], '%PDF'),
+        ]);
+
+        $client->get('signers/s1/documents', ['page' => 1]);
+        $this->assertTrue($this->lastRequest()->hasHeader('X-Api-Key'));
+
+        $client->get('signers/s1/documents/search', ['search' => 'a']);
+        $this->assertTrue($this->lastRequest()->hasHeader('X-Api-Key'));
+
+        $client->get('signers/s1/documents', ['signer-access-code' => 'code']);
+        $this->assertFalse($this->lastRequest()->hasHeader('X-Api-Key'));
+
+        $client->get('signers/s1/documents/search', ['search' => 'a', 'signer-access-code' => 'code']);
+        $this->assertFalse($this->lastRequest()->hasHeader('X-Api-Key'));
+
+        $client->get('signers/s1/documents/d1/download/original', ['signer-access-code' => 'code']);
+        $this->assertFalse($this->lastRequest()->hasHeader('X-Api-Key'));
+    }
+
     public function testAccountFieldValidationRetainsWorkspaceCredentialWithSignerContext(): void
     {
         $client = $this->client([
@@ -557,6 +583,31 @@ final class GuzzleHttpClientTest extends TestCase
             $this->assertSame('request-123', $e->getResponseHeaderLine('x-request-id'));
             $this->assertSame('5', $e->getResponseHeaderLine('Retry-After'));
             $this->assertNotNull($e->getPrevious());
+        }
+    }
+
+    public function testRateLimitedResponseExposesRetryAfterAndWindow(): void
+    {
+        $client = $this->client([
+            new GuzzleResponse(
+                429,
+                [
+                    'Retry-After' => '30',
+                    'X-Rate-Limit-Limit' => '120',
+                    'X-Rate-Limit-Remaining' => '0',
+                    'X-Rate-Limit-Reset' => '30',
+                ],
+                '{"status":429,"data":null,"message":"Too Many Requests"}'
+            ),
+        ]);
+
+        try {
+            $client->get('documents/d1');
+            $this->fail('Expected an API exception');
+        } catch (ApiException $e) {
+            $this->assertTrue($e->isRateLimited());
+            $this->assertSame(30, $e->getRetryAfter());
+            $this->assertSame(['limit' => 120, 'remaining' => 0, 'reset' => 30], $e->getRateLimit());
         }
     }
 

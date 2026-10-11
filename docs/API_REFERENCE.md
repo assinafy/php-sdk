@@ -5,7 +5,7 @@ This reference maps every public resource method in this SDK to the Assinafy API
 - <https://api.assinafy.com.br/v1/docs>
 - <https://api.assinafy.com.br/v1/docs/openapi.json>
 
-This reference describes SDK version 2.6.0. Install published releases with
+This reference describes SDK version 2.6.1. Install published releases with
 `composer require assinafy/php-sdk` and use the documentation shipped with the selected tag.
 See [INSTALLATION.md](INSTALLATION.md) for setup.
 
@@ -92,7 +92,16 @@ Every operation in the current OpenAPI document declares `200` success. The comp
 below put the success code first. For example, `200; 400, 401, 404, 500` means success is `200`
 and the documented errors are `400`, `401`, `404`, and `500`.
 
-The introduction additionally lists `403`, `415`, and `429` as possible global errors, and OAuth userinfo declares 403 for insufficient scope. In particular, callers should still handle `429` and respect `Retry-After` if present.
+The introduction additionally lists `403`, `415`, and `429` as possible global errors, and OAuth userinfo declares 403 for insufficient scope.
+
+### Rate limits
+
+Requests are limited per minute (per user when authenticated, per IP otherwise; payments, coupons,
+MFA and OAuth have tighter limits). Responses carry `X-Rate-Limit-Limit`, `X-Rate-Limit-Remaining`
+and `X-Rate-Limit-Reset` (seconds until the window resets). Past the limit the API answers `429`
+with `Retry-After` (seconds). The SDK never retries automatically; on `ApiException`,
+`isRateLimited()` detects the `429`, `getRetryAfter()` returns the wait in seconds and
+`getRateLimit()` returns `['limit' => int, 'remaining' => int, 'reset' => int]` (or `null`).
 
 ## Operational notes
 
@@ -250,6 +259,9 @@ An application-supplied `HttpClientInterface` owns its wire behavior and must se
 | `ApiException::getResponseData(): ?array` | Parsed error payload. |
 | `ApiException::getResponseHeaders(): array` | Normalized response headers. |
 | `ApiException::getResponseHeaderLine(string $name): string` | Case-insensitive comma-joined header lookup. |
+| `ApiException::isRateLimited(): bool` | True for `429 Too Many Requests`. |
+| `ApiException::getRetryAfter(): ?int` | Seconds from `Retry-After` (an HTTP-date is converted to remaining seconds); `null` when absent. |
+| `ApiException::getRateLimit(): ?array` | `['limit' => int, 'remaining' => int, 'reset' => int]` from the `X-Rate-Limit-*` headers; `null` unless all three are present. |
 | `ApiException::fromResponse(int $statusCode, array $responseData, ?Throwable $previous = null, array $responseHeaders = []): self` | Factory using `message`, then `error`, then a safe fallback. |
 | `ValidationException::__construct(string $message = 'Validation failed', array $errors = [], int $code = 422)` | Local structured validation failure. `getErrors()` and inherited `getContext()['errors']` expose the validation details, which may contain sensitive input. |
 | `ValidationException::getErrors(): array` | Structured input errors. |
@@ -671,8 +683,8 @@ them, so the SDK does not call them.
 | SDK method | Official operation | Auth | Request | SDK success return | Statuses |
 |---|---|---|---|---|---|
 | `current($signerId, $accessCode)` | [`GET /v1/signers/{signerId}/document`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fsigners%2F%7BsignerId%7D%2Fdocument) | Signer | Signer path ID plus access code query. | Unwrapped `Document`. | `200; 401, 404, 500` |
-| `list($signerId, $accessCode, $filters)` | [`GET /v1/signers/{signerId}/documents`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fsigners%2F%7BsignerId%7D%2Fdocuments) | Signer | Published query `page`, `per-page`; SDK accepts those filters and adds access code. | Envelope with `data: Document[]` and normalized `pagination`. | `200; 401, 500` |
-| `search($signerId, $accessCode, $term)` | [`GET /v1/signers/{signerId}/documents/search`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fsigners%2F%7BsignerId%7D%2Fdocuments%2Fsearch) | Signer | Signer path ID, access code query, `search` query. | Unwrapped list of the compact document shape (no `assignment` or `pages`). | `200; 401, 500` |
+| `list($signerId, $accessCode, $filters)` | [`GET /v1/signers/{signerId}/documents`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fsigners%2F%7BsignerId%7D%2Fdocuments) | Signer code, or workspace API key/Bearer when `$accessCode` is `null` | Published query `page`, `per-page`; SDK accepts those filters and adds the access code when given. With workspace credentials the signer must belong to the workspace. | Envelope with `data: Document[]` and normalized `pagination`. | `200; 401, 500` |
+| `search($signerId, $accessCode, $term)` | [`GET /v1/signers/{signerId}/documents/search`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fsigners%2F%7BsignerId%7D%2Fdocuments%2Fsearch) | Signer code, or workspace API key/Bearer when `$accessCode` is `null` | Signer path ID, optional access code query, `search` query. | Unwrapped list of the compact document shape (no `assignment` or `pages`). | `200; 401, 500` |
 | `signMultiple($accessCode, $documentIds)` | [`PUT /v1/signers/documents/sign-multiple`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Fsigners%2Fdocuments%2Fsign-multiple) | Signer | Access code query; required JSON `{document_ids: string[]}`. SDK rejects an empty list. | Unwrapped empty list. | `200; 401, 500` |
 | `declineMultiple($accessCode, $documentIds, $reason)` | [`PUT /v1/signers/documents/decline-multiple`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Fsigners%2Fdocuments%2Fdecline-multiple) | Signer | Access code query; required JSON `{document_ids: string[], decline_reason: string}`. | Unwrapped empty list. | `200; 401, 500` |
 | `download($signerId, $documentId, $accessCode, $artifact)` | [`GET /v1/signers/{signerId}/documents/{documentId}/download/{artifactName}`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fsigners%2F%7BsignerId%7D%2Fdocuments%2F%7BdocumentId%7D%2Fdownload%2F%7BartifactName%7D) | Public in spec; SDK requires signer code | Artifact is `original`, `certificated`, `certificate-page`, `pades`, or `bundle`; certificate rules match workspace download. | Raw binary bytes. | `200; 404, 500` |

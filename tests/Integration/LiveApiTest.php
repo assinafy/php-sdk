@@ -192,7 +192,7 @@ final class LiveApiTest extends TestCase
 
     private function waitForRateLimit(ApiException $exception): void
     {
-        $retryAfter = (int) $exception->getResponseHeaderLine('Retry-After');
+        $retryAfter = $exception->getRetryAfter() ?? 0;
         if ($retryAfter <= 0 && preg_match('/(?:retry|wait).*?(\d+)\s*seconds?/i', $exception->getMessage(), $match)) {
             $retryAfter = (int) $match[1];
         }
@@ -1101,6 +1101,22 @@ final class LiveApiTest extends TestCase
             $this->assertStringStartsWith('whsec_', $secret);
             $rotated = $webhooks->rotateEndpointSecret((string) $created['id']);
             $this->assertNotSame($secret, $rotated);
+
+            // A sample delivery signed with the rotated secret verifies; the old one no longer does.
+            $body = '{"event":"document_ready","object":{"id":"document-id"}}';
+            $id = 'msg_' . bin2hex(random_bytes(8));
+            $timestamp = (string) time();
+            $key = base64_decode(substr($rotated, strlen('whsec_')), true);
+            $this->assertIsString($key);
+            $headers = [
+                'webhook-id' => $id,
+                'webhook-timestamp' => $timestamp,
+                'webhook-signature' => 'v1,' . base64_encode(
+                    hash_hmac('sha256', "{$id}.{$timestamp}.{$body}", $key, true)
+                ),
+            ];
+            $this->assertTrue($this->client->webhookEvents()->verifySignature($body, $headers, $rotated));
+            $this->assertFalse($this->client->webhookEvents()->verifySignature($body, $headers, $secret));
             $this->assertFalse(
                 $webhooks->updateEndpoint((string) $created['id'], ['signing_enabled' => false])['signing_enabled']
             );
@@ -1369,6 +1385,93 @@ final class LiveApiTest extends TestCase
      * A bogus query code must produce 401 "invalid credentials" (the server found and
      * rejected it), rather than a route miss or missing-parameter response.
      */
+    /**
+     * WhatsApp and digital-certificate assignments use the same request shape as Email.
+     * Plans without those features answer 403 on both the estimate and the creation; a
+     * plan that has them accepts the request. Either answer proves the shape was accepted
+     * up to the plan check.
+     */
+    public function testPlanGatedVerificationMethodsReachTheApi(): void
+    {
+        $suffix = uniqid();
+        $whatsapp = $this->client->signers()->create(
+            'SDK WhatsApp ' . $suffix,
+            $this->reservedEmail('sdk-whatsapp'),
+            '+5511999999999'
+        );
+        $this->createdSigners[] = (string) $whatsapp['id'];
+        $certificate = $this->client->signers()->create(
+            'SDK Certificate ' . $suffix,
+            $this->reservedEmail('sdk-certificate'),
+            null,
+            '52998224725'
+        );
+        $this->createdSigners[] = (string) $certificate['id'];
+
+        $cases = [
+            [['id' => $whatsapp['id'], 'verification_method' => AssignmentResource::VERIFICATION_WHATSAPP]],
+            [[
+                'id' => $certificate['id'],
+                'verification_method' => AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE,
+            ]],
+        ];
+        foreach ($cases as $signers) {
+            $document = $this->client->documents()->upload($this->makePdfFixture());
+            $this->createdDocuments[] = (string) $document['id'];
+            $this->client->documents()->waitUntilReady((string) $document['id'], 60, 2);
+
+            foreach (['estimateCost', 'create'] as $operation) {
+                try {
+                    $result = $this->retryRateLimited(
+                        fn () => $this->client->assignments()->{$operation}((string) $document['id'], $signers)
+                    );
+                    $this->assertIsArray($result);
+                } catch (ApiException $e) {
+                    $this->assertSame(403, $e->getStatusCode(), $e->getMessage());
+                }
+            }
+        }
+    }
+
+    /**
+     * Email assignment followed by the public send-token request, the signer document
+     * list/search with workspace credentials, the original artifact and rate-limit headers.
+     */
+    public function testSendTokenAndSignerDocumentsWithWorkspaceCredentials(): void
+    {
+        $email = $this->reservedEmail('sdk-send-token');
+        $signer = $this->controlledSigner($email, 'SDK send-token');
+        $document = $this->client->documents()->upload($this->makePdfFixture());
+        $documentId = (string) $document['id'];
+        $this->createdDocuments[] = $documentId;
+        $this->client->documents()->waitUntilReady($documentId, 60, 2);
+        $this->client->assignments()->create($documentId, [[
+            'id' => $signer['id'],
+            'verification_method' => AssignmentResource::VERIFICATION_EMAIL,
+        ]]);
+
+        $public = AssinafyClient::forAuth($this->client->getConfig()->getBaseUrl());
+        $sent = $public->documents()->sendToken($documentId, $email);
+        $this->assertSame('email', $sent['channel'] ?? null);
+        $this->assertSame($email, $sent['recipient'] ?? null);
+        $this->assertSame($documentId, $sent['document']['id'] ?? null);
+
+        $listed = $this->client->signerDocuments()->list((string) $signer['id'], null);
+        $this->assertContains($documentId, array_column($listed['data'] ?? [], 'id'));
+        $found = $this->client->signerDocuments()->search((string) $signer['id'], null, (string) $document['name']);
+        $this->assertContains($documentId, array_column($found, 'id'));
+
+        $this->assertStringStartsWith(
+            '%PDF',
+            $this->client->documents()->download($documentId, DocumentResource::ARTIFACT_ORIGINAL)
+        );
+
+        $headers = array_change_key_case($this->client->getHttpClient()->get('documents/statuses')->getHeaders());
+        foreach (['x-rate-limit-limit', 'x-rate-limit-remaining', 'x-rate-limit-reset'] as $name) {
+            $this->assertMatchesRegularExpression('/^\d+$/', (string) (((array) ($headers[$name] ?? ''))[0] ?? ''));
+        }
+    }
+
     public function testSignerAccessCodeQueryParameterIsRecognized(): void
     {
         try {
