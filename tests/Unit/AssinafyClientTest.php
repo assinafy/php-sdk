@@ -22,6 +22,7 @@ use Assinafy\SDK\Resources\UserResource;
 use Assinafy\SDK\Resources\WebhookResource;
 use Assinafy\SDK\Support\WebhookEventParser;
 use Assinafy\SDK\Tests\Unit\Support\FakeHttpClient;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\AbstractLogger;
 
@@ -161,7 +162,16 @@ final class AssinafyClientTest extends TestCase
         ], $lastCall['body']);
     }
 
-    public function testUploadWorkflowPreservesPerSignerAssignmentOptions(): void
+    /** @return iterable<string, array{string, string}> */
+    public static function workflowVerificationMethods(): iterable
+    {
+        yield 'certificate' => ['DigitalCertificate', 'Email'];
+        yield 'biometric email' => ['IdDocumentFaceMatchBasic', 'Email'];
+        yield 'biometric whatsapp' => ['IdDocumentFaceMatchBasic', 'Whatsapp'];
+    }
+
+    #[DataProvider('workflowVerificationMethods')]
+    public function testUploadWorkflowPreservesPerSignerAssignmentOptions(string $verification, string $notification): void
     {
         $http = new FakeHttpClient();
         $client = new AssinafyClient(new Configuration('k', 'a'), $http);
@@ -178,8 +188,8 @@ final class AssinafyClientTest extends TestCase
         try {
             $client->uploadAndRequestSignatures($pdfPath, [[
                 'id' => 'signer1',
-                'verification_method' => AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE,
-                'notification_methods' => [AssignmentResource::NOTIFICATION_EMAIL],
+                'verification_method' => $verification,
+                'notification_methods' => [$notification],
                 'step' => 1,
             ]]);
         } finally {
@@ -188,10 +198,27 @@ final class AssinafyClientTest extends TestCase
 
         $this->assertSame([[
             'id' => 'signer1',
-            'verification_method' => AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE,
-            'notification_methods' => [AssignmentResource::NOTIFICATION_EMAIL],
+            'verification_method' => $verification,
+            'notification_methods' => [$notification],
             'step' => 1,
         ]], $http->lastCall()['body']['signers']);
+    }
+
+    public function testBiometricWorkflowRequiresAnExistingSignerBeforeUploading(): void
+    {
+        $http = new FakeHttpClient();
+        $client = new AssinafyClient(new Configuration('k', 'a'), $http);
+
+        try {
+            $client->uploadAndRequestSignatures('/unused.pdf', [[
+                'full_name' => 'Example Signer', 'email' => 'signer@example.com',
+                'verification_method' => AssignmentResource::VERIFICATION_ID_DOCUMENT_FACE_MATCH_BASIC,
+            ]]);
+            $this->fail('Expected an existing biometric signer to be required');
+        } catch (\InvalidArgumentException $e) {
+            $this->assertStringContainsString('government_id', $e->getMessage());
+            $this->assertSame([], $http->calls);
+        }
     }
 
     public function testUploadWorkflowValidatesAllSignersBeforeUploading(): void

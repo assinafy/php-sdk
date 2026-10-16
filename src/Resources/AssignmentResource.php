@@ -34,18 +34,24 @@ class AssignmentResource extends AbstractResource
      * {@see DocumentResource::ARTIFACT_PADES}.
      *
      * A1 and A3 differ only in where the private key lives; both use this one value and the
-     * same payload. Needs the account's Digital Certificate feature, a CPF in the signer's
+     * same payload. Needs the account's Digital Certificate feature, CPF/CNPJ in the signer's
      * `government_id`, and the signer alone in its signing step. Costs 0.5 credits per signer
      * under the `SignatureDigitalCertificate` breakdown code, on top of its notification.
      * Pairs with either notification method. The browser completes the signature, so
      * {@see SignerSessionResource::sign()} cannot finish it.
      */
     public const VERIFICATION_DIGITAL_CERTIFICATE = 'DigitalCertificate';
+    /** Government-ID photos, face matching and liveness; needs the account feature and a valid signer CPF. */
+    public const VERIFICATION_ID_DOCUMENT_FACE_MATCH_BASIC = 'IdDocumentFaceMatchBasic';
+
+    public const IDENTITY_REVIEW_APPROVED = 'Approved';
+    public const IDENTITY_REVIEW_REJECTED = 'Rejected';
 
     public const VERIFICATION_METHODS = [
         self::VERIFICATION_EMAIL,
         self::VERIFICATION_WHATSAPP,
         self::VERIFICATION_DIGITAL_CERTIFICATE,
+        self::VERIFICATION_ID_DOCUMENT_FACE_MATCH_BASIC,
     ];
 
     /** Emails the signing invitation. 0 credits. */
@@ -82,7 +88,7 @@ class AssignmentResource extends AbstractResource
      *     'signers' => [
      *         [
      *             'id' => 'signer-id',                  // required
-     *             'verification_method' => 'Email',     // Email | Whatsapp | DigitalCertificate
+     *             'verification_method' => 'Email',     // See VERIFICATION_METHODS
      *             'notification_methods' => ['Email'],  // exactly one: Email | Whatsapp
      *             'step' => 1,                          // 1-based signing order
      *         ],
@@ -708,6 +714,148 @@ class AssignmentResource extends AbstractResource
         return $this->extractData($response->getData() ?? []);
     }
 
+    /**
+     * Read a signer's identity-document verification as the workspace reviewer.
+     * `GET /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/identity-verification`
+     *
+     * Authentication: configured API key or workspace Bearer token. Request: the three IDs
+     * in the path; no query or body. Requires an identity verification for this assignment.
+     * An InReview signer may continue signing; certification waits for the account's decision.
+     * Provider-approved verifications may have no evidence here; read their activity instead.
+     *
+     * Example SDK response:
+     * ```php
+     * [
+     *     'id' => 'verification-id', 'status' => 'InReview', 'provider' => 'AssinafyVerify',
+     *     'verification_method' => 'IdDocumentFaceMatchBasic',
+     *     'reason_codes' => [['code' => 'NAME_MISMATCH', 'description' => 'Name differs']],
+     *     'evidence_available' => true,
+     *     'expected' => ['name' => 'Example Signer', 'cpf' => '52998224725'],
+     *     'document' => ['type' => 'CNH', 'name' => 'EXAMPLE SIGNER', 'cpf' => '52998224725'],
+     *     'matches' => ['cpf' => true, 'name' => 0.52, 'birth_date' => null],
+     *     'checks' => [['name' => 'name', 'result' => 'review', 'score' => 0.52, 'reasons' => ['NAME_MISMATCH']]],
+     *     'images' => ['document_front', 'document_back', 'face'],
+     *     'ruleset_version' => '2026-10-12.2', 'evidence_sha256' => '<sha256-digest>',
+     *     'reviewed_by' => null, 'reviewed_at' => null, 'review_note' => null, 'completed_at' => null,
+     * ]
+     * ```
+     *
+     * @param string $documentId the document ID
+     * @param string $assignmentId the document's assignment ID
+     * @param string $signerId the assigned signer ID
+     * @return array<string, mixed> the unwrapped SignerIdentityReview
+     * @throws ValidationException when an ID is empty
+     * @throws \Assinafy\SDK\Exceptions\ApiException 404 when the assignment, signer or verification is missing
+     */
+    public function identityVerification(string $documentId, string $assignmentId, string $signerId): array
+    {
+        $response = $this->httpClient->get($this->identityVerificationPath($documentId, $assignmentId, $signerId));
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    /**
+     * Download one identity-review evidence image or PDF as raw bytes.
+     * `GET /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/identity-verification/images/{name}`
+     *
+     * Authentication: configured API key or workspace Bearer token. No query or body.
+     * Requires an InReview verification and a name from its images list. Evidence is fetched
+     * from the provider, never stored by Assinafy, and unavailable after the review is decided.
+     * The response is image/jpeg, image/png or application/pdf, with Cache-Control: no-store.
+     * ```php
+     * $bytes = $client->assignments()->identityVerificationImage('document-id', 'assignment-id', 'signer-id', 'face');
+     * // The complete image byte string, without a JSON envelope.
+     * ```
+     *
+     * @param string $documentId the document ID
+     * @param string $assignmentId the assignment ID
+     * @param string $signerId the assigned signer ID
+     * @param string $name document_front, document_back, document_pdf or face, from the review's images
+     * @return string the image or PDF bytes
+     * @throws ValidationException when an ID is empty or the image name is unknown
+     * @throws \Assinafy\SDK\Exceptions\ApiException 404 when the image or open review is unavailable
+     */
+    public function identityVerificationImage(
+        string $documentId,
+        string $assignmentId,
+        string $signerId,
+        string $name
+    ): string {
+        if (!in_array($name, ['document_front', 'document_back', 'document_pdf', 'face'], true)) {
+            throw new ValidationException('Unknown identity verification image name');
+        }
+
+        $path = $this->identityVerificationPath($documentId, $assignmentId, $signerId);
+
+        return $this->httpClient->get($path . '/images/' . $this->pathSegment($name))->getBody();
+    }
+
+    /**
+     * Approve or reject an InReview identity verification.
+     * `POST /documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/identity-verification/review`
+     *
+     * Authentication: configured API key or workspace Bearer token. The document must be
+     * pending_signature or pending_identity_review. Approval releases certification once all
+     * signers have signed and all reviews are approved. Rejection cancels the document and
+     * notifies signers and copy receivers; the note is never shown to them. The decision and
+     * note are sent to the provider and recorded in activity. Evidence images then become unavailable.
+     *
+     * Request body: ['decision' => 'Approved', 'note' => 'Checked by reviewer']; note is optional.
+     * Example SDK response:
+     * ```php
+     * [
+     *     'id' => 'verification-id', 'status' => 'Approved', 'provider' => 'AssinafyVerify',
+     *     'verification_method' => 'IdDocumentFaceMatchBasic', 'reason_codes' => [],
+     *     'evidence_available' => false, 'expected' => null, 'document' => null, 'matches' => null,
+     *     'checks' => [], 'images' => [], 'ruleset_version' => null, 'evidence_sha256' => null,
+     *     'reviewed_by' => ['id' => 'user-id', 'name' => 'Reviewer'],
+     *     'reviewed_at' => '2026-10-16T12:00:00Z', 'review_note' => 'Checked by reviewer',
+     *     'completed_at' => '2026-10-16T12:00:00Z',
+     * ]
+     * ```
+     *
+     * @param string $documentId the document ID
+     * @param string $assignmentId the assignment ID
+     * @param string $signerId the assigned signer ID
+     * @param string $decision Approved or Rejected (case-sensitive)
+     * @param string|null $note optional reviewer note, at most 2000 characters
+     * @return array<string, mixed> the unwrapped SignerIdentityReview after the decision
+     * @throws ValidationException on an empty ID, invalid decision or oversized note
+     * @throws \Assinafy\SDK\Exceptions\ApiException 400 when the review/document is not open; 404 when missing
+     */
+    public function reviewIdentityVerification(
+        string $documentId,
+        string $assignmentId,
+        string $signerId,
+        string $decision,
+        #[\SensitiveParameter] ?string $note = null
+    ): array {
+        if (!in_array($decision, [self::IDENTITY_REVIEW_APPROVED, self::IDENTITY_REVIEW_REJECTED], true)) {
+            throw new ValidationException('Identity review decision must be Approved or Rejected');
+        }
+        if ($note !== null && mb_strlen($note) > 2000) {
+            throw new ValidationException('Identity review note cannot exceed 2000 characters');
+        }
+
+        $payload = ['decision' => $decision];
+        if ($note !== null) {
+            $payload['note'] = $note;
+        }
+        $response = $this->httpClient->post(
+            $this->identityVerificationPath($documentId, $assignmentId, $signerId) . '/review',
+            $payload
+        );
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    private function identityVerificationPath(string $documentId, string $assignmentId, string $signerId): string
+    {
+        return 'documents/' . $this->pathSegment($documentId, 'document ID')
+            . '/assignments/' . $this->pathSegment($assignmentId, 'assignment ID')
+            . '/signers/' . $this->pathSegment($signerId, 'signer ID') . '/identity-verification';
+    }
+
     private function assertMethod(string $method): void
     {
         if (!in_array($method, [self::METHOD_VIRTUAL, self::METHOD_COLLECT], true)) {
@@ -800,6 +948,7 @@ class AssignmentResource extends AbstractResource
                         is_string($verification)
                         && is_string($notification)
                         && $verification !== self::VERIFICATION_DIGITAL_CERTIFICATE
+                        && $verification !== self::VERIFICATION_ID_DOCUMENT_FACE_MATCH_BASIC
                         && $verification !== $notification
                     ) {
                         throw new ValidationException(

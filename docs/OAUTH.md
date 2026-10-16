@@ -135,8 +135,8 @@ to `OAuthResource::DEFAULT_ISSUER` when you pass nothing.
 | `SCOPE_DOCUMENTS_WRITE` | `documents:write` | Create documents and send them for signature |
 | `SCOPE_TEMPLATES_READ` | `templates:read` | Read templates |
 | `SCOPE_TEMPLATES_WRITE` | `templates:write` | Create and change templates |
-| `SCOPE_ACCOUNT_READ` | `account:read` | Read the workspace profile, theme, logo and webhook subscription |
-| `SCOPE_WEBHOOKS_WRITE` | `webhooks:write` | Configure and deactivate the workspace webhook subscription |
+| `SCOPE_ACCOUNT_READ` | `account:read` | Read the workspace profile, theme, logo and webhook endpoints/subscription |
+| `SCOPE_WEBHOOKS_WRITE` | `webhooks:write` | Create, update and delete webhook endpoints, and configure/deactivate the legacy subscription |
 | `SCOPE_OPENID` | `openid` | Receive an `id_token` identifying the user |
 | `SCOPE_PROFILE` | `profile` | Read the user's name |
 | `SCOPE_EMAIL` | `email` | Read the user's email and whether it is verified |
@@ -188,7 +188,9 @@ because nothing else echoes one back.
 
 The `options` argument overrides `state`, `code_verifier`, `nonce`, `issuer`,
 `authorization_endpoint` and `resource`; every one has a correct default. Supply your own only
-when your framework owns that material.
+when your framework owns that material. Preserve the discovered `issuer` exactly. Scope entries
+follow the RFC 6749 token grammar: visible ASCII except double quote and backslash, with no spaces
+or control characters. New server-defined scope tokens remain accepted.
 
 If `client_id` or `redirect_uri` is wrong the user is **not** sent back to you — the authorization
 server shows an error on its own page, because redirecting to an unverified address would be
@@ -197,9 +199,9 @@ unsafe. Users stuck on an Assinafy error page usually mean one of those two valu
 ## Validate the callback and exchange the code
 
 `handleCallback()` is the security-critical step. It rejects a `state` that does not match the
-stored transaction and an `iss` that is not the expected authorization server before the code is
-sent anywhere, and turns a declined authorization into an exception. Consume the stored
-transaction exactly once.
+stored transaction and an `iss` that is not byte-identical to the stored issuer before the code is
+sent anywhere (including differences in trailing slashes), and turns a declined authorization into
+an exception. Consume the stored transaction exactly once.
 
 ```php
 use Assinafy\SDK\Exceptions\ApiException;

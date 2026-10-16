@@ -189,6 +189,88 @@ an in-flight document. Changing an unverified channel succeeds but rotates its a
 verification codes, invalidating earlier links/OTPs; call `assignments()->resend()` afterward.
 Certificated documents do not block channel updates.
 
+## Biometric identity verification
+
+Use the production API with the account's **ID Document + Face Match** feature. Register the
+signer's valid CPF, choose Email or WhatsApp notification, and estimate before assigning:
+
+```php
+use Assinafy\SDK\Resources\AssignmentResource;
+
+$signer = $client->signers()->create('Example Signer', 'signer@example.com', null, '52998224725');
+$signers = [[
+    'id' => $signer['id'],
+    'verification_method' => AssignmentResource::VERIFICATION_ID_DOCUMENT_FACE_MATCH_BASIC,
+    'notification_methods' => [AssignmentResource::NOTIFICATION_EMAIL],
+]];
+$estimate = $client->assignments()->estimateCost($documentId, $signers);
+if (!($estimate['has_sufficient_resources'] ?? false)) {
+    throw new RuntimeException($estimate['blocking_reason'] ?? 'Insufficient resources');
+}
+$assignment = $client->assignments()->create($documentId, $signers);
+$assignmentId = $assignment['id'];
+```
+
+After the assigned signer obtains their own access code and explicitly consents to biometric
+processing, open the hosted capture. Workspace credentials are not used for these signer calls:
+
+```php
+$session = $client->signerSession()->identityVerification($signerAccessCode);
+if ($session['can_start']) {
+    $session = $client->signerSession()->startIdentityVerification($signerAccessCode, true);
+}
+$captureUrl = $session['url'] ?? null;
+```
+
+When present, redirect to the exact capture URL, including its `#t=` fragment. It is a bearer
+credential: keep it out of logs and browser storage. Only a missing or Expired session can be
+started. Pending, InReview, Approved, Declined and Abandoned cannot be restarted; Declined or
+Abandoned requires a new document and assignment. Resending the invitation preserves the live
+session. The account is billed once per signer at assignment creation, with no restart fee.
+
+Follow the existing signer flow after capture: view the document, confirm data and submit signing
+values. InReview allows signing to continue. Once every signer has signed, the document stays
+`pending_identity_review` until all required reviews are approved.
+
+A workspace reviewer reads the verification and its available evidence:
+
+```php
+$review = $client->assignments()->identityVerification($documentId, $assignmentId, $signer['id']);
+if ($review['status'] === 'InReview' && in_array('face', $review['images'], true)) {
+    $faceBytes = $client->assignments()->identityVerificationImage(
+        $documentId,
+        $assignmentId,
+        $signer['id'],
+        'face',
+    );
+}
+```
+
+Images are `document_front`, `document_back`, `document_pdf` and `face`, as listed in the review.
+They are fetched from the provider, returned as JPEG/PNG/PDF bytes with `Cache-Control: no-store`,
+and stop being available once the review is decided. `evidence_available: false` can mean the
+provider retains no evidence or that it is not available yet. Directly approved evidence is in
+the `signer_identity_verified` activity.
+
+Submit only the decision selected by the authorized reviewer after examining the evidence:
+
+```php
+$decided = $client->assignments()->reviewIdentityVerification(
+    $documentId,
+    $assignmentId,
+    $signer['id'],
+    $reviewerDecision, // AssignmentResource::IDENTITY_REVIEW_APPROVED or IDENTITY_REVIEW_REJECTED
+    $reviewerNote,     // optional, at most 2000 characters
+);
+```
+
+Approval releases certification after all signatures and reviews are complete. Rejection cancels
+the document (`rejected_by_user`) and notifies every signer and copy receiver. The note is recorded
+in activity and sent to the provider, but never shown to the signer. Then use the ordinary
+artifact-download and signature-hash verification flow. The SDK returns provider status and
+payload fields unchanged; [the API reference](API_REFERENCE.md#assignment-schemas) describes all
+session and review response fields.
+
 ## List and search documents
 
 Paginated methods retain the API envelope and add a normalized `pagination` entry from response headers.
@@ -700,7 +782,7 @@ $endpoint = $client->webhooks()->createEndpoint(
     name: 'ERP',
     signingEnabled: true,
 );
-$secret = $client->webhooks()->endpointSecret($endpoint['id']);   // 'whsec_...'
+$secret = $endpoint['secret']; // Store immediately; OAuth cannot read or rotate it later.
 
 $client->webhooks()->updateEndpoint($endpoint['id'], ['is_active' => false]);  // pause
 $endpoints = $client->webhooks()->listEndpoints();

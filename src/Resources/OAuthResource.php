@@ -209,7 +209,7 @@ class OAuthResource extends AbstractResource
      *     {@see self::authorizationServerMetadata()} to avoid hardcoding them.
      * @return array<string, string> the transaction to persist
      * @throws ValidationException on a non-HTTPS or fragment-bearing redirect URI, an
-     *     empty scope list, a scope containing a space, or an out-of-grammar verifier
+     *     empty scope list, an invalid RFC 6749 scope token, or an out-of-grammar verifier
      */
     public function startAuthorization(
         string $redirectUri,
@@ -226,9 +226,9 @@ class OAuthResource extends AbstractResource
         // silently request two permissions — or one that does not exist.
         $requested = [];
         foreach ($scopes as $scope) {
-            if (!is_string($scope) || trim($scope) === '' || str_contains($scope, ' ')) {
+            if (!is_string($scope) || preg_match('/^[\x21\x23-\x5B\x5D-\x7E]+$/D', $scope) !== 1) {
                 throw new ValidationException(
-                    'OAuth scopes must be non-empty strings without spaces',
+                    'OAuth scopes must be non-empty RFC 6749 scope tokens',
                     ['scope' => $scope]
                 );
             }
@@ -242,9 +242,9 @@ class OAuthResource extends AbstractResource
             );
         }
 
-        $issuer = rtrim($this->stringOption($options, 'issuer') ?? self::DEFAULT_ISSUER, '/');
+        $issuer = $this->stringOption($options, 'issuer') ?? self::DEFAULT_ISSUER;
         $endpoint = $this->stringOption($options, 'authorization_endpoint')
-            ?? $issuer . '/oauth/authorize';
+            ?? rtrim($issuer, '/') . '/oauth/authorize';
         $state = $this->stringOption($options, 'state') ?? self::createState();
         $resource = $this->stringOption($options, 'resource') ?? $this->apiOrigin();
 
@@ -329,12 +329,9 @@ class OAuthResource extends AbstractResource
 
         // The authorization server advertises authorization_response_iss_parameter_supported,
         // so a missing `iss` is itself a reason to stop rather than something to tolerate.
-        $expectedIssuer = rtrim(
-            $this->stringOption($transaction, 'issuer') ?? self::DEFAULT_ISSUER,
-            '/'
-        );
+        $expectedIssuer = $this->stringOption($transaction, 'issuer') ?? self::DEFAULT_ISSUER;
         $issuer = $this->stringOption($query, 'iss');
-        if ($issuer === null || !hash_equals($expectedIssuer, rtrim($issuer, '/'))) {
+        if ($issuer === null || !hash_equals($expectedIssuer, $issuer)) {
             throw new ValidationException('OAuth callback issuer does not match the expected authorization server');
         }
 
@@ -690,19 +687,43 @@ class OAuthResource extends AbstractResource
      *
      * A new one is required for every connection attempt. {@see self::startAuthorization()}
      * calls this for you; use it directly only when your framework owns the session material.
+     * No authentication or HTTP request is involved.
+     * ```php
+     * $verifier = OAuthResource::createCodeVerifier();
+     * // A cryptographically random 43-character base64url string.
+     * ```
+     *
+     * @return string the verifier to store in the authorization transaction
      */
     public static function createCodeVerifier(): string
     {
         return self::base64Url(random_bytes(32));
     }
 
-    /** Derive the S256 challenge sent to the authorization server from a verifier. */
+    /**
+     * Derive the RFC 7636 S256 challenge locally, without authentication or an HTTP call.
+     * ```php
+     * OAuthResource::codeChallenge('dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk');
+     * // 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM'
+     * ```
+     *
+     * @param string $codeVerifier the verifier saved for this connection attempt
+     * @return string the base64url-encoded SHA-256 digest, without padding
+     */
     public static function codeChallenge(#[\SensitiveParameter] string $codeVerifier): string
     {
         return self::base64Url(hash('sha256', $codeVerifier, true));
     }
 
-    /** Generate the random per-attempt `state` that protects the callback against CSRF. */
+    /**
+     * Generate the per-attempt state locally, without authentication or an HTTP call.
+     * ```php
+     * $state = OAuthResource::createState();
+     * // A cryptographically random 43-character base64url string.
+     * ```
+     *
+     * @return string the state to store and compare with the callback
+     */
     public static function createState(): string
     {
         return self::base64Url(random_bytes(32));

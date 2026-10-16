@@ -78,6 +78,14 @@ final class LogRedactorTest extends TestCase
         );
     }
 
+    public function testRedactsBiometricCaptureLinkFragments(): void
+    {
+        $this->assertSame(
+            'https://verify.assinafy.com.br/c/session#t=' . LogRedactor::PLACEHOLDER,
+            LogRedactor::redactText('https://verify.assinafy.com.br/c/session#t=capture-token')
+        );
+    }
+
     public function testASecretHoldingAnArrayIsMaskedWholesaleRatherThanWalked(): void
     {
         $redacted = LogRedactor::redact(['token' => ['nested' => 'still-secret']]);

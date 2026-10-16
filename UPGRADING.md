@@ -1,8 +1,36 @@
 # Upgrading
 
-Install a published 2.x release with `composer require assinafy/php-sdk:^2.6`. Remove obsolete
+Install a published 2.x release with `composer require assinafy/php-sdk:^2.7`. Remove obsolete
 VCS/path repository overrides if they prevent Composer from resolving the Packagist package.
 Use the documentation shipped with the installed tag; `main` may include unreleased changes.
+
+## Upgrading to 2.7.0
+
+Biometric verification uses `AssignmentResource::VERIFICATION_ID_DOCUMENT_FACE_MATCH_BASIC`.
+Create or update the signer's valid CPF first, select Email or WhatsApp notification, and obtain
+explicit signer consent before `signerSession()->startIdentityVerification($code, true)`.
+Workspace review and evidence methods are on `assignments()`. The upload helper requires an
+existing signer ID for this verification method. See the complete flow in README.md.
+
+`listEndpoints()` accepts an optional exact URL; `deleteEndpointByUrl()` deletes that endpoint.
+Signed endpoint creation returns the secret in `secret`: OAuth applications must store it then,
+since later secret reads and rotations are unavailable to them.
+
+Pass the issuer exactly as authorization-server metadata publishes it. Authorization transactions
+preserve trailing slashes, and callback `iss` must match byte-for-byte. Scope tokens containing
+control characters, double quotes, backslashes or non-ASCII characters now raise
+`ValidationException`; new valid scope names remain accepted.
+
+Webhook event updates accept sparse PHP arrays and send their values as a JSON array.
+`pending_identity_review` now counts as fully signed and reports 100% signing progress; it still
+requires account review before the certified artifact is available. The SDK User-Agent is
+`Assinafy-PHP-SDK/v2.7.0`.
+
+## Upgrading to 2.6.2
+
+`signerDocuments()->list()` and `search()` require a string signer access code. Use the explicit
+`listAsWorkspace()` and `searchAsWorkspace()` methods with workspace API-key or Bearer credentials;
+passing `null` no longer switches authentication modes.
 
 ## Upgrading to 2.6.0
 
@@ -165,14 +193,19 @@ password responses. Legacy social URL builders are separate from marketplace OAu
 ## Webhook handling
 
 Use `$client->webhookEvents()` and `Support\WebhookEventParser`. Remove calls to
-`webhookVerifier()` and `WebhookVerifier::verify()`: Assinafy deliveries are unsigned.
+`webhookVerifier()` and `WebhookVerifier::verify()`. Enable signing on the endpoint and call
+`webhookEvents()->verifySignature()` with the raw body and its `whsec_` secret before parsing.
 `extractEvent()` decodes the envelope, `getEventType()` reads `event`, `getEventData()` reads
 `object`, `getEventPayload()` reads `payload`, and `getAccountId()` reads `account_id`.
 
 ```php
 $payload = file_get_contents('php://input');
 $parser = $client->webhookEvents();
-$event = is_string($payload) ? $parser->extractEvent($payload) : null;
+if (!is_string($payload) || !$parser->verifySignature($payload, getallheaders(), $endpointSecret)) {
+    http_response_code(401);
+    exit;
+}
+$event = $parser->extractEvent($payload);
 if ($event === null) {
     http_response_code(400);
     exit;
@@ -183,9 +216,11 @@ http_response_code(200);
 ```
 
 Use HTTPS, an unguessable endpoint path, request limits and idempotent processing. Registration
-requires URL, email, events and `is_active`; it replaces the workspace's single subscription.
-Use `deactivate()` to stop delivery and `activate()` to resume. A new workspace can return a
-subscription object with an empty URL; `get()` returns null only for empty/null response data.
+requires URL, email, events and `is_active`; the legacy methods update the account's oldest endpoint.
+Accounts can have one endpoint, or up to three on paid plans. Use `listEndpoints()`, `createEndpoint()`,
+`getEndpoint()`, `updateEndpoint()` and `deleteEndpoint()` to manage them independently.
+Use `deactivate()` to stop the oldest endpoint's delivery and `activate()` to resume it.
+A new workspace can return a subscription object with an empty URL; `get()` returns null only for empty/null response data.
 
 ## Document and signer behavior
 

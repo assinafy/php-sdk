@@ -160,13 +160,14 @@ notificação (como recebe o convite). O SDK valida a matriz antes de enviar a r
 | --- | --- | --- | --- |
 | `VERIFICATION_EMAIL` | `Email` | Email cadastrado no signatário | 0 |
 | `VERIFICATION_WHATSAPP` | `Whatsapp` | `whatsapp_phone_number` e assinatura paga | 0,45 |
+| `VERIFICATION_ID_DOCUMENT_FACE_MATCH_BASIC` | `Email` ou `Whatsapp` | Recurso ID Document + Face Match na conta e CPF válido em `government_id` | Tarifa por signatário retornada pela estimativa |
 | `VERIFICATION_DIGITAL_CERTIFICATE` | `Email` ou `Whatsapp` | Recurso Certificado Digital na conta (planos Standard e Pro), CPF/CNPJ em `government_id` e o signatário sozinho na sua etapa | 0,5 pela assinatura, além da notificação |
 
 `DigitalCertificate` cobre os certificados ICP-Brasil **A1** (arquivo de software no dispositivo) e
 **A3** (cartão ou token). Os dois usam esse mesmo valor e o mesmo payload — mudam apenas onde a
 chave privada fica guardada. A assinatura é concluída no navegador pela extensão Web PKI, então
-`signerSession()->sign()` não a finaliza e a API não publica operação de início/conclusão de
-certificado. O resultado é uma assinatura qualificada PAdES, baixável pelo artefato `pades`.
+`signerSession()->sign()` não a finaliza. O SDK não executa esse protocolo de navegador.
+O resultado é uma assinatura qualificada PAdES, baixável pelo artefato `pades`.
 Nos custos, ela aparece no breakdown sob o código `SignatureDigitalCertificate`.
 
 ### 4. Solicitar a assinatura
@@ -267,8 +268,9 @@ $activities = $client->documents()->activities($documentId);
 ```
 
 `ready`, `certificating` e `certificated` indicam conclusão pelos signatários. A certificação e os
-arquivos finais podem ficar disponíveis depois. Use webhooks e consulte o documento autenticado para
-confirmar o estado. Se precisar aguardar em um processo síncrono, limite o tempo:
+arquivos finais podem ficar disponíveis depois. `pending_identity_review` indica que todos assinaram,
+mas a certificação aguarda a revisão de identidade pela conta. Use webhooks e consulte o documento
+autenticado para confirmar o estado. Se precisar aguardar em um processo síncrono, limite o tempo:
 
 ```php
 $deadline = hrtime(true) + 60_000_000_000;
@@ -338,6 +340,39 @@ signatário com CPF/CNPJ e deixe esse signatário sozinho em sua etapa. A estima
 de certificado e notificação. A conclusão ICP-Brasil depende do fluxo da Assinafy; o SDK não expõe
 um protocolo de início/conclusão de certificado sem contrato publicado.
 
+## Verificação biométrica de identidade
+
+Na produção, `IdDocumentFaceMatchBasic` usa documento de identidade, foto do signatário com o
+documento e prova de vida. A conta precisa do recurso ID Document + Face Match, e o signatário
+precisa de um CPF válido em `government_id`. No plano de signatários dos passos 3–4, use
+`AssignmentResource::VERIFICATION_ID_DOCUMENT_FACE_MATCH_BASIC` com notificação Email ou Whatsapp.
+Crie o signatário com CPF antes da atribuição e consulte a estimativa para a tarifa vigente.
+
+Depois do consentimento explícito do signatário, use o código de acesso dele para abrir a captura:
+
+```php
+$state = $client->signerSession()->identityVerification($signerAccessCode);
+if ($state['can_start']) {
+    $state = $client->signerSession()->startIdentityVerification($signerAccessCode, true);
+}
+$captureUrl = $state['url'] ?? null;
+```
+
+Abra a URL retornada sem alterar o fragmento `#t=`; esse link é uma credencial e não deve ir para
+logs ou armazenamento do navegador. Após a captura, o signatário continua a visualização,
+confirmação de dados e assinatura dos passos 5–7. Uma sessão Expired pode ser reiniciada;
+Declined ou Abandoned exige novo documento e nova atribuição. Reenvios preservam a sessão ativa.
+
+Quando houver revisão, a conta usa `assignments()->identityVerification()` para ler o resultado,
+`identityVerificationImage()` para obter as imagens/PDF indicados em `images`, e
+`reviewIdentityVerification()` para enviar a decisão do revisor autorizado (`Approved` ou
+`Rejected`, nota opcional de até 2000 caracteres). As imagens só existem enquanto InReview.
+A aprovação libera a certificação quando todas as assinaturas e revisões terminarem; a rejeição
+cancela o documento e avisa signatários e destinatários de cópia, sem mostrar a nota.
+`pending_identity_review` mantém o progresso de assinatura em 100% até a revisão terminar.
+O [exemplo completo](docs/EXAMPLES.md#biometric-identity-verification) inclui criação, estimativa,
+captura, evidências, decisão e retorno ao fluxo de download e verificação.
+
 ## Templates e organização
 
 ```php
@@ -395,9 +430,13 @@ $endpoint = $client->webhooks()->createEndpoint(
     signingEnabled: true,
 );
 
-// Guarde o segredo como qualquer credencial; ele não está disponível para tokens OAuth.
-$secret = $client->webhooks()->endpointSecret($endpoint['id']); // 'whsec_...'
+// Guarde o segredo retornado na criação como qualquer credencial.
+$secret = $endpoint['secret']; // 'whsec_...'
 ```
+
+Aplicativos OAuth devem guardar o segredo na criação: não podem lê-lo nem rotacioná-lo depois.
+Se o perderem, excluam o endpoint e criem outro. Com API key ou sessão de usuário,
+`endpointSecret()` lê o segredo atual e `rotateEndpointSecret()` o substitui.
 
 No receptor, verifique a assinatura com o corpo **bruto** antes de decodificá-lo:
 
@@ -436,6 +475,7 @@ mudado.
 | `createEndpoint(...)` | `POST .../webhooks/endpoints` |
 | `updateEndpoint($id, $campos)` | `PUT .../webhooks/endpoints/{id}` (atualização parcial) |
 | `deleteEndpoint($id)` | `DELETE .../webhooks/endpoints/{id}` |
+| `listEndpoints($url)` / `deleteEndpointByUrl($url)` | `GET` / `DELETE .../webhooks/endpoints?url=...` (URL exata) |
 | `endpointSecret($id)` / `rotateEndpointSecret($id)` | `.../secret` e `.../secret/rotate` |
 | `dispatches()` / `retryDispatch($id)` | Histórico de entregas e reenvio |
 

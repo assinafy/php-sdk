@@ -8,6 +8,7 @@ use Assinafy\SDK\Configuration;
 use Assinafy\SDK\Exceptions\ValidationException;
 use Assinafy\SDK\Resources\AssignmentResource;
 use Assinafy\SDK\Tests\Unit\Support\FakeHttpClient;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 final class AssignmentResourceTest extends TestCase
@@ -121,6 +122,92 @@ final class AssignmentResourceTest extends TestCase
             ['id' => 's1', 'verification_method' => AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE],
             ['id' => 's2'],
         ]);
+    }
+
+    /** @return iterable<string, array{string, string, bool}> */
+    public static function verificationNotificationPairs(): iterable
+    {
+        yield 'email and email' => ['Email', 'Email', true];
+        yield 'email and whatsapp' => ['Email', 'Whatsapp', false];
+        yield 'whatsapp and email' => ['Whatsapp', 'Email', false];
+        yield 'whatsapp and whatsapp' => ['Whatsapp', 'Whatsapp', true];
+        yield 'certificate and email' => ['DigitalCertificate', 'Email', true];
+        yield 'certificate and whatsapp' => ['DigitalCertificate', 'Whatsapp', true];
+        yield 'biometric and email' => ['IdDocumentFaceMatchBasic', 'Email', true];
+        yield 'biometric and whatsapp' => ['IdDocumentFaceMatchBasic', 'Whatsapp', true];
+    }
+
+    #[DataProvider('verificationNotificationPairs')]
+    public function testVerificationNotificationPairing(string $verification, string $notification, bool $valid): void
+    {
+        $signer = [
+            'id' => 'signer-id',
+            'verification_method' => $verification,
+            'notification_methods' => [$notification],
+        ];
+        foreach (['create', 'estimateCost'] as $operation) {
+            $http = new FakeHttpClient();
+            $assignments = new AssignmentResource($http, new Configuration('key', 'acc'));
+            if ($valid) {
+                $http->queueJson(200, []);
+                $assignments->{$operation}('document-id', [$signer]);
+                $this->assertSame([$signer], $http->lastCall()['body']['signers']);
+            } else {
+                try {
+                    $assignments->{$operation}('document-id', [$signer]);
+                    $this->fail('Expected an incompatible verification/notification pair to be rejected');
+                } catch (ValidationException) {
+                    $this->assertSame([], $http->calls);
+                }
+            }
+        }
+    }
+
+    public function testIdentityReviewRoutesEncodeIdsAndUnwrapResponses(): void
+    {
+        $review = ['id' => 'verification-id', 'status' => 'InReview', 'images' => ['document_front']];
+        $this->http->queueJson(200, $review)->queueRaw(200, '%PDF-evidence')->queueJson(200, $review);
+        $path = 'documents/doc%2Fid/assignments/assignment%20id/signers/signer%3Fid/identity-verification';
+
+        $this->assertSame($review, $this->assignments->identityVerification('doc/id', 'assignment id', 'signer?id'));
+        $this->assertSame($path, $this->http->lastCall()['uri']);
+        $this->assertSame('%PDF-evidence', $this->assignments->identityVerificationImage(
+            'doc/id',
+            'assignment id',
+            'signer?id',
+            'document_pdf'
+        ));
+        $this->assertSame($path . '/images/document_pdf', $this->http->lastCall()['uri']);
+        $this->assertSame($review, $this->assignments->reviewIdentityVerification(
+            'doc/id',
+            'assignment id',
+            'signer?id',
+            'Approved',
+            'Checked by reviewer'
+        ));
+        $this->assertSame($path . '/review', $this->http->lastCall()['uri']);
+        $this->assertSame(['decision' => 'Approved', 'note' => 'Checked by reviewer'], $this->http->lastCall()['body']);
+    }
+
+    public function testIdentityReviewCanRejectWithoutANote(): void
+    {
+        $this->http->queueJson(200, ['status' => 'Declined']);
+        $this->assignments->reviewIdentityVerification('d', 'a', 's', 'Rejected');
+        $this->assertSame(['decision' => 'Rejected'], $this->http->lastCall()['body']);
+    }
+
+    public function testIdentityReviewRejectsInvalidInputsBeforeTheRequest(): void
+    {
+        foreach ([['approved', null], ['Approved', str_repeat('é', 2001)]] as [$decision, $note]) {
+            try {
+                $this->assignments->reviewIdentityVerification('d', 'a', 's', $decision, $note);
+                $this->fail('Expected an invalid review to be rejected');
+            } catch (ValidationException) {
+                $this->assertSame([], $this->http->calls);
+            }
+        }
+        $this->expectException(ValidationException::class);
+        $this->assignments->identityVerificationImage('d', 'a', 's', '../secret');
     }
 
     public function testCreateRejectsInvalidMethod(): void

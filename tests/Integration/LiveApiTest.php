@@ -1076,10 +1076,19 @@ final class LiveApiTest extends TestCase
             }
         }
 
-        if (getenv('ASSINAFY_STATEFUL_TESTS') !== '1') {
-            return;
+        if (getenv('ASSINAFY_DESTRUCTIVE_TESTS') !== '1') {
+            $this->markTestSkipped('Set ASSINAFY_DESTRUCTIVE_TESTS=1 for disposable webhook endpoint tests');
         }
+
+        $account = $this->client->accounts()->create('SDK webhook endpoints ' . uniqid());
+        $disposable = AssinafyClient::create(
+            (string) getenv('ASSINAFY_API_KEY'),
+            (string) $account['id'],
+            $this->client->getConfig()->getBaseUrl()
+        );
+        $webhooks = $disposable->webhooks();
         try {
+            $this->assertSame([], $webhooks->listEndpoints());
             $created = $webhooks->createEndpoint(
                 'https://example.com/assinafy-sdk-live/' . bin2hex(random_bytes(8)),
                 'webhooks@example.com',
@@ -1088,21 +1097,15 @@ final class LiveApiTest extends TestCase
                 false,
                 true
             );
-        } catch (ApiException $e) {
-            if ($e->getStatusCode() === 403) {
-                $this->markTestSkipped('The account has no free webhook endpoint slot on its plan');
-            }
-            throw $e;
-        }
-
-        try {
+            $endpointId = (string) $created['id'];
+            $this->assertSame($endpointId, $webhooks->listEndpoints()[0]['id']);
+            $this->assertSame($endpointId, $webhooks->getEndpoint($endpointId)['id']);
             $this->assertTrue($created['signing_enabled']);
-            $secret = $webhooks->endpointSecret((string) $created['id']);
+            $secret = $webhooks->endpointSecret($endpointId);
             $this->assertStringStartsWith('whsec_', $secret);
-            $rotated = $webhooks->rotateEndpointSecret((string) $created['id']);
+            $rotated = $webhooks->rotateEndpointSecret($endpointId);
             $this->assertNotSame($secret, $rotated);
 
-            // A sample delivery signed with the rotated secret verifies; the old one no longer does.
             $body = '{"event":"document_ready","object":{"id":"document-id"}}';
             $id = 'msg_' . bin2hex(random_bytes(8));
             $timestamp = (string) time();
@@ -1115,13 +1118,18 @@ final class LiveApiTest extends TestCase
                     hash_hmac('sha256', "{$id}.{$timestamp}.{$body}", $key, true)
                 ),
             ];
-            $this->assertTrue($this->client->webhookEvents()->verifySignature($body, $headers, $rotated));
-            $this->assertFalse($this->client->webhookEvents()->verifySignature($body, $headers, $secret));
-            $this->assertFalse(
-                $webhooks->updateEndpoint((string) $created['id'], ['signing_enabled' => false])['signing_enabled']
-            );
+            $this->assertTrue($disposable->webhookEvents()->verifySignature($body, $headers, $rotated));
+            $this->assertFalse($disposable->webhookEvents()->verifySignature($body, $headers, $secret));
+            $updated = $webhooks->updateEndpoint($endpointId, [
+                'events' => [7 => WebhookResource::EVENT_SIGNER_SIGNED],
+                'signing_enabled' => false,
+            ]);
+            $this->assertSame([WebhookResource::EVENT_SIGNER_SIGNED], $updated['events']);
+            $this->assertFalse($updated['signing_enabled']);
+            $webhooks->deleteEndpoint($endpointId);
+            $this->assertSame([], $webhooks->listEndpoints());
         } finally {
-            $webhooks->deleteEndpoint((string) $created['id']);
+            $disposable->accounts()->delete(true);
         }
     }
 

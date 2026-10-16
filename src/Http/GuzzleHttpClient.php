@@ -526,6 +526,8 @@ class GuzzleHttpClient implements HttpClientInterface
                 'POST verify',
                 'POST signature',
                 'GET signers/self',
+                'GET signers/identity-verification',
+                'POST signers/identity-verification',
                 'PUT signers/accept-terms',
                 'PUT signers/documents/sign-multiple',
                 'PUT signers/documents/decline-multiple',

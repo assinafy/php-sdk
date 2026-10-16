@@ -360,9 +360,9 @@ class AssinafyClient
      *     (or phone)?, verification_method?, notification_methods?, step? }`
      *
      * Signers without an `id` are created via the API; signers found by email (when an email
-     * is supplied) are reused. DigitalCertificate entries must instead supply an existing
-     * signer ID whose government_id was set first. Returns the created document, the assignment,
-     * and the resolved signer IDs.
+     * is supplied) are reused. DigitalCertificate and IdDocumentFaceMatchBasic entries must
+     * instead supply an existing signer ID whose government_id was set first. Returns the
+     * created document, the assignment, and the resolved signer IDs.
      *
      * Example call (the helper composes the multipart upload and JSON requests):
      * ```php
@@ -691,6 +691,11 @@ class AssinafyClient
                             . 'set government_id with signers()->update() first'
                         );
                     }
+                    if ($contactRequirements['identity_document']) {
+                        throw new \InvalidArgumentException(
+                            'Identity-document workflows require an existing signer ID with government_id set'
+                        );
+                    }
                     if ($contactRequirements['email'] && $email === null) {
                         throw new \InvalidArgumentException(
                             'Email verification or notification requires the signer email'
@@ -746,7 +751,7 @@ class AssinafyClient
 
     /**
      * @param array<string, mixed> $signer
-     * @return array{email: bool, phone: bool, digital_certificate: bool}
+     * @return array{email: bool, phone: bool, digital_certificate: bool, identity_document: bool}
      */
     private function validateWorkflowSignerOptions(#[\SensitiveParameter] array $signer): array
     {
@@ -784,6 +789,7 @@ class AssinafyClient
             && $notificationChannels !== null
             && $notificationChannels !== []
             && $verification !== AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE
+            && $verification !== AssignmentResource::VERIFICATION_ID_DOCUMENT_FACE_MATCH_BASIC
             && $verification !== $notificationChannels[0]
         ) {
             throw new \InvalidArgumentException(
@@ -809,6 +815,8 @@ class AssinafyClient
                 || in_array(AssignmentResource::NOTIFICATION_WHATSAPP, $notificationChannels, true),
             'digital_certificate' => $verification
                 === AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE,
+            'identity_document' => $verification
+                === AssignmentResource::VERIFICATION_ID_DOCUMENT_FACE_MATCH_BASIC,
         ];
     }
 

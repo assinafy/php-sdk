@@ -30,6 +30,7 @@ class DocumentResource extends AbstractResource
     public const STATUS_METADATA_PROCESSING = 'metadata_processing';
     public const STATUS_METADATA_READY = 'metadata_ready';
     public const STATUS_PENDING_SIGNATURE = 'pending_signature';
+    public const STATUS_PENDING_IDENTITY_REVIEW = 'pending_identity_review';
     public const STATUS_READY = 'ready';
     public const STATUS_EXPIRED = 'expired';
     public const STATUS_CERTIFICATING = 'certificating';
@@ -42,6 +43,7 @@ class DocumentResource extends AbstractResource
     public const READY_STATUSES = [
         self::STATUS_METADATA_READY,
         self::STATUS_PENDING_SIGNATURE,
+        self::STATUS_PENDING_IDENTITY_REVIEW,
         self::STATUS_READY,
         self::STATUS_CERTIFICATING,
         self::STATUS_CERTIFICATED,
@@ -57,6 +59,7 @@ class DocumentResource extends AbstractResource
 
     /** Statuses that mean every signer has completed the assignment. */
     private const FULLY_SIGNED_STATUSES = [
+        self::STATUS_PENDING_IDENTITY_REVIEW,
         self::STATUS_READY,
         self::STATUS_CERTIFICATING,
         self::STATUS_CERTIFICATED,
@@ -1107,8 +1110,8 @@ class DocumentResource extends AbstractResource
      * Poll `GET /documents/{id}` until the document reaches a usable status.
      *
      * Client-side helper, not an API endpoint. Page rendering after {@see self::upload()}
-     * is asynchronous, and an assignment cannot be created until it finishes — this bridges
-     * that gap:
+     * is asynchronous. Collect assignments need prepared pages; virtual assignments can
+     * also be created before metadata processing finishes:
      * ```php
      * $document = $client->documents()->upload('/path/contract.pdf');
      * $ready    = $client->documents()->waitUntilReady($document['id']);
@@ -1199,7 +1202,8 @@ class DocumentResource extends AbstractResource
     /**
      * `true` once every signer has completed, including while certification is in progress.
      *
-     * Client-side helper over {@see self::get()} — costs one API call. True for `ready`,
+     * Client-side helper over {@see self::get()} — costs one API call. True for
+     * `pending_identity_review`, `ready`,
      * `certificating` and `certificated`, so it answers "is everyone done signing?" rather
      * than "is the certified PDF downloadable?". For the latter, compare `status` against
      * {@see self::STATUS_CERTIFICATED} directly.
@@ -1209,7 +1213,7 @@ class DocumentResource extends AbstractResource
      * Authentication: configured API key or workspace Bearer token (`documents:read` for OAuth).
      * ```php
      * $fullySigned = $client->documents()->isFullySigned('document-id');
-     * // true for ready/certificating/certificated, false for a pending document.
+     * // true while identity review or certification remains, after everyone has signed.
      * ```
      *
      * @param string $documentId the document ID to read
@@ -1233,7 +1237,7 @@ class DocumentResource extends AbstractResource
      * Request: as {@see self::get()}; only `status` and `assignment` are read.
      *
      * Response (computed locally, ready for a progress bar):
-     * ```
+     * ```php
      * ['signed' => 1, 'total' => 3, 'pending' => 2, 'percentage' => 33.33]
      * ```
      *
@@ -1241,8 +1245,11 @@ class DocumentResource extends AbstractResource
      * the API prunes assignment items after certification, so counting them would
      * otherwise regress to 0%.
      *
-     * A document with no assignment yields `total => 0` and `percentage => 0.0`.
+     * Before a fully-signed status, a document without an assignment yields `total => 0`
+     * and `percentage => 0.0`. Identity review can hold certification after signing reaches 100%.
      *
+     * Authentication: configured API key or workspace Bearer token (`documents:read` for OAuth).
+     * @param string $documentId the document ID to read
      * @return array{signed:int,total:int,pending:int,percentage:float}
      * @throws ValidationException when `$documentId` is empty
      */

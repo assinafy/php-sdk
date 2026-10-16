@@ -121,6 +121,13 @@ final class GuzzleHttpClientTest extends TestCase
                     'progress' => fn () => $documents->getSigningProgress('d1'),
                     'signerSelf' => fn () => $client->signerSession()->self('signer-code'),
                     'signerTerms' => fn () => $client->signerSession()->acceptTerms('signer-code'),
+                    'signerIdentityStatus' => fn () => $client->signerSession()->identityVerification('signer-code'),
+                    'signerIdentityStart' => fn () => $client->signerSession()->startIdentityVerification('signer-code', true),
+                    'identityReview' => fn () => $client->assignments()->identityVerification('d1', 'a1', 's1'),
+                    'identityEvidence' => fn () => $client->assignments()->identityVerificationImage('d1', 'a1', 's1', 'face'),
+                    'identityDecision' => fn () => $client->assignments()->reviewIdentityVerification('d1', 'a1', 's1', 'Approved'),
+                    'webhookUrlLookup' => fn () => $client->webhooks()->listEndpoints('https://example.com/hook'),
+                    'webhookUrlDelete' => fn () => $client->webhooks()->deleteEndpointByUrl('https://example.com/hook'),
                     'signerVerify' => fn () => $client->signerSession()->verifyCode('signer-code', '123456'),
                     'signerConfirm' => fn () => $client->signerSession()->confirmData('d1', 'signer-code', [
                         'full_name' => 'Example Signer', 'has_accepted_terms' => true,
@@ -141,7 +148,7 @@ final class GuzzleHttpClientTest extends TestCase
                         ['field_id' => 'f1', 'value' => 'Example'],
                     ], 'signer-code'),
                 ];
-                foreach (['Email', 'Whatsapp', 'DigitalCertificate'] as $verification) {
+                foreach (['Email', 'Whatsapp', 'DigitalCertificate', 'IdDocumentFaceMatchBasic'] as $verification) {
                     $signers = [['id' => 's1', 'verification_method' => $verification]];
                     $operations['estimate' . $verification] = fn () => $client->assignments()->estimateCost('d1', $signers);
                     $operations['assign' . $verification] = fn () => $client->assignments()->create('d1', $signers);
@@ -151,7 +158,7 @@ final class GuzzleHttpClientTest extends TestCase
                     $data = ['id' => 'd1', 'status' => 'metadata_ready'];
                     $body = json_encode(['status' => 200, 'message' => '', 'data' => $data], JSON_THROW_ON_ERROR);
                     $contentType = 'application/json';
-                    if (in_array($name, ['download', 'thumbnail', 'page', 'signerImage', 'signerDownload'], true)) {
+                    if (in_array($name, ['download', 'thumbnail', 'page', 'signerImage', 'signerDownload', 'identityEvidence'], true)) {
                         $isPdf = in_array($name, ['download', 'signerDownload'], true);
                         $body = $isPdf ? '%PDF-1.4 binary' : 'image-bytes';
                         $contentType = $isPdf ? 'application/pdf' : 'image/jpeg';

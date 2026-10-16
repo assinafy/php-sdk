@@ -24,6 +24,7 @@ final class LogRedactor
         'newpassword',
         'currentpassword',
         'token',
+        't',
         'accesstoken',
         'refreshtoken',
         'apikey',

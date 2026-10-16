@@ -5,6 +5,23 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-10-16
+
+### Fixed
+
+- Compare OAuth callback issuers exactly, including trailing slashes, and preserve the configured issuer identifier in authorization transactions.
+- Validate OAuth scope tokens against RFC 6749 syntax while accepting new server-defined scopes.
+- Send webhook endpoint event updates as JSON arrays when PHP keys are sparse.
+- Recognize `pending_identity_review` as prepared and fully signed while certification awaits review.
+
+### Added
+
+- `IdDocumentFaceMatchBasic` verification for assignments, templates, cost estimates and the upload workflow, with Email or WhatsApp notifications.
+- Signer identity-verification status and explicit-consent capture sessions through `identityVerification()` and `startIdentityVerification()`.
+- Workspace identity-review status, evidence downloads and approval/rejection through assignment resource methods.
+- Exact-URL webhook lookup with `listEndpoints($url)` and deletion with `deleteEndpointByUrl($url)`.
+- Constants for the five identity-verification and identity-review webhook events; biometric capture-link tokens are redacted from diagnostics.
+
 ## [2.6.2] - 2026-10-11
 
 ### Changed

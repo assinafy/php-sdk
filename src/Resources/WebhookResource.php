@@ -37,6 +37,11 @@ class WebhookResource extends AbstractResource
     public const EVENT_SIGNER_EMAIL_VERIFIED = 'signer_email_verified';
     public const EVENT_SIGNER_WHATSAPP_VERIFIED = 'signer_whatsapp_verified';
     public const EVENT_SIGNER_DATA_CONFIRMED = 'signer_data_confirmed';
+    public const EVENT_SIGNER_IDENTITY_VERIFIED = 'signer_identity_verified';
+    public const EVENT_SIGNER_IDENTITY_VERIFICATION_FAILED = 'signer_identity_verification_failed';
+    public const EVENT_SIGNER_IDENTITY_REVIEW_REQUIRED = 'signer_identity_review_required';
+    public const EVENT_SIGNER_IDENTITY_REVIEW_APPROVED = 'signer_identity_review_approved';
+    public const EVENT_SIGNER_IDENTITY_REVIEW_REJECTED = 'signer_identity_review_rejected';
     public const EVENT_SIGNER_SIGNED = 'signer_signed_document';
     public const EVENT_SIGNER_VIEWED = 'signer_viewed_document';
     public const EVENT_SIGNER_REJECTED = 'signer_rejected_document';
@@ -197,7 +202,7 @@ class WebhookResource extends AbstractResource
      * Request/Response: as {@see self::get()} then {@see self::register()}.
      *
      * Response (unwrapped `data` from the register call):
-     * ```
+     * ```php
      * [
      *   'events'     => ['document_ready', 'signer_signed_document'],
      *   'is_active'  => true,
@@ -232,7 +237,8 @@ class WebhookResource extends AbstractResource
      * List the account's webhook endpoints, oldest first.
      * `GET /accounts/{account_id}/webhooks/endpoints`
      *
-     * Request: no parameters. OAuth scope: `account:read`.
+     * Authentication: configured API key or workspace Bearer token (OAuth scope account:read).
+     * Request: no body. Optional exact-URL filter: ['url' => 'https://example.com/webhooks/assinafy'].
      *
      * Example response (SDK return; a direct list, no pagination):
      * ```php
@@ -251,11 +257,19 @@ class WebhookResource extends AbstractResource
      * ]
      * ```
      *
+     * @param string|null $url return only the endpoint with this exact URL; null lists every endpoint
      * @return array<int, array<string, mixed>>
+     * @throws ValidationException when the optional URL is invalid
      */
-    public function listEndpoints(): array
+    public function listEndpoints(#[\SensitiveParameter] ?string $url = null): array
     {
-        $response = $this->httpClient->get($this->accountPath('webhooks/endpoints'));
+        if ($url !== null) {
+            $this->assertUrl($url);
+        }
+        $response = $this->httpClient->get(
+            $this->accountPath('webhooks/endpoints'),
+            $url === null ? [] : ['url' => $url]
+        );
 
         return $this->extractData($response->getData() ?? []);
     }
@@ -266,7 +280,8 @@ class WebhookResource extends AbstractResource
      *
      * An account holds 1 endpoint, or up to 3 on paid plans; one past the limit returns
      * `403`. Each endpoint needs a distinct `url` (`400` otherwise). With `$signingEnabled`,
-     * the API generates a `whsec_` secret — read it with {@see self::endpointSecret()}.
+     * the API generates a `whsec_` secret. The published create response includes `secret`;
+     * store it immediately for OAuth apps, which cannot call {@see self::endpointSecret()}.
      * OAuth scope: `webhooks:write`.
      *
      * Request body:
@@ -293,6 +308,7 @@ class WebhookResource extends AbstractResource
      *     'signing_enabled' => true,
      *     'created_at' => '2026-10-01T12:00:00Z',
      *     'updated_at' => '2026-10-01T12:00:00Z',
+     *     'secret' => 'whsec_<base64-key>', // present when signing_enabled is true
      * ]
      * ```
      *
@@ -300,6 +316,8 @@ class WebhookResource extends AbstractResource
      * @param string            $email  address alerted when deliveries fail
      * @param array<int, mixed> $events event type IDs; when empty, {@see DEFAULT_EVENTS} is sent
      * @param string|null       $name   label telling endpoints apart
+     * @param bool              $isActive whether to deliver subscribed events
+     * @param bool              $signingEnabled whether deliveries carry an HMAC signature
      * @return array<string, mixed> the created endpoint
      * @throws ValidationException on a non-absolute URL, a malformed email or a non-string event
      * @throws \Assinafy\SDK\Exceptions\ApiException 403 past the plan's endpoint limit,
@@ -430,6 +448,7 @@ class WebhookResource extends AbstractResource
         }
         if (isset($changes['events'])) {
             $this->assertEvents($changes['events']);
+            $changes['events'] = array_values($changes['events']);
         }
 
         $response = $this->httpClient->put($this->endpointPath($endpointId), $changes);
@@ -454,6 +473,31 @@ class WebhookResource extends AbstractResource
     public function deleteEndpoint(string $endpointId): array
     {
         $response = $this->httpClient->delete($this->endpointPath($endpointId));
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    /**
+     * Delete the endpoint whose registered URL matches exactly and free its slot.
+     * `DELETE /accounts/{accountId}/webhooks/endpoints`
+     *
+     * Authentication: API key or workspace Bearer token (OAuth scope webhooks:write).
+     * Query: ['url' => 'https://example.com/hooks/assinafy']; no request body.
+     * The endpoint must belong to the configured workspace. Query strings are part of the URL.
+     * ```php
+     * $client->webhooks()->deleteEndpointByUrl('https://example.com/hooks/assinafy');
+     * // SDK response: [] (the unwrapped data array).
+     * ```
+     *
+     * @param string $url the exact registered HTTP(S) URL
+     * @return array<array-key, mixed> the unwrapped empty data array
+     * @throws ValidationException when the URL is invalid
+     * @throws \Assinafy\SDK\Exceptions\ApiException 404 when no endpoint uses this URL
+     */
+    public function deleteEndpointByUrl(#[\SensitiveParameter] string $url): array
+    {
+        $this->assertUrl($url);
+        $response = $this->httpClient->delete($this->accountPath('webhooks/endpoints'), [], ['url' => $url]);
 
         return $this->extractData($response->getData() ?? []);
     }

@@ -38,6 +38,32 @@ final class SignerSessionResourceTest extends TestCase
         $this->session->self('   ');
     }
 
+    public function testIdentityVerificationUsesSignerCredentialsAndPreservesCaptureUrl(): void
+    {
+        $status = ['can_start' => true, 'status' => null, 'url' => null, 'expires_at' => null, 'completed_at' => null];
+        $capture = ['id' => 'session-id', 'url' => 'https://verify.assinafy.com.br/c/session#t=token', 'expires_at' => null];
+        $this->http->queueJson(200, $status)->queueJson(200, $capture);
+
+        $this->assertSame($status, $this->session->identityVerification('CODE'));
+        $this->assertSame('GET', $this->http->lastCall()['method']);
+        $this->assertSame($capture, $this->session->startIdentityVerification('CODE', true));
+        $call = $this->http->lastCall();
+        $this->assertSame('POST', $call['method']);
+        $this->assertSame('signers/identity-verification', $call['uri']);
+        $this->assertSame(['signer-access-code' => 'CODE'], $call['query']);
+        $this->assertSame(['consent' => true], $call['body']);
+    }
+
+    public function testIdentityVerificationRequiresExplicitConsent(): void
+    {
+        try {
+            $this->session->startIdentityVerification('CODE', false);
+            $this->fail('Expected missing consent to be rejected');
+        } catch (ValidationException) {
+            $this->assertSame([], $this->http->calls);
+        }
+    }
+
     public function testAcceptTerms(): void
     {
         $this->http->queueJson(200, ['has_accepted_terms' => true]);

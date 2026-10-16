@@ -262,6 +262,19 @@ class SignerDocumentResource extends AbstractResource
      * workspace credentials instead of a signer access code. The signer must belong to the
      * configured workspace.
      *
+     * Request: no body; query `['page' => 1, 'per-page' => 20]`.
+     * ```php
+     * $result = $client->signerDocuments()->listAsWorkspace('signer-id', ['per-page' => 20]);
+     * // Complete SDK response when this signer has no documents:
+     * [
+     *     'status' => 200, 'message' => 'Success', 'data' => [],
+     *     'pagination' => ['current_page' => 1, 'page_count' => 0, 'per_page' => 20, 'total_count' => 0],
+     * ]
+     * ```
+     * Non-empty `data` contains the complete document arrays shown in {@see self::list()}.
+     * OAuth requires `documents:read`.
+     *
+     * @param string $signerId the workspace signer ID
      * @param array<string, scalar> $filters optional `page` and `per-page`
      * @return array{status?: int, message?: string, data?: array<int, array<string, mixed>>,
      *     pagination?: array{current_page: int, page_count: int, per_page: int, total_count: int}}
@@ -343,6 +356,16 @@ class SignerDocumentResource extends AbstractResource
      * workspace credentials instead of a signer access code. The signer must belong to the
      * configured workspace.
      *
+     * Request: no body; query `['search' => 'agreement']`.
+     * ```php
+     * $result = $client->signerDocuments()->searchAsWorkspace('signer-id', 'agreement');
+     * // Complete SDK response when there are no matches:
+     * []
+     * ```
+     * Matching document arrays have the shape shown in {@see self::search()}.
+     * OAuth requires `documents:read`.
+     *
+     * @param string $signerId the workspace signer ID
      * @param string $term substring to match against the document name
      * @return array<int, array<string, mixed>>
      * @throws ValidationException when the signer ID is blank, or the client was built with

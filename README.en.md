@@ -361,13 +361,14 @@ before sending the request.
 | --- | --- | --- | --- |
 | `VERIFICATION_EMAIL` | `Email` | An email address on the signer | 0 |
 | `VERIFICATION_WHATSAPP` | `Whatsapp` | `whatsapp_phone_number` and a paid subscription | 0.45 |
+| `VERIFICATION_ID_DOCUMENT_FACE_MATCH_BASIC` | `Email` or `Whatsapp` | Account ID Document + Face Match feature and valid CPF in `government_id` | Per-signer fee returned by the estimate |
 | `VERIFICATION_DIGITAL_CERTIFICATE` | `Email` or `Whatsapp` | The account's Digital Certificate feature (Standard and Pro plans), a CPF/CNPJ in `government_id`, and the signer alone in its step | 0.5 for the signature, on top of its notification |
 
 `DigitalCertificate` covers the ICP-Brasil **A1** (a software file on the device) and **A3** (a
 smart card or token) certificates. Both use this one value and the same payload — they differ only
 in where the private key lives. The signature is completed in the browser through the Web PKI
-extension, so `signerSession()->sign()` cannot finish it and the API publishes no certificate
-start/complete operation. The result is a qualified PAdES signature, downloadable as the `pades`
+extension, so `signerSession()->sign()` cannot finish it. The SDK does not implement that browser
+protocol. The result is a qualified PAdES signature, downloadable as the `pades`
 artifact and billed in the breakdown under `SignatureDigitalCertificate`.
 
 Exactly one notification method is allowed per signer; an explicit empty list is preserved rather
@@ -526,7 +527,8 @@ $signerDocuments = $public->signerDocuments()->list($signerId, $accessCode);
 
 ### 7. Monitor progress
 
-Use the document as the source of truth and webhooks for prompt updates:
+Use the document as the source of truth and webhooks for prompt updates.
+`pending_identity_review` means everyone has signed while certification awaits account identity review:
 
 ```php
 $document = $client->documents()->get($documentId);
@@ -586,6 +588,39 @@ $public = AssinafyClient::forAuth(Configuration::DEFAULT_BASE_URL);
 $verification = $public->documents()->verify($signatureHash);
 $publicDocument = $public->documents()->publicInfo($documentId);
 ```
+
+## Biometric identity verification
+
+On production, `IdDocumentFaceMatchBasic` combines government-ID capture, a photo of the signer
+holding it, and liveness. The account needs ID Document + Face Match and the signer needs a valid
+CPF in `government_id`. In steps 4–5, use
+`AssignmentResource::VERIFICATION_ID_DOCUMENT_FACE_MATCH_BASIC` with Email or WhatsApp notification.
+Create the signer with their CPF first and use the cost estimate for the current per-signer fee.
+
+After explicit signer consent, open capture with their signer access code:
+
+```php
+$state = $client->signerSession()->identityVerification($signerAccessCode);
+if ($state['can_start']) {
+    $state = $client->signerSession()->startIdentityVerification($signerAccessCode, true);
+}
+$captureUrl = $state['url'] ?? null;
+```
+
+Open that URL unchanged, including `#t=`; it is a bearer credential and must stay out of logs and
+browser storage. After capture, continue the document view, data confirmation and signing steps.
+Expired sessions may restart; Declined/Abandoned require a new document and assignment. Resends
+preserve live sessions.
+
+For InReview results, the workspace uses `assignments()->identityVerification()` to read the
+review, `identityVerificationImage()` to fetch listed images/PDF, and
+`reviewIdentityVerification()` to submit the authorized reviewer's `Approved` or `Rejected`
+decision and optional note (max 2000 characters). Images are available only while InReview.
+Approval releases certification after all signatures and reviews; rejection cancels the document
+and notifies signers and copy receivers without showing the note. `pending_identity_review`
+retains 100% signing progress until review completes. See the
+[complete example](docs/EXAMPLES.md#biometric-identity-verification) for creation, estimates,
+capture, evidence, decisions and the return to artifact download and verification.
 
 ## Organize documents with tags
 
@@ -672,9 +707,13 @@ $endpoint = $client->webhooks()->createEndpoint(
     signingEnabled: true,
 );
 
-// Store it like any credential. OAuth access tokens cannot read it.
-$secret = $client->webhooks()->endpointSecret($endpoint['id']); // 'whsec_...'
+// Store the secret returned at creation like any credential.
+$secret = $endpoint['secret']; // 'whsec_...'
 ```
+
+OAuth applications must store the secret at creation; they cannot read or rotate it later.
+If it is lost, delete the endpoint and create another. API-key and user-session clients can read
+it with `endpointSecret()` and replace it with `rotateEndpointSecret()`.
 
 In the receiver, verify the **raw** body before decoding it:
 
@@ -711,6 +750,7 @@ acting on state that may have changed.
 | `createEndpoint(...)` | `POST .../webhooks/endpoints` |
 | `updateEndpoint($id, $changes)` | `PUT .../webhooks/endpoints/{id}` (partial update) |
 | `deleteEndpoint($id)` | `DELETE .../webhooks/endpoints/{id}` |
+| `listEndpoints($url)` / `deleteEndpointByUrl($url)` | `GET` / `DELETE .../webhooks/endpoints?url=...` (exact URL) |
 | `endpointSecret($id)` / `rotateEndpointSecret($id)` | `.../secret` and `.../secret/rotate` |
 | `dispatches()` / `retryDispatch($id)` | Delivery history and forced redelivery |
 
@@ -867,6 +907,7 @@ export ASSINAFY_STATEFUL_TESTS=1
 export ASSINAFY_DESTRUCTIVE_TESTS=1
 ```
 
+Signed endpoint lifecycle checks use a fresh disposable account under `ASSINAFY_DESTRUCTIVE_TESTS=1`.
 Enable only the category whose side effects are acceptable. The live suite never deletes the
 configured account or supplied API key. Login/reset completion, OTP completion, social-provider
 flows, password changes, and API-key deletion need the corresponding disposable credentials,

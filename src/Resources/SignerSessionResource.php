@@ -578,6 +578,79 @@ class SignerSessionResource extends AbstractResource
         return $this->extractData($response->getData() ?? []);
     }
 
+    /**
+     * Read the current signer's identity-document verification state.
+     * `GET /signers/identity-verification`
+     *
+     * Authentication: signer access code only. Query: ['signer-access-code' => '<access-code>'];
+     * no body. Requires an IdDocumentFaceMatchBasic assignment. can_start is true before a
+     * session exists or after it expires. Pending, InReview, Approved, Declined and Abandoned
+     * sessions cannot be restarted here. InReview signers may continue signing while review
+     * holds certification. The API synchronizes pending provider decisions on this read.
+     * Example SDK response:
+     * ```php
+     * [
+     *     'can_start' => false, 'status' => 'Pending',
+     *     'url' => 'https://verify.assinafy.com.br/c/session-id#t=<capture-token>',
+     *     'expires_at' => '2026-10-16T13:00:00Z', 'completed_at' => null,
+     * ]
+     * ```
+     * Open the capture URL unchanged, including its fragment. It is a bearer credential;
+     * keep it out of logs and browser storage. It is null outside Pending.
+     *
+     * @param string $accessCode the current signer access code
+     * @return array<string, mixed> the unwrapped can_start/status/url/expires_at/completed_at object
+     * @throws ValidationException when the access code is empty
+     * @throws \Assinafy\SDK\Exceptions\ApiException 401 on invalid signer credentials
+     */
+    public function identityVerification(#[\SensitiveParameter] string $accessCode): array
+    {
+        $response = $this->httpClient->get('signers/identity-verification', $this->accessCodeQuery($accessCode));
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    /**
+     * Record explicit biometric-processing consent and open a hosted provider session.
+     * `POST /signers/identity-verification`
+     *
+     * Authentication: signer access code only, as ['signer-access-code' => '<access-code>'].
+     * Request body: ['consent' => true]. The caller must obtain the signer's consent first.
+     * Allowed before a session exists or after it Expires; other existing states return 400.
+     * A resend preserves a live session. A restart has no extra charge; billing is once per
+     * signer at assignment creation. Declined/Abandoned require a new document and assignment.
+     * Example SDK response:
+     * ```php
+     * [
+     *     'id' => 'verification-id',
+     *     'url' => 'https://verify.assinafy.com.br/c/session-id#t=<capture-token>',
+     *     'expires_at' => '2026-10-16T13:00:00Z',
+     * ]
+     * ```
+     * Redirect to the exact returned URL, including #t=. Never log or store this bearer link
+     * in browser storage. expires_at can be null; review/processing may outlive link expiry.
+     *
+     * @param string $accessCode the current signer access code
+     * @param bool $consent explicit consent to biometric processing; must be true
+     * @return array<string, mixed> the unwrapped id/url/expires_at object
+     * @throws ValidationException on an empty access code or missing consent
+     * @throws \Assinafy\SDK\Exceptions\ApiException 400 when a non-expired session exists; 401 on invalid credentials
+     */
+    public function startIdentityVerification(#[\SensitiveParameter] string $accessCode, bool $consent): array
+    {
+        if (!$consent) {
+            throw new ValidationException('Explicit consent to biometric processing is required');
+        }
+        $response = $this->httpClient->post(
+            'signers/identity-verification',
+            ['consent' => true],
+            [],
+            $this->accessCodeQuery($accessCode)
+        );
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
     private function assertType(string $type): void
     {
         if (!in_array($type, [self::TYPE_SIGNATURE, self::TYPE_INITIAL], true)) {

@@ -171,7 +171,7 @@ final class OAuthResourceTest extends TestCase
 
         $this->assertSame('supplied-state', $start['state']);
         $this->assertSame($verifier, $start['code_verifier']);
-        $this->assertSame('https://auth.assinafy.com.br', $start['issuer']);
+        $this->assertSame('https://auth.assinafy.com.br/', $start['issuer']);
     }
 
     public function testStartAuthorizationRejectsUnusableRedirectUris(): void
@@ -202,6 +202,18 @@ final class OAuthResourceTest extends TestCase
     {
         $this->expectException(ValidationException::class);
         $this->oauth->startAuthorization(self::REDIRECT, ['documents:read documents:write']);
+    }
+
+    public function testStartAuthorizationRejectsScopesOutsideTheWireGrammar(): void
+    {
+        foreach (["documents:read\t", "documents:read\n", 'documents:"read', 'documents:\\read', 'documentos:lé'] as $scope) {
+            try {
+                $this->oauth->startAuthorization(self::REDIRECT, [$scope]);
+                $this->fail('Expected an invalid scope token to be rejected');
+            } catch (ValidationException) {
+                $this->assertSame([], $this->http->calls);
+            }
+        }
     }
 
     public function testStartAuthorizationRejectsAnOutOfGrammarVerifier(): void
@@ -244,7 +256,7 @@ final class OAuthResourceTest extends TestCase
     {
         $start = $this->oauth->startAuthorization(self::REDIRECT, [OAuthResource::SCOPE_ACCOUNT_READ]);
 
-        foreach ([null, 'https://auth.example.com'] as $issuer) {
+        foreach ([null, 'https://auth.example.com', 'https://auth.assinafy.com.br/'] as $issuer) {
             $query = ['code' => 'authorization-code', 'state' => $start['state']];
             if ($issuer !== null) {
                 $query['iss'] = $issuer;
@@ -257,6 +269,22 @@ final class OAuthResourceTest extends TestCase
                 $this->assertStringContainsString('issuer', $e->getMessage());
             }
         }
+    }
+
+    public function testHandleCallbackPreservesTheConfiguredIssuerIdentifier(): void
+    {
+        $issuer = 'https://auth.example.test/tenant/';
+        $start = $this->oauth->startAuthorization(self::REDIRECT, ['documents:read'], ['issuer' => $issuer]);
+
+        $this->assertSame($issuer, $start['issuer']);
+        $this->assertSame('code', $this->oauth->handleCallback([
+            'code' => 'code', 'state' => $start['state'], 'iss' => $issuer,
+        ], $start));
+
+        $this->expectException(ValidationException::class);
+        $this->oauth->handleCallback([
+            'code' => 'code', 'state' => $start['state'], 'iss' => rtrim($issuer, '/'),
+        ], $start);
     }
 
     public function testHandleCallbackRaisesTheAuthorizationServerError(): void

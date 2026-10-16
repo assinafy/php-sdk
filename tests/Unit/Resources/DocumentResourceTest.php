@@ -281,6 +281,21 @@ final class DocumentResourceTest extends TestCase
         $this->assertSame('accounts/acc/templates/tmpl1/documents/estimate-cost', $this->http->lastCall()['uri']);
     }
 
+    public function testBiometricTemplateSignersArePreserved(): void
+    {
+        $signer = [
+            'role_id' => 'role-id', 'id' => 'signer-id',
+            'verification_method' => 'IdDocumentFaceMatchBasic', 'notification_methods' => ['Whatsapp'],
+        ];
+        $this->http->queueJson(200, ['id' => 'document-id'])->queueJson(200, ['total_credits' => 1]);
+
+        $this->documents->createFromTemplate('template-id', [$signer]);
+        $this->assertSame([$signer], $this->http->lastCall()['body']['signers']);
+        unset($signer['id']);
+        $this->documents->estimateCostFromTemplate('template-id', [$signer]);
+        $this->assertSame([$signer], $this->http->lastCall()['body']['signers']);
+    }
+
     public function testIsFullySignedAndProgress(): void
     {
         $this->http->queueJson(200, [
@@ -330,6 +345,22 @@ final class DocumentResourceTest extends TestCase
 
         $this->expectException(NetworkException::class);
         $this->documents->get('doc1');
+    }
+
+    public function testCompletedSignaturesCanWaitForIdentityReview(): void
+    {
+        $document = [
+            'id' => 'doc1',
+            'status' => 'PENDING_IDENTITY_REVIEW',
+            'assignment' => ['signers' => [['id' => 's1'], ['id' => 's2']], 'items' => []],
+        ];
+        $this->http->queueJson(200, $document)->queueJson(200, $document)->queueJson(200, $document);
+
+        $this->assertTrue($this->documents->isFullySigned('doc1'));
+        $this->assertSame([
+            'signed' => 2, 'total' => 2, 'pending' => 0, 'percentage' => 100.0,
+        ], $this->documents->getSigningProgress('doc1'));
+        $this->assertSame($document, $this->documents->waitUntilReady('doc1', 1, 1));
     }
 
     public function testWaitUntilReadyReturnsWhenReady(): void

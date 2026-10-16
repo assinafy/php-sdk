@@ -123,13 +123,13 @@ Each resource extends `AbstractResource`, which centralizes account paths, path-
 | Accessor | Responsibility |
 |---|---|
 | `accounts()` | Account discovery and management, branding, and account statistics |
-| `assignments()` | Signature requests, Email/WhatsApp/DigitalCertificate estimates, resend operations, expiration resets, and WhatsApp history |
+| `assignments()` | Signature requests and Email/WhatsApp/DigitalCertificate/biometric estimates, identity reviews/evidence, resend, expiration resets, and WhatsApp history |
 | `auth()` | Login, social login, password flows, API-key lifecycle, and legacy social URL builders |
 | `documents()` | Document upload, retrieval, search, downloads (including `pades`), tags, verification, and template-driven creation |
 | `fields()` | Field definitions, validation, and the global field-type catalog |
 | `oauth()` | Marketplace PKCE transactions, callback validation, token exchange/refresh, revocation, userinfo, and RFC 8414/9728 discovery |
 | `signers()` | Workspace signer CRUD (including `government_id` update), email lookup, and explicit-country-code E.164 normalization |
-| `signerSession()` | End-signer identity, verification, data confirmation, signature image, signing, and decline operations |
+| `signerSession()` | End-signer identity, OTP and consented biometric capture, data confirmation, signature image, signing, and decline operations |
 | `signerDocuments()` | End-signer document lookup, search, bulk actions, and downloads |
 | `tags()` | Account tag CRUD |
 | `templates()` | Template upload, polling, retrieval, update, deletion, and page downloads |
@@ -179,6 +179,16 @@ $client->setLogger($logger);
 ```
 
 Applications should still avoid logging their own raw request bodies or webhook payloads. `LogRedactor` protects logging performed through the SDK's default transport, not unrelated application logging.
+
+### Biometric identity verification
+
+`IdDocumentFaceMatchBasic` uses the existing assignment and template payloads with either
+notification channel. `SignerSessionResource` sends only the signer access code for status/capture;
+the caller supplies explicit consent. It returns the provider URL unchanged, including its bearer
+`#t=` fragment, which `LogRedactor` masks. The SDK stores no provider session, image or biometric.
+`AssignmentResource` reads workspace review summaries, streams evidence bytes back to the caller,
+and submits the reviewer's decision. It shares path validation and transport error handling.
+`pending_identity_review` counts as fully signed while account review holds certification.
 
 ### Webhook parsing
 

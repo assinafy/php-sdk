@@ -254,6 +254,44 @@ final class WebhookResourceTest extends TestCase
         $this->assertFalse($body['signing_enabled']);
     }
 
+    public function testEndpointUrlOperationsUseTheQueryString(): void
+    {
+        [$http, $webhooks] = $this->build();
+        $url = 'https://example.com/hooks?a=1&b=2';
+        $endpoint = ['id' => 'ep1', 'url' => $url];
+        $http->queueJson(200, [$endpoint])->queueJson(200, []);
+
+        $this->assertSame([$endpoint], $webhooks->listEndpoints($url));
+        $this->assertSame(['url' => $url], $http->lastCall()['query']);
+        $this->assertSame([], $webhooks->deleteEndpointByUrl($url));
+        $this->assertSame('DELETE', $http->lastCall()['method']);
+        $this->assertSame('accounts/a/webhooks/endpoints', $http->lastCall()['uri']);
+        $this->assertSame(['url' => $url], $http->lastCall()['query']);
+    }
+
+    public function testEndpointUrlOperationsRejectRelativeUrls(): void
+    {
+        [$http, $webhooks] = $this->build();
+        foreach (['listEndpoints', 'deleteEndpointByUrl'] as $method) {
+            try {
+                $webhooks->{$method}('/hooks');
+                $this->fail('Expected a relative URL to be rejected');
+            } catch (ValidationException) {
+                $this->assertSame([], $http->calls);
+            }
+        }
+    }
+
+    public function testUpdateEndpointSendsSparseEventsAsAList(): void
+    {
+        [$http, $webhooks] = $this->build();
+        $http->queueJson(200, []);
+
+        $webhooks->updateEndpoint('ep1', ['events' => [7 => WebhookResource::EVENT_DOCUMENT_READY]]);
+
+        $this->assertSame(['events' => ['document_ready']], $http->lastCall()['body']);
+    }
+
     public function testSecretMethodsReturnTheSecretString(): void
     {
         [$http, $webhooks] = $this->build();
