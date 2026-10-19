@@ -5,7 +5,7 @@ This reference maps every public resource method in this SDK to the Assinafy API
 - <https://api.assinafy.com.br/v1/docs>
 - <https://api.assinafy.com.br/v1/docs/openapi.json>
 
-This reference describes SDK version 2.7.0. Install published releases with
+This reference describes SDK version 2.7.1. Install published releases with
 `composer require assinafy/php-sdk` and use the documentation shipped with the selected tag.
 See [INSTALLATION.md](INSTALLATION.md) for setup.
 
@@ -120,7 +120,7 @@ with `Retry-After` (seconds). The SDK never retries automatically; on `ApiExcept
 | Identity-document verification | `IdDocumentFaceMatchBasic` requires the account feature and a valid CPF in `government_id`, and accepts Email or WhatsApp notification. Signer session methods open the hosted capture after explicit consent. Workspace assignment methods read evidence and decide a review. `pending_identity_review` means every signer has signed while certification awaits review. |
 | Webhook URL operations | `listEndpoints($url)` filters by the exact registered URL. `deleteEndpointByUrl($url)` deletes it and frees its slot; `deleteEndpoint($id)` remains available. |
 | Webhook signing secret | A signed endpoint create response includes `secret`. OAuth applications must persist it then; they cannot read or rotate it later, and must delete/recreate an endpoint if the secret is lost. API-key/user-session clients can use `endpointSecret()`. |
-| Digital-certificate assignment | `DigitalCertificate` requires the account feature, a signer `government_id`, and an isolated signing step. Availability depends on the account and environment. The ordinary sign endpoint cannot complete it, and OpenAPI contains no certificate start/complete operation. |
+| Digital-certificate assignment | `DigitalCertificate` requires `method: virtual`, the account feature, a signer `government_id`, and an isolated signing step. The SDK rejects `collect` and all template certificate requests with stable validation code `digital_certificate_requires_virtual_assignment`; template endpoints derive the method from placed fields without exposing it to the SDK. |
 | Digital-certificate signer gate | Call `confirmData()` with `has_accepted_terms: true` before `GET /sign`. The confirm-data schema lists only `full_name`, `email`, and `government_id`; the `GET /sign` narrative documents `has_accepted_terms` as part of this body, which is where the SDK sends it. |
 | Template management | `TemplateResource::create()`, `get()`, `update()`, `delete()`, and `downloadPage()` use service routes absent from OpenAPI. They are marked **undocumented** below and may change independently of the specification. |
 | OAuth start/callback | `GET /auth/authenticate` and `GET /login-callback` are absent from OpenAPI. The SDK retains URL builders for legacy social authentication. Marketplace OAuth uses the authorization server described below. |
@@ -311,7 +311,7 @@ both to `Email`.
 | `Email` | `AssignmentResource::VERIFICATION_EMAIL` | Enters a code received by email before signing. | An email address on the signer. |
 | `Whatsapp` | `AssignmentResource::VERIFICATION_WHATSAPP` | Enters a code received over WhatsApp before signing. | A `whatsapp_phone_number` on the signer; paid subscriptions only. Requires the WhatsApp notification channel — the two always travel together. |
 | `IdDocumentFaceMatchBasic` | `AssignmentResource::VERIFICATION_ID_DOCUMENT_FACE_MATCH_BASIC` | Hosted government-ID capture, face matching and liveness. | Account feature, valid CPF in `government_id`, explicit biometric-processing consent before capture; a per-signer fee from `estimateCost()`. |
-| `DigitalCertificate` | `AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE` | Signs with their own ICP-Brasil certificate — **A1** (a software file on the device) or **A3** (a smart card or token) — through the Web PKI browser extension, producing a qualified PAdES signature. | The account's Digital Certificate feature (Standard and Pro plans), a CPF/CNPJ in the signer's `government_id`, and the signer alone in its signing step. |
+| `DigitalCertificate` | `AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE` | Signs with their own ICP-Brasil certificate — **A1** (a software file on the device) or **A3** (a smart card or token) — through the Web PKI browser extension, producing a qualified PAdES signature. | `method: virtual`, the account's Digital Certificate feature (Standard and Pro plans), a CPF/CNPJ in the signer's `government_id`, and the signer alone in its signing step. |
 
 | Notification | Constant | Delivers | Requirements |
 |---|---|---|---|
@@ -354,6 +354,8 @@ A1 and A3 differ only in where the signer's private key lives; both reach the AP
 signature is completed in the browser through the Web PKI extension, so the ordinary
 `signerSession()->sign()` path cannot complete it. The SDK does not implement the Web PKI
 browser protocol. The resulting qualified signature is downloadable as the `pades` artifact.
+Certificate completion operates on the signer's virtual item; the ordinary signing endpoint
+refuses a certificate signer, so a placed-field `collect` assignment cannot be completed.
 
 ### Assignment creation body
 
@@ -395,16 +397,17 @@ omitting both defaults to Email. DigitalCertificate and IdDocumentFaceMatchBasic
 
 `DigitalCertificate` requires the account feature and an existing signer whose CPF/CNPJ has been
 set through `signers()->create()` or `signers()->update(..., ['government_id' => ...])`. That signer must be alone in its
-signing step. Cost estimates add 0.5 credits per certificate signer under
-`SignatureDigitalCertificate`, on top of any notification cost. The SDK supports this
-create/estimate payload; availability depends on the account and environment. See the
-signer-session limitation below.
+signing step and the assignment method must be `virtual`. Cost estimates add 0.5 credits per
+certificate signer under `SignatureDigitalCertificate`, on top of any notification cost. The SDK
+rejects `collect` during both creation and estimation with `ValidationException`; callers can
+branch on `getErrors()['code'] === AssignmentResource::ERROR_DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL`
+(`digital_certificate_requires_virtual_assignment`). See the signer-session limitation below.
 
 | SDK method | Official operation | Auth | Request | SDK success return | Statuses |
 |---|---|---|---|---|---|
-| `create($documentId, $signers, $method, $options)` | [`POST /v1/documents/{documentId}/assignments`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fassignments) | Workspace | Required JSON in [Assignment creation body](#assignment-creation-body). String signer IDs are normalized to `{id}`. SDK validates the ordinary max-one/coupling rules and requires a DigitalCertificate signer to be alone in its step. | Unwrapped `Assignment`. | `200; 400, 401, 500` |
+| `create($documentId, $signers, $method, $options)` | [`POST /v1/documents/{documentId}/assignments`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fassignments) | Workspace | Required JSON in [Assignment creation body](#assignment-creation-body). String signer IDs are normalized to `{id}`. SDK validates the ordinary max-one/coupling rules and requires a DigitalCertificate signer to use `virtual` and be alone in its step. | Unwrapped `Assignment`. | `200; 400, 401, 500` |
 | `list($page, $perPage, $filters)` | [`GET /v1/assignments`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fassignments) | Workspace | Published: `page`, `per-page`. Runtime-required: `accountId`. | Envelope with `data: Assignment[]` and normalized `pagination`. | `200; 401, 500` |
-| `estimateCost($documentId, $signers, $method, $options)` | [`POST /v1/documents/{documentId}/assignments/estimate-cost`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fassignments%2Festimate-cost) | Workspace | Published JSON properties are optional `method: virtual\|collect`, `signers: [{verification_method?, notification_methods?}]`, and `entries: object[]`; signer IDs are not part of estimate entries. The SDK requires at least one signer in both modes, plus entries for collect. DigitalCertificate adds 0.5 credits per signer. | Unwrapped `CostEstimate`. | `200; 400, 401, 500` |
+| `estimateCost($documentId, $signers, $method, $options)` | [`POST /v1/documents/{documentId}/assignments/estimate-cost`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fassignments%2Festimate-cost) | Workspace | Published JSON properties are optional `method: virtual\|collect`, `signers: [{verification_method?, notification_methods?}]`, and `entries: object[]`; signer IDs are not part of estimate entries. The SDK requires at least one signer in both modes, plus entries for collect, and rejects DigitalCertificate unless the method is `virtual`. | Unwrapped `CostEstimate`. | `200; 400, 401, 500` |
 | `resend($documentId, $assignmentId, $signerId)` | [`PUT /v1/documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/resend`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fassignments%2F%7BassignmentId%7D%2Fsigners%2F%7BsignerId%7D%2Fresend) | Workspace | Path parameters only. | Unwrapped `{is_sent, document_id, signer_id}`. | `200; 401, 500` |
 | `estimateResendCost($documentId, $assignmentId, $signerId)` | [`POST /v1/documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/estimate-resend-cost`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fassignments%2F%7BassignmentId%7D%2Fsigners%2F%7BsignerId%7D%2Festimate-resend-cost) | Workspace | Path parameters only. | Unwrapped `ResendCostEstimate`. | `200; 401, 500` |
 | `resetExpiration($documentId, $assignmentId, $expiresAt)` | [`PUT /v1/documents/{documentId}/assignments/{assignmentId}/reset-expiration`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fassignments%2F%7BassignmentId%7D%2Freset-expiration) | Workspace | Required JSON body with the `expires_at` key: an ISO-8601 date-time at least one hour in the future, or `null` to remove the expiration. Not allowed once the document is closed. | Unwrapped `Assignment`; `expires_at` is `null` after clearing. | `200; 400, 401, 404, 500` |
@@ -566,8 +569,8 @@ file fails locally. The API still performs authoritative PDF parsing and enforce
 | `replaceTags($documentId, $tagNames)` | [`PUT /v1/accounts/{accountId}/documents/{documentId}/tags`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fdocuments%2F%7BdocumentId%7D%2Ftags) | Workspace | Required JSON `{tags: string[]}`. Despite an upstream description saying IDs, runtime values are names and missing names are auto-created. Empty replaces the set with none. | Unwrapped `Tag[]`. | `200; 401, 500` |
 | `appendTags($documentId, $tagNames)` | [`POST /v1/accounts/{accountId}/documents/{documentId}/tags`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fdocuments%2F%7BdocumentId%7D%2Ftags) | Workspace | Required JSON `{tags: string[]}` using names; missing names are auto-created. SDK rejects an empty list. | Unwrapped `Tag[]`. | `200; 401, 500` |
 | `detachTag($documentId, $tagId)` | [`DELETE /v1/accounts/{accountId}/documents/{documentId}/tags/{tagId}`](https://api.assinafy.com.br/v1/docs/markdown?method=delete&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fdocuments%2F%7BdocumentId%7D%2Ftags%2F%7BtagId%7D) | Workspace | Account, document, and tag path IDs. | Unwrapped `{detached: boolean}`. | `200; 401, 500` |
-| `createFromTemplate($templateId, $signers, $options)` | [`POST /v1/accounts/{accountId}/templates/{templateId}/documents`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Ftemplates%2F%7BtemplateId%7D%2Fdocuments) | Workspace | See [Create from template body](#create-from-template-body). | Unwrapped `Document`. | `200; 400, 401, 500` |
-| `estimateCostFromTemplate($templateId, $signers)` | [`POST /v1/accounts/{accountId}/templates/{templateId}/documents/estimate-cost`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Ftemplates%2F%7BtemplateId%7D%2Fdocuments%2Festimate-cost) | Workspace | Required `{signers: [{role_id, verification_method?, notification_methods?}]}`; signer ID is not required for estimation. | Unwrapped `CostEstimate`. | `200; 401, 500` |
+| `createFromTemplate($templateId, $signers, $options)` | [`POST /v1/accounts/{accountId}/templates/{templateId}/documents`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Ftemplates%2F%7BtemplateId%7D%2Fdocuments) | Workspace | See [Create from template body](#create-from-template-body). The SDK rejects DigitalCertificate because this endpoint does not expose whether placed fields derive `collect`. | Unwrapped `Document`. | `200; 400, 401, 500` |
+| `estimateCostFromTemplate($templateId, $signers)` | [`POST /v1/accounts/{accountId}/templates/{templateId}/documents/estimate-cost`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Ftemplates%2F%7BtemplateId%7D%2Fdocuments%2Festimate-cost) | Workspace | Required `{signers: [{role_id, verification_method?, notification_methods?}]}`; signer ID is not required for estimation. The SDK rejects DigitalCertificate because the derived assignment method is not exposed. | Unwrapped `CostEstimate`. | `200; 401, 500` |
 
 ### Create from template body
 
@@ -589,10 +592,12 @@ tags[]                   tag names; missing names are created
 
 The template's `default_document_tags` are always merged into the generated document's tags.
 Template-create prose says a lone verification or notification method infers the other, defaults
-both to Email, and permits only one notification method. It applies the same DigitalCertificate
-feature, `government_id`, isolated-step, and 0.5-credit requirements. The service accepts template
-notification arrays without the ordinary-assignment max-one/coupling rules, so the SDK preserves
-the supplied array.
+both to Email, and permits only one notification method. A template with placed fields derives a
+`collect` assignment, but neither template endpoint exposes the derived method before accepting,
+inviting or charging a DigitalCertificate signer. The SDK therefore rejects DigitalCertificate
+from both template calls with `digital_certificate_requires_virtual_assignment` until the API can
+guarantee `virtual`. The service accepts other template notification arrays without the
+ordinary-assignment max-one/coupling rules, so the SDK preserves the supplied array.
 
 ### Document helper methods
 

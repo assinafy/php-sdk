@@ -4,6 +4,15 @@ Install a published 2.x release with `composer require assinafy/php-sdk:^2.7`. R
 VCS/path repository overrides if they prevent Composer from resolving the Packagist package.
 Use the documentation shipped with the installed tag; `main` may include unreleased changes.
 
+## Upgrading to 2.7.1
+
+`DigitalCertificate` signers now require `AssignmentResource::METHOD_VIRTUAL`. Ordinary
+`create()` and `estimateCost()` calls reject `collect`, and template creation/estimation reject
+certificate signers because the template endpoint derives `collect` from placed fields without
+exposing the method to the SDK. Catch `ValidationException` and read the stable
+`getErrors()['code']` value `digital_certificate_requires_virtual_assignment`. The SDK User-Agent
+is `Assinafy-PHP-SDK/v2.7.1`.
+
 ## Upgrading to 2.7.0
 
 Biometric verification uses `AssignmentResource::VERIFICATION_ID_DOCUMENT_FACE_MATCH_BASIC`.

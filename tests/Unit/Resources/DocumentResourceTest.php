@@ -9,6 +9,7 @@ use Assinafy\SDK\Exceptions\NetworkException;
 use Assinafy\SDK\Exceptions\ValidationException;
 use Assinafy\SDK\Http\HttpClientInterface;
 use Assinafy\SDK\Http\Response;
+use Assinafy\SDK\Resources\AssignmentResource;
 use Assinafy\SDK\Resources\DocumentResource;
 use Assinafy\SDK\Tests\Unit\Support\FakeHttpClient;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -474,6 +475,29 @@ final class DocumentResourceTest extends TestCase
         $this->http->queueJson(200, ['total' => 1]);
         $this->documents->estimateCostFromTemplate('template1', $signers);
         $this->assertSame($expected, $this->http->lastCall()['body']['signers']);
+    }
+
+    public function testTemplateFlowsRejectDigitalCertificateWithStableCode(): void
+    {
+        foreach (['createFromTemplate', 'estimateCostFromTemplate'] as $operation) {
+            $http = new FakeHttpClient();
+            $documents = new DocumentResource($http, new Configuration('key', 'acc'));
+
+            try {
+                $documents->{$operation}('template1', [[
+                    'role_id' => 'r1',
+                    'id' => 's1',
+                    'verification_method' => AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE,
+                ]]);
+                $this->fail('Expected a DigitalCertificate template signer to be rejected');
+            } catch (ValidationException $exception) {
+                $this->assertSame(
+                    AssignmentResource::ERROR_DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL,
+                    $exception->getErrors()['code'] ?? null
+                );
+                $this->assertSame([], $http->calls);
+            }
+        }
     }
 
     public function testTemplateSignerRejectsWhitespaceRoleId(): void

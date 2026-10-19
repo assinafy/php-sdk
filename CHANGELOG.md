@@ -5,6 +5,12 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.7.1] - 2026-10-19
+
+### Fixed
+
+- Require `virtual` assignments for `DigitalCertificate` signers before cost estimation or assignment creation. Template certificate requests are rejected because templates with placed fields resolve to `collect`; validation failures expose the stable code `digital_certificate_requires_virtual_assignment`.
+
 ## [2.7.0] - 2026-10-16
 
 ### Fixed

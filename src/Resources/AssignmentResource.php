@@ -17,6 +17,8 @@ class AssignmentResource extends AbstractResource
 {
     public const METHOD_VIRTUAL = 'virtual';
     public const METHOD_COLLECT = 'collect';
+    public const ERROR_DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL =
+        'digital_certificate_requires_virtual_assignment';
 
     /** Signer enters a code received by email. Free, and the default for both sides. */
     public const VERIFICATION_EMAIL = 'Email';
@@ -37,8 +39,8 @@ class AssignmentResource extends AbstractResource
      * same payload. Needs the account's Digital Certificate feature, CPF/CNPJ in the signer's
      * `government_id`, and the signer alone in its signing step. Costs 0.5 credits per signer
      * under the `SignatureDigitalCertificate` breakdown code, on top of its notification.
-     * Pairs with either notification method. The browser completes the signature, so
-     * {@see SignerSessionResource::sign()} cannot finish it.
+     * Requires a `virtual` assignment and pairs with either notification method. The browser
+     * completes the signature, so {@see SignerSessionResource::sign()} cannot finish it.
      */
     public const VERIFICATION_DIGITAL_CERTIFICATE = 'DigitalCertificate';
     /** Government-ID photos, face matching and liveness; needs the account feature and a valid signer CPF. */
@@ -224,7 +226,8 @@ class AssignmentResource extends AbstractResource
      * @return array<string, mixed> the created assignment
      * @throws ValidationException on an unknown method, an empty signer list, a `collect`
      *     assignment without entries, a malformed `expires_at`, non-contiguous steps, or a
-     *     digital-certificate signer sharing a step with another signer
+     *     digital-certificate signer sharing a step with another signer, or a
+     *     digital-certificate signer on a non-virtual assignment
      */
     public function create(
         string $documentId,
@@ -234,6 +237,7 @@ class AssignmentResource extends AbstractResource
     ): array {
         $this->assertMethod($method);
         $this->assertSigners($signers);
+        $this->assertDigitalCertificateMethod($method, $signers);
         $options = $this->normalizeListOptions($options);
 
         if ($method === self::METHOD_COLLECT && ($options['entries'] ?? []) === []) {
@@ -437,6 +441,7 @@ class AssignmentResource extends AbstractResource
      * @param array<string, mixed> $options
      *     Optional keys: `entries` (required for collect), `message`, `expires_at`, `copy_receivers`.
      * @return array<string, mixed>
+     * @throws ValidationException when a DigitalCertificate signer is used with a non-virtual method
      */
     public function estimateCost(
         string $documentId,
@@ -449,6 +454,7 @@ class AssignmentResource extends AbstractResource
         // The API prices per signer in both modes and rejects a signer-less estimate with
         // `400 "Pelo menos um signatários precisa ser informado."`, so `collect` needs them too.
         $this->assertSigners($signers);
+        $this->assertDigitalCertificateMethod($method, $signers);
         if ($method === self::METHOD_COLLECT && ($options['entries'] ?? []) === []) {
             throw new ValidationException('Collect estimates require field entries');
         }
@@ -1072,6 +1078,28 @@ class AssignmentResource extends AbstractResource
             ) {
                 throw new ValidationException(
                     'A digital-certificate signer must be alone in its signing step'
+                );
+            }
+        }
+    }
+
+    /**
+     * @param array<int, mixed> $signers
+     */
+    private function assertDigitalCertificateMethod(string $method, array $signers): void
+    {
+        if ($method === self::METHOD_VIRTUAL) {
+            return;
+        }
+
+        foreach ($signers as $signer) {
+            if (
+                is_array($signer)
+                && ($signer['verification_method'] ?? null) === self::VERIFICATION_DIGITAL_CERTIFICATE
+            ) {
+                throw new ValidationException(
+                    'DigitalCertificate signers require a virtual assignment',
+                    ['code' => self::ERROR_DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL]
                 );
             }
         }

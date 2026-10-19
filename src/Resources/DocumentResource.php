@@ -1016,7 +1016,8 @@ class DocumentResource extends AbstractResource
      * @param array<string, mixed>             $options optional `name`, `message`, `editor_fields`,
      *     `expires_at`, and `tags`
      * @return array<string, mixed> the created document
-     * @throws ValidationException when `$signers` is empty or an entry is malformed
+     * @throws ValidationException when `$signers` is empty, an entry is malformed, or a
+     *     DigitalCertificate signer is supplied because the template method cannot be guaranteed virtual
      */
     public function createFromTemplate(
         string $templateId,
@@ -1087,7 +1088,8 @@ class DocumentResource extends AbstractResource
      * @param array<int, array<string, mixed>> $signers each entry: `{ role_id,
      *     verification_method?, notification_methods? }`
      * @return array<string, mixed>
-     * @throws ValidationException when `$signers` is empty or an entry is malformed
+     * @throws ValidationException when `$signers` is empty, an entry is malformed, or a
+     *     DigitalCertificate signer is supplied because the template method cannot be guaranteed virtual
      */
     public function estimateCostFromTemplate(
         string $templateId,
@@ -1431,6 +1433,16 @@ class DocumentResource extends AbstractResource
             }
             if ($signerId !== null && (!is_string($signerId) || trim($signerId) === '')) {
                 throw new ValidationException('Template signer id must be a non-empty string');
+            }
+
+            if (
+                ($signer['verification_method'] ?? null)
+                === AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE
+            ) {
+                throw new ValidationException(
+                    'DigitalCertificate template assignments cannot be guaranteed to be virtual',
+                    ['code' => AssignmentResource::ERROR_DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL]
+                );
             }
 
             if (array_key_exists('notification_methods', $signer)) {

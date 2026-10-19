@@ -115,6 +115,33 @@ final class AssignmentResourceTest extends TestCase
         );
     }
 
+    public function testCollectFlowsRejectDigitalCertificateWithStableCode(): void
+    {
+        foreach (['create', 'estimateCost'] as $operation) {
+            $http = new FakeHttpClient();
+            $assignments = new AssignmentResource($http, new Configuration('key', 'acc'));
+
+            try {
+                $assignments->{$operation}(
+                    'doc1',
+                    [[
+                        'id' => 's1',
+                        'verification_method' => AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE,
+                    ]],
+                    AssignmentResource::METHOD_COLLECT,
+                    ['entries' => [['page_id' => 'page1', 'fields' => []]]]
+                );
+                $this->fail('Expected a collect DigitalCertificate signer to be rejected');
+            } catch (ValidationException $exception) {
+                $this->assertSame(
+                    AssignmentResource::ERROR_DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL,
+                    $exception->getErrors()['code'] ?? null
+                );
+                $this->assertSame([], $http->calls);
+            }
+        }
+    }
+
     public function testDigitalCertificateSignerMustBeAloneInStep(): void
     {
         $this->expectException(ValidationException::class);

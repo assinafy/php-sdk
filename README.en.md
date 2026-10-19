@@ -362,7 +362,7 @@ before sending the request.
 | `VERIFICATION_EMAIL` | `Email` | An email address on the signer | 0 |
 | `VERIFICATION_WHATSAPP` | `Whatsapp` | `whatsapp_phone_number` and a paid subscription | 0.45 |
 | `VERIFICATION_ID_DOCUMENT_FACE_MATCH_BASIC` | `Email` or `Whatsapp` | Account ID Document + Face Match feature and valid CPF in `government_id` | Per-signer fee returned by the estimate |
-| `VERIFICATION_DIGITAL_CERTIFICATE` | `Email` or `Whatsapp` | The account's Digital Certificate feature (Standard and Pro plans), a CPF/CNPJ in `government_id`, and the signer alone in its step | 0.5 for the signature, on top of its notification |
+| `VERIFICATION_DIGITAL_CERTIFICATE` | `Email` or `Whatsapp` | The `virtual` method, the account's Digital Certificate feature (Standard and Pro plans), a CPF/CNPJ in `government_id`, and the signer alone in its step | 0.5 for the signature, on top of its notification |
 
 `DigitalCertificate` covers the ICP-Brasil **A1** (a software file on the device) and **A3** (a
 smart card or token) certificates. Both use this one value and the same payload — they differ only
@@ -370,6 +370,11 @@ in where the private key lives. The signature is completed in the browser throug
 extension, so `signerSession()->sign()` cannot finish it. The SDK does not implement that browser
 protocol. The result is a qualified PAdES signature, downloadable as the `pades`
 artifact and billed in the breakdown under `SignatureDigitalCertificate`.
+Certificate completion only handles the signer's `virtual` item; a certificate signer cannot
+complete a `collect` assignment. `estimateCost()` and `create()` therefore reject that combination
+with `ValidationException` code `digital_certificate_requires_virtual_assignment`. Because a
+template's method is derived from its placed fields and is not exposed to the SDK, both template
+document calls reject `DigitalCertificate` until the API can guarantee `virtual`.
 
 Exactly one notification method is allowed per signer; an explicit empty list is preserved rather
 than replaced.
