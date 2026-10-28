@@ -80,14 +80,13 @@ final class WebhookResourceTest extends TestCase
         $webhooks->register('ftp://example.com/hook', 'a@example.com');
     }
 
-    public function testRegisterAcceptsAbsoluteHttpUrlWithQuery(): void
+    public function testRegisterRejectsAnHttpUrl(): void
     {
-        [$http, $webhooks] = $this->build();
-        $http->queueJson(200, []);
+        [, $webhooks] = $this->build();
 
+        $this->expectException(ValidationException::class);
+        $this->expectExceptionMessage('must use HTTPS');
         $webhooks->register('http://example.com/hook?source=sdk', 'developer@example.test');
-
-        $this->assertSame('http://example.com/hook?source=sdk', $http->lastCall()['body']['url']);
     }
 
     public function testGet(): void
@@ -131,6 +130,22 @@ final class WebhookResourceTest extends TestCase
         $webhooks->activate();
 
         $this->assertTrue($http->lastCall()['body']['is_active']);
+    }
+
+    public function testActivatePreservesAnExistingHttpUrl(): void
+    {
+        [$http, $webhooks] = $this->build();
+        $http->queueJson(200, [
+            'url' => 'http://legacy.example.com/hook',
+            'email' => 'a@example.com',
+            'events' => WebhookResource::DEFAULT_EVENTS,
+            'is_active' => false,
+        ]);
+        $http->queueJson(200, []);
+
+        $webhooks->activate();
+
+        $this->assertSame('http://legacy.example.com/hook', $http->lastCall()['body']['url']);
     }
 
     public function testActivateThrowsWhenNoSubscription(): void
@@ -267,6 +282,56 @@ final class WebhookResourceTest extends TestCase
         $this->assertSame('DELETE', $http->lastCall()['method']);
         $this->assertSame('accounts/a/webhooks/endpoints', $http->lastCall()['uri']);
         $this->assertSame(['url' => $url], $http->lastCall()['query']);
+    }
+
+    public function testEndpointUrlFiltersPreserveExistingHttpUrls(): void
+    {
+        [$http, $webhooks] = $this->build();
+        $url = 'http://legacy.example.com/hooks';
+        $http->queueJson(200, [])->queueJson(200, []);
+
+        $webhooks->listEndpoints($url);
+        $webhooks->deleteEndpointByUrl($url);
+
+        $this->assertSame(['url' => $url], $http->calls[0]['query']);
+        $this->assertSame(['url' => $url], $http->calls[1]['query']);
+    }
+
+    public function testCreateAndUpdateRejectHttpUrls(): void
+    {
+        [$http, $webhooks] = $this->build();
+
+        foreach (
+            [
+                fn () => $webhooks->createEndpoint('http://example.com/hook', 'ops@example.com'),
+                fn () => $webhooks->updateEndpoint('ep1', ['url' => 'http://example.com/hook']),
+            ] as $call
+        ) {
+            try {
+                $call();
+                $this->fail('Expected HTTP to be rejected');
+            } catch (ValidationException) {
+                $this->assertSame([], $http->calls);
+            }
+        }
+    }
+
+    public function testContractEventConstantsMatchThePublishedIds(): void
+    {
+        $this->assertSame('document_contract_updated', WebhookResource::EVENT_DOCUMENT_CONTRACT_UPDATED);
+        $this->assertSame(
+            'document_contract_renewal_notice',
+            WebhookResource::EVENT_DOCUMENT_CONTRACT_RENEWAL_NOTICE
+        );
+        $this->assertSame('document_contract_expiring', WebhookResource::EVENT_DOCUMENT_CONTRACT_EXPIRING);
+        $this->assertSame('document_contract_expired', WebhookResource::EVENT_DOCUMENT_CONTRACT_EXPIRED);
+        $this->assertSame('document_contract_renewed', WebhookResource::EVENT_DOCUMENT_CONTRACT_RENEWED);
+        $this->assertSame('document_contract_terminated', WebhookResource::EVENT_DOCUMENT_CONTRACT_TERMINATED);
+        $this->assertSame('document_contract_amended', WebhookResource::EVENT_DOCUMENT_CONTRACT_AMENDED);
+        $this->assertSame(
+            'document_contract_amendment_updated',
+            WebhookResource::EVENT_DOCUMENT_CONTRACT_AMENDMENT_UPDATED
+        );
     }
 
     public function testEndpointUrlOperationsRejectRelativeUrls(): void

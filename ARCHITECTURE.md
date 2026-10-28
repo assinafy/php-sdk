@@ -5,7 +5,7 @@
 The Assinafy PHP SDK is a small, synchronous client for the Assinafy v1 API. It uses a facade over focused resource classes, a project-specific HTTP abstraction, PSR-3 logging, strict PHP types, and explicit exception mapping.
 
 The package targets PHP 8.2 through 8.5, the complete supported CI matrix, and implements the
-workspace, document, signer, authentication and webhook operations. The endpoint mapping and operational notes are in
+workspace, document, contract, signer, authentication and webhook operations. The endpoint mapping and operational notes are in
 [docs/API_REFERENCE.md](docs/API_REFERENCE.md).
 
 ## Directory structure
@@ -30,6 +30,7 @@ assinafy-php-sdk/
 │   │   ├── AccountResource.php
 │   │   ├── AssignmentResource.php
 │   │   ├── AuthResource.php
+│   │   ├── ContractResource.php
 │   │   ├── DocumentResource.php
 │   │   ├── FieldResource.php
 │   │   ├── OAuthResource.php
@@ -125,6 +126,7 @@ Each resource extends `AbstractResource`, which centralizes account paths, path-
 | `accounts()` | Account discovery and management, branding, and account statistics |
 | `assignments()` | Signature requests and Email/WhatsApp/DigitalCertificate/biometric estimates, identity reviews/evidence, resend, expiration resets, and WhatsApp history |
 | `auth()` | Login, social login, password flows, API-key lifecycle, and legacy social URL builders |
+| `contracts()` | Document contract terms, amendment families, renewals, and terminations |
 | `documents()` | Document upload, retrieval, search, downloads (including `pades`), tags, verification, and template-driven creation |
 | `fields()` | Field definitions, validation, and the global field-type catalog |
 | `oauth()` | Marketplace PKCE transactions, callback validation, token exchange/refresh, revocation, userinfo, and RFC 8414/9728 discovery |

@@ -86,6 +86,11 @@ final class UserResourceTest extends TestCase
 
     public function testGetsAndUpdatesNotificationPreferences(): void
     {
+        $this->assertContains('ContractRenewalNotice', UserResource::NOTIFICATION_PREFERENCE_CODES);
+        $this->assertContains('ContractExpiring', UserResource::NOTIFICATION_PREFERENCE_CODES);
+        $this->assertContains('ContractExpired', UserResource::NOTIFICATION_PREFERENCE_CODES);
+        $this->assertContains('ContractRenewed', UserResource::NOTIFICATION_PREFERENCE_CODES);
+
         $all = array_fill_keys(UserResource::NOTIFICATION_PREFERENCE_CODES, true);
         $this->http->queueJson(200, $all);
         $this->assertSame($all, $this->users->notificationPreferences());

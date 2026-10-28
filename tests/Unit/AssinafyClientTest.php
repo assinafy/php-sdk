@@ -9,6 +9,7 @@ use Assinafy\SDK\Configuration;
 use Assinafy\SDK\Http\GuzzleHttpClient;
 use Assinafy\SDK\Resources\AssignmentResource;
 use Assinafy\SDK\Resources\AuthResource;
+use Assinafy\SDK\Resources\ContractResource;
 use Assinafy\SDK\Resources\DocumentResource;
 use Assinafy\SDK\Resources\FieldResource;
 use Assinafy\SDK\Resources\OAuthResource;
@@ -34,6 +35,8 @@ final class AssinafyClientTest extends TestCase
 
         $this->assertSame($client->documents(), $client->documents());
         $this->assertInstanceOf(DocumentResource::class, $client->documents());
+        $this->assertSame($client->contracts(), $client->contracts());
+        $this->assertInstanceOf(ContractResource::class, $client->contracts());
         $this->assertInstanceOf(SignerResource::class, $client->signers());
         $this->assertInstanceOf(AssignmentResource::class, $client->assignments());
         $this->assertInstanceOf(TemplateResource::class, $client->templates());

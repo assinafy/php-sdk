@@ -477,26 +477,23 @@ final class DocumentResourceTest extends TestCase
         $this->assertSame($expected, $this->http->lastCall()['body']['signers']);
     }
 
-    public function testTemplateFlowsRejectDigitalCertificateWithStableCode(): void
+    public function testTemplateFlowsForwardDigitalCertificateForServerEligibilityChecks(): void
     {
         foreach (['createFromTemplate', 'estimateCostFromTemplate'] as $operation) {
             $http = new FakeHttpClient();
             $documents = new DocumentResource($http, new Configuration('key', 'acc'));
 
-            try {
-                $documents->{$operation}('template1', [[
-                    'role_id' => 'r1',
-                    'id' => 's1',
-                    'verification_method' => AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE,
-                ]]);
-                $this->fail('Expected a DigitalCertificate template signer to be rejected');
-            } catch (ValidationException $exception) {
-                $this->assertSame(
-                    AssignmentResource::ERROR_DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL,
-                    $exception->getErrors()['code'] ?? null
-                );
-                $this->assertSame([], $http->calls);
-            }
+            $http->queueJson(200, []);
+            $documents->{$operation}('template1', [[
+                'role_id' => 'r1',
+                'id' => 's1',
+                'verification_method' => AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE,
+            ]]);
+
+            $this->assertSame(
+                AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE,
+                $http->lastCall()['body']['signers'][0]['verification_method']
+            );
         }
     }
 

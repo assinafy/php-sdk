@@ -329,7 +329,10 @@ class OAuthResource extends AbstractResource
 
         // The authorization server advertises authorization_response_iss_parameter_supported,
         // so a missing `iss` is itself a reason to stop rather than something to tolerate.
-        $expectedIssuer = $this->stringOption($transaction, 'issuer') ?? self::DEFAULT_ISSUER;
+        $expectedIssuer = $this->stringOption($transaction, 'issuer');
+        if ($expectedIssuer === null) {
+            throw new ValidationException('Stored OAuth transaction is missing its issuer');
+        }
         $issuer = $this->stringOption($query, 'iss');
         if ($issuer === null || !hash_equals($expectedIssuer, $issuer)) {
             throw new ValidationException('OAuth callback issuer does not match the expected authorization server');
@@ -399,8 +402,8 @@ class OAuthResource extends AbstractResource
      *     returned; `code_verifier`, `redirect_uri` and `resource` are read from it
      * @return array<string, mixed> `{ access_token, token_type, expires_in, scope,
      *     refresh_token?, id_token? }`
-     * @throws ValidationException on an empty code or a transaction missing its verifier
-     *     or redirect URI
+     * @throws ValidationException on an empty code or a transaction missing its verifier,
+     *     redirect URI, or resource
      * @throws ApiException `invalid_grant` (expired, replayed, or mismatched code),
      *     `invalid_client`, `invalid_target`; 429 when rate-limited — wait the `Retry-After`
      *     seconds, readable via {@see ApiException::getRetryAfter()}
@@ -423,12 +426,17 @@ class OAuthResource extends AbstractResource
             throw new ValidationException('Stored OAuth transaction is missing its redirect URI');
         }
 
+        $resource = $this->stringOption($transaction, 'resource');
+        if ($resource === null) {
+            throw new ValidationException('Stored OAuth transaction is missing its resource');
+        }
+
         return $this->token([
             'grant_type' => self::GRANT_AUTHORIZATION_CODE,
             'code' => $code,
             'redirect_uri' => $redirectUri,
             'code_verifier' => $verifier,
-            'resource' => $this->stringOption($transaction, 'resource') ?? $this->apiOrigin(),
+            'resource' => $resource,
         ]);
     }
 

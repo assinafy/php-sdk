@@ -28,6 +28,10 @@ class UserResource extends AbstractResource
         'DocumentProcessingFailed',
         'TemplateProcessingFailed',
         'SignerWhatsappFailed',
+        'ContractRenewalNotice',
+        'ContractExpiring',
+        'ContractExpired',
+        'ContractRenewed',
     ];
 
     /**
@@ -176,15 +180,15 @@ class UserResource extends AbstractResource
     }
 
     /**
-     * Get all owner-facing document email preferences.
+     * Get all owner-facing document and contract email preferences.
      * `GET /users/self/notification-preferences`
      *
-     * These are the emails the document **owner** receives about their own documents — not
-     * the signature invitations sent to signers. Account and security email (welcome,
+     * These are the emails the document or contract **owner** receives — not the signature
+     * invitations sent to signers. Account and security email (welcome,
      * password reset, invitations, account deletion) is not configurable and never appears
      * here.
      *
-     * All nine keys are always returned; everything defaults to `true`. The codes are
+     * All 13 keys are always returned; everything defaults to `true`. The codes are
      * available as {@see self::NOTIFICATION_PREFERENCE_CODES}.
      *
      * Request: no parameters.
@@ -201,6 +205,10 @@ class UserResource extends AbstractResource
      *     'DocumentProcessingFailed' => true,
      *     'TemplateProcessingFailed' => true,
      *     'SignerWhatsappFailed' => true,
+     *     'ContractRenewalNotice' => true,
+     *     'ContractExpiring' => true,
+     *     'ContractExpired' => true,
+     *     'ContractRenewed' => true,
      * ]
      * ```
      *
@@ -211,7 +219,9 @@ class UserResource extends AbstractResource
      * @return array{DocumentCompleted?: bool, SignerDeclined?: bool,
      *     DocumentCancelled?: bool, DocumentAboutToExpire?: bool, DocumentExpired?: bool,
      *     DocumentExpirationReset?: bool, DocumentProcessingFailed?: bool,
-     *     TemplateProcessingFailed?: bool, SignerWhatsappFailed?: bool}
+     *     TemplateProcessingFailed?: bool, SignerWhatsappFailed?: bool,
+     *     ContractRenewalNotice?: bool, ContractExpiring?: bool, ContractExpired?: bool,
+     *     ContractRenewed?: bool}
      */
     public function notificationPreferences(#[\SensitiveParameter] ?string $accessToken = null): array
     {
@@ -225,7 +235,7 @@ class UserResource extends AbstractResource
     }
 
     /**
-     * Merge selected owner-facing document email preferences.
+     * Merge selected owner-facing document and contract email preferences.
      * `PUT /users/self/notification-preferences`
      *
      * A merge, not a replace: omitted keys keep their current values, so you never have to
@@ -254,6 +264,10 @@ class UserResource extends AbstractResource
      *     'DocumentProcessingFailed' => true,
      *     'TemplateProcessingFailed' => true,
      *     'SignerWhatsappFailed' => false,
+     *     'ContractRenewalNotice' => true,
+     *     'ContractExpiring' => true,
+     *     'ContractExpired' => true,
+     *     'ContractRenewed' => true,
      * ]
      * ```
      *
@@ -265,7 +279,9 @@ class UserResource extends AbstractResource
      * @return array{DocumentCompleted?: bool, SignerDeclined?: bool,
      *     DocumentCancelled?: bool, DocumentAboutToExpire?: bool, DocumentExpired?: bool,
      *     DocumentExpirationReset?: bool, DocumentProcessingFailed?: bool,
-     *     TemplateProcessingFailed?: bool, SignerWhatsappFailed?: bool}
+     *     TemplateProcessingFailed?: bool, SignerWhatsappFailed?: bool,
+     *     ContractRenewalNotice?: bool, ContractExpiring?: bool, ContractExpired?: bool,
+     *     ContractRenewed?: bool}
      */
     public function updateNotificationPreferences(
         array $preferences,

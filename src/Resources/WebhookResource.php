@@ -50,6 +50,14 @@ class WebhookResource extends AbstractResource
     public const EVENT_TEMPLATE_CREATED = 'template_created';
     public const EVENT_TEMPLATE_PROCESSED = 'template_processed';
     public const EVENT_TEMPLATE_PROCESSING_FAILED = 'template_processing_failed';
+    public const EVENT_DOCUMENT_CONTRACT_UPDATED = 'document_contract_updated';
+    public const EVENT_DOCUMENT_CONTRACT_RENEWAL_NOTICE = 'document_contract_renewal_notice';
+    public const EVENT_DOCUMENT_CONTRACT_EXPIRING = 'document_contract_expiring';
+    public const EVENT_DOCUMENT_CONTRACT_EXPIRED = 'document_contract_expired';
+    public const EVENT_DOCUMENT_CONTRACT_RENEWED = 'document_contract_renewed';
+    public const EVENT_DOCUMENT_CONTRACT_TERMINATED = 'document_contract_terminated';
+    public const EVENT_DOCUMENT_CONTRACT_AMENDED = 'document_contract_amended';
+    public const EVENT_DOCUMENT_CONTRACT_AMENDMENT_UPDATED = 'document_contract_amendment_updated';
 
     /** Sensible default subscription covering the common document lifecycle events. */
     public const DEFAULT_EVENTS = [
@@ -96,12 +104,12 @@ class WebhookResource extends AbstractResource
      * The subscription body has no signing field; enable signing on the endpoint with
      * {@see self::updateEndpoint()}.
      *
-     * @param string            $url    absolute HTTP(S) endpoint to POST deliveries to
+     * @param string            $url    absolute HTTPS endpoint to POST deliveries to
      * @param string            $email  address alerted when delivery fails
      * @param array<int, mixed> $events event type IDs; when empty, {@see DEFAULT_EVENTS} is sent
      * @param bool              $isActive whether to start delivering immediately
      * @return array<string, mixed> the stored subscription
-     * @throws ValidationException on a non-absolute URL, a malformed email, or a
+     * @throws ValidationException on a non-HTTPS URL, a malformed email, or a
      *     non-string event
      */
     public function register(
@@ -110,23 +118,11 @@ class WebhookResource extends AbstractResource
         array $events = [],
         bool $isActive = true
     ): array {
-        $this->assertUrl($url);
+        $this->assertUrl($url, true);
         $this->assertEmail($email);
         $this->assertEvents($events);
 
-        $payload = [
-            'url' => $url,
-            'email' => $email,
-            'events' => $events !== [] ? array_values($events) : self::DEFAULT_EVENTS,
-            'is_active' => $isActive,
-        ];
-
-        $response = $this->httpClient->put(
-            $this->accountPath('webhooks/subscriptions'),
-            $payload
-        );
-
-        return $this->extractData($response->getData() ?? []);
+        return $this->saveSubscription($url, $email, $events, $isActive);
     }
 
     /**
@@ -223,14 +219,16 @@ class WebhookResource extends AbstractResource
             throw new \RuntimeException('No webhook subscription is configured — call register() first.');
         }
 
-        return $this->register(
-            (string) $current['url'],
-            (string) ($current['email'] ?? ''),
-            is_array($current['events'] ?? null) && $current['events'] !== []
-                ? $current['events']
-                : self::DEFAULT_EVENTS,
-            true
-        );
+        $url = (string) $current['url'];
+        $email = (string) ($current['email'] ?? '');
+        $events = is_array($current['events'] ?? null) && $current['events'] !== []
+            ? $current['events']
+            : self::DEFAULT_EVENTS;
+        $this->assertUrl($url);
+        $this->assertEmail($email);
+        $this->assertEvents($events);
+
+        return $this->saveSubscription($url, $email, $events, true);
     }
 
     /**
@@ -250,6 +248,8 @@ class WebhookResource extends AbstractResource
      *         'email' => 'ops@example.com',
      *         'events' => ['document_ready', 'signer_signed_document'],
      *         'is_active' => true,
+     *         'is_held' => false,
+     *         'held_since' => null,
      *         'signing_enabled' => true,
      *         'created_at' => '2026-10-01T12:00:00Z',
      *         'updated_at' => '2026-10-01T12:00:00Z',
@@ -299,12 +299,15 @@ class WebhookResource extends AbstractResource
      * Example response (SDK return):
      * ```php
      * [
+     *     'resource' => 'webhook_endpoint',
      *     'id' => '65f1c2a9b3e4d5f60718293a4b5c6d7e',
      *     'name' => 'ERP',
      *     'url' => 'https://example.com/webhooks/assinafy',
      *     'email' => 'ops@example.com',
      *     'events' => ['document_ready', 'signer_signed_document'],
      *     'is_active' => true,
+     *     'is_held' => false,
+     *     'held_since' => null,
      *     'signing_enabled' => true,
      *     'created_at' => '2026-10-01T12:00:00Z',
      *     'updated_at' => '2026-10-01T12:00:00Z',
@@ -312,14 +315,14 @@ class WebhookResource extends AbstractResource
      * ]
      * ```
      *
-     * @param string            $url    absolute HTTP(S) URL that receives deliveries
+     * @param string            $url    absolute HTTPS URL that receives deliveries
      * @param string            $email  address alerted when deliveries fail
      * @param array<int, mixed> $events event type IDs; when empty, {@see DEFAULT_EVENTS} is sent
      * @param string|null       $name   label telling endpoints apart
      * @param bool              $isActive whether to deliver subscribed events
      * @param bool              $signingEnabled whether deliveries carry an HMAC signature
      * @return array<string, mixed> the created endpoint
-     * @throws ValidationException on a non-absolute URL, a malformed email or a non-string event
+     * @throws ValidationException on a non-HTTPS URL, a malformed email or a non-string event
      * @throws \Assinafy\SDK\Exceptions\ApiException 403 past the plan's endpoint limit,
      *     400 on a duplicate URL
      */
@@ -331,7 +334,7 @@ class WebhookResource extends AbstractResource
         bool $isActive = true,
         bool $signingEnabled = false
     ): array {
-        $this->assertUrl($url);
+        $this->assertUrl($url, true);
         $this->assertEmail($email);
         $this->assertEvents($events);
 
@@ -360,12 +363,15 @@ class WebhookResource extends AbstractResource
      * Example response (SDK return):
      * ```php
      * [
+     *     'resource' => 'webhook_endpoint',
      *     'id' => '65f1c2a9b3e4d5f60718293a4b5c6d7e',
      *     'name' => 'ERP',
      *     'url' => 'https://example.com/webhooks/assinafy',
      *     'email' => 'ops@example.com',
      *     'events' => ['document_ready', 'signer_signed_document'],
      *     'is_active' => true,
+     *     'is_held' => false,
+     *     'held_since' => null,
      *     'signing_enabled' => true,
      *     'created_at' => '2026-10-01T12:00:00Z',
      *     'updated_at' => '2026-10-01T12:00:00Z',
@@ -386,9 +392,10 @@ class WebhookResource extends AbstractResource
      * Change selected fields of a webhook endpoint.
      * `PUT /accounts/{account_id}/webhooks/endpoints/{endpoint_id}`
      *
-     * A partial update: only the keys sent change. `url` cannot repeat another endpoint's
-     * (`400`). Turning `signing_enabled` on generates a secret when the endpoint has none and
-     * keeps the existing one otherwise; turning it off discards the secret.
+     * A partial update: only the keys sent change. A changed `url` must use HTTPS and cannot
+     * repeat another endpoint's (`400`). Changing the URL or setting `is_active` to true lifts
+     * a delivery hold. Turning `signing_enabled` on generates a secret when the endpoint has
+     * none and keeps the existing one otherwise; turning it off discards the secret.
      * OAuth scope: `webhooks:write`.
      *
      * Request body (any subset, at least one key):
@@ -406,12 +413,15 @@ class WebhookResource extends AbstractResource
      * Example response (SDK return, the updated endpoint):
      * ```php
      * [
+     *     'resource' => 'webhook_endpoint',
      *     'id' => '65f1c2a9b3e4d5f60718293a4b5c6d7e',
      *     'name' => 'ERP',
      *     'url' => 'https://example.com/webhooks/assinafy',
      *     'email' => 'ops@example.com',
      *     'events' => ['document_ready', 'signer_signed_document'],
      *     'is_active' => true,
+     *     'is_held' => false,
+     *     'held_since' => null,
      *     'signing_enabled' => true,
      *     'created_at' => '2026-10-01T12:00:00Z',
      *     'updated_at' => '2026-10-01T12:00:00Z',
@@ -421,8 +431,8 @@ class WebhookResource extends AbstractResource
      * @param array<string, mixed> $changes subset of `url`, `email`, `events`, `name`,
      *     `is_active`, `signing_enabled`
      * @return array<string, mixed> the updated endpoint
-     * @throws ValidationException when `$changes` is empty, has an unknown key, or a value of
-     *     the wrong type
+     * @throws ValidationException when `$changes` is empty, has an unknown key, a value of
+     *     the wrong type, or a non-HTTPS URL
      */
     public function updateEndpoint(string $endpointId, #[\SensitiveParameter] array $changes): array
     {
@@ -441,7 +451,7 @@ class WebhookResource extends AbstractResource
             }
         }
         if (isset($changes['url'])) {
-            $this->assertUrl($changes['url']);
+            $this->assertUrl($changes['url'], true);
         }
         if (isset($changes['email'])) {
             $this->assertEmail($changes['email']);
@@ -534,8 +544,8 @@ class WebhookResource extends AbstractResource
      * `POST /accounts/{account_id}/webhooks/endpoints/{endpoint_id}/secret/rotate`
      *
      * The old secret stops working immediately: deliveries sent afterwards are signed only
-     * with the new one, so update the receiver's stored secret right away. Not available to
-     * OAuth applications.
+     * with the new one, so update the receiver's stored secret right away. OAuth applications
+     * require the `webhooks:write` scope.
      *
      * Request: no body.
      *
@@ -672,9 +682,14 @@ class WebhookResource extends AbstractResource
      *             'id' => 'webhook-dispatch-id',
      *             'event' => 'document_ready',
      *             'activity_id' => 456,
+     *             'endpoint_id' => 'endpoint-id',
      *             'endpoint' => 'https://example.com/webhook',
      *             'payload' => null,
      *             'delivered' => true,
+     *             'webhook_id' => 'message-id',
+     *             'attempt' => 1,
+     *             'kind' => 'scheduled',
+     *             'will_retry' => false,
      *             'http_status' => 200,
      *             'response_body' => 'OK',
      *             'error' => null,
@@ -738,9 +753,14 @@ class WebhookResource extends AbstractResource
      *     'id' => 'webhook-dispatch-id',
      *     'event' => 'document_ready',
      *     'activity_id' => 456,
+     *     'endpoint_id' => 'endpoint-id',
      *     'endpoint' => 'https://example.com/webhook',
      *     'payload' => null,
      *     'delivered' => true,
+     *     'webhook_id' => 'message-id',
+     *     'attempt' => 1,
+     *     'kind' => 'manual',
+     *     'will_retry' => false,
      *     'http_status' => 200,
      *     'response_body' => 'OK',
      *     'error' => null,
@@ -777,7 +797,27 @@ class WebhookResource extends AbstractResource
         return $secret;
     }
 
-    private function assertUrl(#[\SensitiveParameter] string $url): void
+    /**
+     * @param array<int, mixed> $events
+     * @return array<string, mixed>
+     */
+    private function saveSubscription(
+        #[\SensitiveParameter] string $url,
+        #[\SensitiveParameter] string $email,
+        array $events,
+        bool $isActive
+    ): array {
+        $response = $this->httpClient->put($this->accountPath('webhooks/subscriptions'), [
+            'url' => $url,
+            'email' => $email,
+            'events' => $events !== [] ? array_values($events) : self::DEFAULT_EVENTS,
+            'is_active' => $isActive,
+        ]);
+
+        return $this->extractData($response->getData() ?? []);
+    }
+
+    private function assertUrl(#[\SensitiveParameter] string $url, bool $requireHttps = false): void
     {
         $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
         if (
@@ -786,6 +826,9 @@ class WebhookResource extends AbstractResource
             || parse_url($url, PHP_URL_HOST) === null
         ) {
             throw new ValidationException('Webhook URL must be an absolute HTTP or HTTPS URL');
+        }
+        if ($requireHttps && $scheme !== 'https') {
+            throw new ValidationException('New or changed webhook URLs must use HTTPS');
         }
     }
 

@@ -143,16 +143,17 @@ if (!($estimate['has_sufficient_resources'] ?? false)) {
 
 ### Digital-certificate assignments
 
-`DigitalCertificate` is supported only on ordinary `virtual` assignment creation and estimation.
+`DigitalCertificate` is supported on ordinary `virtual` assignments and templates without placed
+signer fields.
 Each certificate signer costs 0.5 credits in addition to notification cost, requires the account's
-Digital Certificate feature, must have a CPF/CNPJ in `government_id`, and must be alone in its
+Digital Certificate feature, must have a valid CPF in `government_id`, and must be alone in its
 signing step. Pass `government_id` when creating the signer
 (`signers()->create($name, $email, null, $governmentId)`), or update an existing signer first.
-Formatted CPF/CNPJ input is accepted and normalized to digits by the
+Formatted CPF input is accepted and normalized to digits by the
 server. The update response may omit or mask `government_id`; do not require it to echo the identifier.
-The SDK rejects certificate signers on `collect` and on both template document calls with
-`ValidationException` code `digital_certificate_requires_virtual_assignment`; a template with
-placed fields resolves to `collect`, while the template endpoints do not expose that method.
+The SDK rejects certificate signers on ordinary `collect` calls with `ValidationException` code
+`digital_certificate_requires_virtual_assignment`. Template requests are forwarded; the API
+returns `400` when placed signer fields make the generated assignment `collect`.
 Run the following only when the feature and certificate completion flow are enabled for the
 target account and environment:
 
@@ -392,7 +393,7 @@ fields. Other templates need a signer binding for each required role and all req
 $template = $client->templates()->get(requiredEnv('ASSINAFY_TEST_TEMPLATE_ID'));
 $signingRoles = array_values(array_filter(
     $template['roles'],
-    static fn (array $role): bool => $role['assignment_type'] !== 'Editor',
+    static fn (array $role): bool => strcasecmp($role['assignment_type'], 'Signer') === 0,
 ));
 if ($signingRoles === []) {
     throw new RuntimeException('Configure signing roles in the Assinafy web app first');
@@ -411,6 +412,90 @@ $created = $client->documents()->createFromTemplate(
 Do not apply the ordinary assignment's max-one/coupling validation to template payloads. Template
 cost estimation and creation accept duplicate entries such as
 `notification_methods: ['Email', 'Email']`, which the SDK preserves.
+
+## Contract tracking
+
+Contract tracking is the API's Contract Lifecycle Management (CLM) capability.
+
+Set terms on an existing document, then read or filter them. OAuth clients use `documents:read`
+for reads and `documents:write` for mutations. Writes return 403 unless the workspace plan includes
+contract tracking.
+
+```php
+$contract = $client->contracts()->update($documentId, [
+    'status' => 'active',
+    'counterparty_name' => 'Example Company',
+    'counterparty_taxpayer_id' => '11.222.333/0001-81',
+    'value' => 120000.50,
+    'currency' => 'BRL',
+    'start_date' => '2026-11-01',
+    'end_date' => '2027-10-31',
+    'auto_renew' => true,
+    'renewal_term_months' => 12,
+    'notice_period_days' => 30,
+    'owner_id' => requiredEnv('ASSINAFY_CONTRACT_OWNER_ID'),
+    'metadata' => ['crm_stage' => 'won'],
+    'external_references' => [['system' => 'erp', 'id' => 'C-1042']],
+]);
+
+$sameContract = $client->contracts()->get($documentId);
+$contracts = $client->contracts()->list(1, 25, [
+    'status' => 'active,expired',
+    'counterparty' => 'Example',
+    'end_date_from' => '2026-11-01',
+    'end_date_to' => '2027-12-31',
+    'ending_within_days' => 90,
+    'external_system' => 'erp',
+    'external_id' => 'C-1042',
+    'sort' => 'end_date',
+    'expand' => 'document',
+]);
+```
+
+`external_references` replaces the entire list. Send `[]` or `null` to clear it. To avoid
+overwriting another writer, pass back the exact `updated_at` from `get()` or `update()`:
+
+```php
+$contract = $client->contracts()->update($documentId, [
+    'notice_period_days' => 60,
+    'counterparty_name' => null,
+    'updated_at' => $contract['updated_at'],
+]);
+```
+
+An amendment is its own uploaded document. Link it to the root and include only the terms the
+instrument changes. The link applies after the amendment document is certificated.
+
+```php
+$amendment = $client->contracts()->update($amendmentDocumentId, [
+    'parent_document_id' => $documentId,
+    'relation_type' => 'amendment',
+    'value' => 130000,
+    'end_date' => '2028-06-30',
+]);
+
+$family = $client->contracts()->related($amendmentDocumentId);
+```
+
+Renew by the current term or an explicit later end date. Using `term` or `updated_at` makes an
+ambiguous retry safe: a second renewal is rejected instead of advancing twice.
+
+```php
+$renewed = $client->contracts()->renew($documentId, [
+    'term' => $contract['term'],
+    'value' => 126000,
+    'updated_at' => $contract['updated_at'],
+]);
+
+$terminated = $client->contracts()->terminate($documentId, [
+    'reason' => 'Supplier replaced',
+    'updated_at' => $renewed['updated_at'],
+]);
+```
+
+`get()` returns `document_contract` for a root or `document_contract_amendment` for a linked
+document. `related()` always returns the root with its `amendments`. Document responses expose
+`has_contract`; contract changes and lifecycle alerts use the `document_contract_*` webhook events.
 
 ## Public authentication
 
@@ -598,7 +683,7 @@ the RS256 signature, issuer, audience, expiration and nonce; the SDK ships none.
 
 ## Notification preferences
 
-The authenticated user's nine owner-facing document email preferences default to `true` and are
+The authenticated user's 13 owner-facing document and contract email preferences default to `true` and are
 always returned as a complete map. A non-empty update may contain any subset; omitted values stay
 unchanged. Account and security email such as welcome messages, password resets, invitations, and
 account deletion cannot be disabled here. Both methods are available in sandbox and production:
@@ -615,13 +700,17 @@ $preferences = $bearerClient->users()->notificationPreferences();
 //     'DocumentProcessingFailed' => true,
 //     'TemplateProcessingFailed' => true,
 //     'SignerWhatsappFailed' => true,
+//     'ContractRenewalNotice' => true,
+//     'ContractExpiring' => true,
+//     'ContractExpired' => true,
+//     'ContractRenewed' => true,
 // ]
 
 $updatedPreferences = $bearerClient->users()->updateNotificationPreferences([
     'DocumentAboutToExpire' => false,
     'SignerWhatsappFailed' => true,
 ]);
-// The response is the same complete nine-key boolean map.
+// The response is the same complete 13-key boolean map.
 ```
 
 API-key lifecycle and password-change methods accept a nullable per-call token. Pass `null` to
@@ -770,6 +859,7 @@ outside the published OpenAPI path inventory.
 
 An account can register 1 endpoint, or up to 3 on paid plans. Each endpoint has its own URL,
 events and signing setting.
+New or changed endpoint URLs must use HTTPS.
 
 ```php
 use Assinafy\SDK\Resources\WebhookResource;
@@ -785,7 +875,7 @@ $endpoint = $client->webhooks()->createEndpoint(
     name: 'ERP',
     signingEnabled: true,
 );
-$secret = $endpoint['secret']; // Store immediately; OAuth cannot read or rotate it later.
+$secret = $endpoint['secret']; // Store immediately; OAuth cannot read it later.
 
 $client->webhooks()->updateEndpoint($endpoint['id'], ['is_active' => false]);  // pause
 $endpoints = $client->webhooks()->listEndpoints();
@@ -824,8 +914,12 @@ http_response_code(200);
 ```
 
 After `rotateEndpointSecret()`, deliveries are signed only with the new secret, so update the
-receiver's stored value at once. The subscription methods `register()`, `get()`, `deactivate()` and
-`activate()` act on the account's oldest endpoint.
+receiver's stored value at once. OAuth applications may rotate with `webhooks:write`. Each event
+can receive up to six attempts about ten minutes apart; after ten failed deliveries the endpoint is
+held and probes the oldest missed event on the published backoff. A successful probe or manual
+retry lifts the hold and drains the backlog oldest first. Dispatch entries remain available for
+seven days. The subscription methods `register()`, `get()`, `deactivate()` and `activate()` act on
+the account's oldest endpoint.
 
 ## Two-factor login
 

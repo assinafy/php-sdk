@@ -5,11 +5,11 @@ This reference maps every public resource method in this SDK to the Assinafy API
 - <https://api.assinafy.com.br/v1/docs>
 - <https://api.assinafy.com.br/v1/docs/openapi.json>
 
-This reference describes SDK version 2.7.1. Install published releases with
+This reference describes SDK version 2.8.0. Install published releases with
 `composer require assinafy/php-sdk` and use the documentation shipped with the selected tag.
 See [INSTALLATION.md](INSTALLATION.md) for setup.
 
-Resource classes map all 106 operations in the current production OpenAPI document, including the
+Resource classes map all 118 operations in the current production OpenAPI document, including the
 four OAuth and discovery operations under
 [Marketplace OAuth](#marketplace-oauth-oauthresource). Five working template-management routes
 and two legacy social URL builders exist at runtime outside OpenAPI and are documented with their
@@ -18,9 +18,9 @@ resources.
 Production: `https://api.assinafy.com.br/v1`; sandbox: `https://sandbox.assinafy.com.br/v1`.
 Statistics and notification preferences work in sandbox. Marketplace OAuth is deployed to
 production and sandbox (issuer `https://auth-sandbox.assinafy.com.br` there), and plan-gated
-features can differ between environments. Webhook endpoints, their signing secrets and two-factor
-authentication are deployed to production; sandbox answers those routes with a framework 404 until
-it is updated. Origin-level discovery
+features can differ between environments. Webhook endpoints and their signing secrets are deployed
+to production and sandbox. Two-factor authentication is production-only; sandbox answers those
+routes with a framework 404. Origin-level discovery
 uses a separate public client without the `/v1` prefix.
 
 ## Conventions
@@ -118,9 +118,9 @@ with `Retry-After` (seconds). The SDK never retries automatically; on `ApiExcept
 | Ordinary assignment notifications | At most one notification method is allowed. For Email/WhatsApp verification, a non-empty notification must match; supplying only one side infers the other, omitting both defaults to Email, and an explicit empty list remains empty. `DigitalCertificate` and `IdDocumentFaceMatchBasic` accept either channel. |
 | Template assignment notifications | Template endpoints accept notification arrays without the ordinary-assignment max-one/coupling checks. The SDK preserves the supplied array. |
 | Identity-document verification | `IdDocumentFaceMatchBasic` requires the account feature and a valid CPF in `government_id`, and accepts Email or WhatsApp notification. Signer session methods open the hosted capture after explicit consent. Workspace assignment methods read evidence and decide a review. `pending_identity_review` means every signer has signed while certification awaits review. |
-| Webhook URL operations | `listEndpoints($url)` filters by the exact registered URL. `deleteEndpointByUrl($url)` deletes it and frees its slot; `deleteEndpoint($id)` remains available. |
-| Webhook signing secret | A signed endpoint create response includes `secret`. OAuth applications must persist it then; they cannot read or rotate it later, and must delete/recreate an endpoint if the secret is lost. API-key/user-session clients can use `endpointSecret()`. |
-| Digital-certificate assignment | `DigitalCertificate` requires `method: virtual`, the account feature, a signer `government_id`, and an isolated signing step. The SDK rejects `collect` and all template certificate requests with stable validation code `digital_certificate_requires_virtual_assignment`; template endpoints derive the method from placed fields without exposing it to the SDK. |
+| Webhook URL operations | New and changed webhook URLs require HTTPS. `listEndpoints($url)` and `deleteEndpointByUrl($url)` still accept an exact stored HTTP URL so legacy endpoints can be found or removed. |
+| Webhook signing secret | A signed endpoint create response includes `secret`. OAuth applications must persist it then because they cannot read it later; with `webhooks:write` they may rotate it and must store the replacement immediately. API-key/user-session clients can use `endpointSecret()`. |
+| Digital-certificate assignment | `DigitalCertificate` requires `method: virtual`, the account feature, a valid signer CPF in `government_id`, and an isolated signing step. The SDK rejects ordinary `collect` calls with stable validation code `digital_certificate_requires_virtual_assignment`. Template requests are forwarded; the API returns `400` when placed signer fields make the generated assignment `collect`. |
 | Digital-certificate signer gate | Call `confirmData()` with `has_accepted_terms: true` before `GET /sign`. The confirm-data schema lists only `full_name`, `email`, and `government_id`; the `GET /sign` narrative documents `has_accepted_terms` as part of this body, which is where the SDK sends it. |
 | Template management | `TemplateResource::create()`, `get()`, `update()`, `delete()`, and `downloadPage()` use service routes absent from OpenAPI. They are marked **undocumented** below and may change independently of the specification. |
 | OAuth start/callback | `GET /auth/authenticate` and `GET /login-callback` are absent from OpenAPI. The SDK retains URL builders for legacy social authentication. Marketplace OAuth uses the authorization server described below. |
@@ -144,6 +144,7 @@ resources through `AssinafyClient` instead.
 | `forAuth(string $baseUrl = Configuration::DEFAULT_BASE_URL): self` | Public/bootstrap client that sends no workspace credential. |
 | `forBearer(string $accessToken, string $accountId, string $baseUrl = Configuration::DEFAULT_BASE_URL): self` | Globally Bearer-authenticated workspace client. |
 | `accounts(): AccountResource` | Lazy, cached account resource. |
+| `contracts(): ContractResource` | Lazy, cached document-contract resource. |
 | `documents(): DocumentResource` | Lazy, cached document resource. |
 | `signers(): SignerResource` | Lazy, cached signer resource. |
 | `assignments(): AssignmentResource` | Lazy, cached assignment resource. |
@@ -311,7 +312,7 @@ both to `Email`.
 | `Email` | `AssignmentResource::VERIFICATION_EMAIL` | Enters a code received by email before signing. | An email address on the signer. |
 | `Whatsapp` | `AssignmentResource::VERIFICATION_WHATSAPP` | Enters a code received over WhatsApp before signing. | A `whatsapp_phone_number` on the signer; paid subscriptions only. Requires the WhatsApp notification channel — the two always travel together. |
 | `IdDocumentFaceMatchBasic` | `AssignmentResource::VERIFICATION_ID_DOCUMENT_FACE_MATCH_BASIC` | Hosted government-ID capture, face matching and liveness. | Account feature, valid CPF in `government_id`, explicit biometric-processing consent before capture; a per-signer fee from `estimateCost()`. |
-| `DigitalCertificate` | `AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE` | Signs with their own ICP-Brasil certificate — **A1** (a software file on the device) or **A3** (a smart card or token) — through the Web PKI browser extension, producing a qualified PAdES signature. | `method: virtual`, the account's Digital Certificate feature (Standard and Pro plans), a CPF/CNPJ in the signer's `government_id`, and the signer alone in its signing step. |
+| `DigitalCertificate` | `AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE` | Signs with their own ICP-Brasil certificate — **A1** (a software file on the device) or **A3** (a smart card or token) — through the Web PKI browser extension, producing a qualified PAdES signature. | `method: virtual`, the account's Digital Certificate feature (Standard and Pro plans), a valid CPF in the signer's `government_id`, and the signer alone in its signing step. |
 
 | Notification | Constant | Delivers | Requirements |
 |---|---|---|---|
@@ -395,7 +396,7 @@ non-empty notification must match; if only one side is supplied, the API infers 
 omitting both defaults to Email. DigitalCertificate and IdDocumentFaceMatchBasic accept either notification channel. Explicit
 `notification_methods: []` is preserved instead of replaced.
 
-`DigitalCertificate` requires the account feature and an existing signer whose CPF/CNPJ has been
+`DigitalCertificate` requires the account feature and an existing signer whose valid CPF has been
 set through `signers()->create()` or `signers()->update(..., ['government_id' => ...])`. That signer must be alone in its
 signing step and the assignment method must be `virtual`. Cost estimates add 0.5 credits per
 certificate signer under `SignatureDigitalCertificate`, on top of any notification cost. The SDK
@@ -508,8 +509,8 @@ rather than retry.
 |---|---|---|---|---|---|
 | `get(?string $accessToken = null)` | [`GET /v1/users/self`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fusers%2Fself) | Workspace | No parameters; optional Bearer override, otherwise configured API-key or global-Bearer authentication. | Unwrapped `AuthUser`. OpenAPI sends it directly in `data`; sandbox nests it at `data.user` beside `data.accounts`. The SDK normalizes both. | `200; 401, 500` |
 | `stats(string $granularity = "monthly", ?string $month = null, ?string $accessToken = null)` | [`GET /v1/users/self/stats`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fusers%2Fself%2Fstats) | Workspace | Optional `granularity: monthly\|daily`; SDK requires valid `month: YYYY-MM` for daily; optional Bearer override. | Unwrapped `DocumentStatsRow[]`, summed across the user's accounts. | `200; 400, 401, 500`. |
-| `notificationPreferences(?string $accessToken = null)` | [`GET /v1/users/self/notification-preferences`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fusers%2Fself%2Fnotification-preferences) | Workspace | No parameters; optional Bearer override. | Full unwrapped map `{DocumentCompleted, SignerDeclined, DocumentCancelled, DocumentAboutToExpire, DocumentExpired, DocumentExpirationReset, DocumentProcessingFailed, TemplateProcessingFailed, SignerWhatsappFailed}`, all boolean. | `200; 401, 500`. |
-| `updateNotificationPreferences(array $preferences, ?string $accessToken = null)` | [`PUT /v1/users/self/notification-preferences`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Fusers%2Fself%2Fnotification-preferences) | Workspace | Non-empty partial JSON map containing any of the nine documented keys with boolean values; omitted keys remain unchanged. | Full unwrapped nine-key boolean map. | `200; 400, 401, 500`. |
+| `notificationPreferences(?string $accessToken = null)` | [`GET /v1/users/self/notification-preferences`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fusers%2Fself%2Fnotification-preferences) | Workspace | No parameters; optional Bearer override. | Full unwrapped 13-key `NotificationPreferences` boolean map. | `200; 401, 500`. |
+| `updateNotificationPreferences(array $preferences, ?string $accessToken = null)` | [`PUT /v1/users/self/notification-preferences`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Fusers%2Fself%2Fnotification-preferences) | Workspace | Non-empty partial JSON map containing any documented key with a boolean value; omitted keys remain unchanged. | Full unwrapped 13-key map. | `200; 400, 401, 500`. |
 
 | `mfaMethods(?string $accessToken = null)` | [`GET /v1/users/self/mfa`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fusers%2Fself%2Fmfa) | Workspace | No parameters; optional Bearer override. | Unwrapped `{methods: MfaMethod[], recovery_codes_remaining: integer}`. | `200; 401, 500` |
 | `startTotpEnrollment(?string $label = null, ?string $accessToken = null)` | [`POST /v1/users/self/mfa/totp`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Fusers%2Fself%2Fmfa%2Ftotp) | Workspace | Optional JSON `{label}`. | Unwrapped `{id, secret, provisioning_uri}`; the secret is returned only here. | `200; 401, 500` |
@@ -520,7 +521,7 @@ rather than retry.
 `MfaMethod` is `{id, type: "Totp", label, confirmed_at, last_used_at}`. Two-factor operations are
 deployed to production.
 
-All nine preferences default to `true`. They control owner-facing document email only; welcome,
+All 13 preferences default to `true`. They control owner-facing document and contract email; welcome,
 password-reset, invitation, account-deletion, and other account/security emails are not
 configurable. The read and update operations return this unwrapped shape:
 
@@ -534,7 +535,11 @@ configurable. The read and update operations return this unwrapped shape:
   "DocumentExpirationReset": true,
   "DocumentProcessingFailed": true,
   "TemplateProcessingFailed": true,
-  "SignerWhatsappFailed": true
+  "SignerWhatsappFailed": true,
+  "ContractRenewalNotice": true,
+  "ContractExpiring": true,
+  "ContractExpired": true,
+  "ContractRenewed": true
 }
 ```
 
@@ -569,15 +574,18 @@ file fails locally. The API still performs authoritative PDF parsing and enforce
 | `replaceTags($documentId, $tagNames)` | [`PUT /v1/accounts/{accountId}/documents/{documentId}/tags`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fdocuments%2F%7BdocumentId%7D%2Ftags) | Workspace | Required JSON `{tags: string[]}`. Despite an upstream description saying IDs, runtime values are names and missing names are auto-created. Empty replaces the set with none. | Unwrapped `Tag[]`. | `200; 401, 500` |
 | `appendTags($documentId, $tagNames)` | [`POST /v1/accounts/{accountId}/documents/{documentId}/tags`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fdocuments%2F%7BdocumentId%7D%2Ftags) | Workspace | Required JSON `{tags: string[]}` using names; missing names are auto-created. SDK rejects an empty list. | Unwrapped `Tag[]`. | `200; 401, 500` |
 | `detachTag($documentId, $tagId)` | [`DELETE /v1/accounts/{accountId}/documents/{documentId}/tags/{tagId}`](https://api.assinafy.com.br/v1/docs/markdown?method=delete&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fdocuments%2F%7BdocumentId%7D%2Ftags%2F%7BtagId%7D) | Workspace | Account, document, and tag path IDs. | Unwrapped `{detached: boolean}`. | `200; 401, 500` |
-| `createFromTemplate($templateId, $signers, $options)` | [`POST /v1/accounts/{accountId}/templates/{templateId}/documents`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Ftemplates%2F%7BtemplateId%7D%2Fdocuments) | Workspace | See [Create from template body](#create-from-template-body). The SDK rejects DigitalCertificate because this endpoint does not expose whether placed fields derive `collect`. | Unwrapped `Document`. | `200; 400, 401, 500` |
-| `estimateCostFromTemplate($templateId, $signers)` | [`POST /v1/accounts/{accountId}/templates/{templateId}/documents/estimate-cost`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Ftemplates%2F%7BtemplateId%7D%2Fdocuments%2Festimate-cost) | Workspace | Required `{signers: [{role_id, verification_method?, notification_methods?}]}`; signer ID is not required for estimation. The SDK rejects DigitalCertificate because the derived assignment method is not exposed. | Unwrapped `CostEstimate`. | `200; 401, 500` |
+| `createFromTemplate($templateId, $signers, $options)` | [`POST /v1/accounts/{accountId}/templates/{templateId}/documents`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Ftemplates%2F%7BtemplateId%7D%2Fdocuments) | Workspace | See [Create from template body](#create-from-template-body). `DigitalCertificate` requires a template without placed signer fields; otherwise the API returns `400`. | Unwrapped `Document`. | `200; 400, 401, 500` |
+| `estimateCostFromTemplate($templateId, $signers)` | [`POST /v1/accounts/{accountId}/templates/{templateId}/documents/estimate-cost`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Ftemplates%2F%7BtemplateId%7D%2Fdocuments%2Festimate-cost) | Workspace | Required `{signers: [{role_id, verification_method?, notification_methods?}]}`; signer ID is not required. `DigitalCertificate` returns `400` when placed signer fields make the assignment `collect`. | Unwrapped `CostEstimate`. | `200; 400, 401, 500` |
 
 ### Create from template body
 
 ```text
 signers*[]
   role_id*               template role ID
-  id*                    existing signer ID
+  id                     existing signer ID; required unless `email` is sent
+  email                  reuses or creates a signer when `id` is omitted
+  name                   full name when creating the signer from `email`
+  whatsapp_phone_number  phone when creating the signer from `email`
   verification_method    "Email" | "Whatsapp" | "DigitalCertificate" | "IdDocumentFaceMatchBasic"
   notification_methods[] runtime-preserved list
   step                   positive sequential-signing step
@@ -592,11 +600,10 @@ tags[]                   tag names; missing names are created
 
 The template's `default_document_tags` are always merged into the generated document's tags.
 Template-create prose says a lone verification or notification method infers the other, defaults
-both to Email, and permits only one notification method. A template with placed fields derives a
-`collect` assignment, but neither template endpoint exposes the derived method before accepting,
-inviting or charging a DigitalCertificate signer. The SDK therefore rejects DigitalCertificate
-from both template calls with `digital_certificate_requires_virtual_assignment` until the API can
-guarantee `virtual`. The service accepts other template notification arrays without the
+both to Email, and permits only one notification method. A template with placed signer fields
+derives a `collect` assignment and the API rejects a `DigitalCertificate` signer with `400`; a
+template without those fields can use certificate signing. The service accepts template
+notification arrays without the
 ordinary-assignment max-one/coupling rules, so the SDK preserves the supplied array.
 
 ### Document helper methods
@@ -632,6 +639,36 @@ The permission approved by consent must cover the call; inspect `WWW-Authenticat
 
 The [test instructions](../README.en.md#testing) show how to run the same sandbox document tests
 with each authentication mode. Token issuance still requires a registered application and consent.
+
+## Contracts (`ContractResource`)
+
+Contract tracking is the API's Contract Lifecycle Management (CLM) capability. It attaches
+lifecycle terms to an existing document and links amendment, renewal, or termination documents
+to the root contract. Reads remain available after a workspace plan no
+longer includes contract tracking. Writes require the feature and return 403 when it is unavailable.
+
+| SDK method | Official operation | Auth | Request | SDK success return | Statuses |
+|---|---|---|---|---|---|
+| `list($page = 1, $perPage = 25, $filters = [])` | [`GET /v1/accounts/{accountId}/contracts`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fcontracts) | Workspace (`documents:read`) | Query `page`, `per-page`; optional comma-separated `status` (`draft`, `active`, `expired`, `terminated`), `counterparty`, document-name `search`, `end_date_from`, `end_date_to`, `ending_within_days` (0–3650), `external_system`, `external_id`, `sort` (`end_date`, `updated_at`, optional `-` prefix), and `expand=document`. | Envelope with `data: DocumentContract[]` and normalized `pagination`. | `200; 400, 401, 500` |
+| `get($documentId)` | [`GET /v1/accounts/{accountId}/documents/{documentId}/contract`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fdocuments%2F%7BdocumentId%7D%2Fcontract) | Workspace (`documents:read`) | Document path ID; no query or body. | Unwrapped `DocumentContract` for a root or `DocumentContractAmendment` for a related document. | `200; 401, 404 no terms, 500` |
+| `update($documentId, $data)` | [`PUT /v1/accounts/{accountId}/documents/{documentId}/contract`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fdocuments%2F%7BdocumentId%7D%2Fcontract) | Workspace (`documents:write`) | Non-empty `DocumentContractInput`; fields and null behavior are below. `updated_at` is an optional optimistic-concurrency precondition. | Unwrapped `DocumentContract` or `DocumentContractAmendment`. | `200; 400, 401, 403 feature, 404, 409 changed, 500` |
+| `related($documentId)` | [`GET /v1/accounts/{accountId}/documents/{documentId}/contract/related`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fdocuments%2F%7BdocumentId%7D%2Fcontract%2Frelated) | Workspace (`documents:read`) | Root or related document path ID; no query or body. | Unwrapped root `DocumentContract` with every related document in `amendments`. | `200; 401, 404 no family, 500` |
+| `renew($documentId, $data = [])` | [`POST /v1/accounts/{accountId}/documents/{documentId}/contract/renew`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fdocuments%2F%7BdocumentId%7D%2Fcontract%2Frenew) | Workspace (`documents:write`) | Optional JSON `{end_date?: date?, value?: number?, term?: integer >= 1, updated_at?: date-time}`. Without a non-empty `end_date`, send the current `term`; an explicit date must be after the current end date. | Unwrapped renewed `DocumentContract`. | `200; 400 invalid/repeated, 401, 403 feature, 404, 409 changed, 500` |
+| `terminate($documentId, $data = [])` | [`POST /v1/accounts/{accountId}/documents/{documentId}/contract/terminate`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fdocuments%2F%7BdocumentId%7D%2Fcontract%2Fterminate) | Workspace (`documents:write`) | Optional JSON `{reason?: string? <= 500, updated_at?: date-time}`. HTML is stripped from the reason. | Unwrapped terminated `DocumentContract`. | `200; 400, 401, 403 feature, 404, 409 changed, 500` |
+
+`DocumentContractInput` accepts `status`, `counterparty_name`,
+`counterparty_taxpayer_id`, `value`, `currency`, `start_date`, `end_date`, `auto_renew`,
+`renewal_term_months`, `notice_period_days`, `owner_id`, `metadata`, `external_references`,
+`parent_document_id`, `relation_type`, and `updated_at`. All are optional, but at least one key is
+required. Nullable fields clear their value. `external_references` replaces the complete list;
+`[]` or `null` clears it.
+
+On a first amendment link, `parent_document_id` identifies any document in the family and
+`relation_type` is required as `amendment`, `renewal`, or `termination`; the API resolves the root.
+The remaining fields are the delta applied after the related document is certificated. On a pending
+link, a null term drops that term from the delta, and `parent_document_id: null` unlinks it. Applied
+links are read-only. Send the object's last `updated_at` to prevent a concurrent write from being
+overwritten.
 
 ## Fields (`FieldResource`)
 
@@ -752,19 +789,19 @@ an event receives it independently. The subscription methods (`register`, `get`,
 | SDK method | Official operation | Auth | Request | SDK success return | Statuses |
 |---|---|---|---|---|---|
 | `listEndpoints($url = null)` | [`GET /v1/accounts/{accountId}/webhooks/endpoints`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Fendpoints) | Workspace (`account:read`) | Account path and optional exact `url` query. | Unwrapped `WebhookEndpoint[]`, oldest first. | `200; 401, 500` |
-| `createEndpoint($url, $email, $events = [], ?$name = null, $isActive = true, $signingEnabled = false)` | [`POST /v1/accounts/{accountId}/webhooks/endpoints`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Fendpoints) | Workspace (`webhooks:write`) | Required JSON `{url, email, events}`, plus `is_active`, `signing_enabled` and, when not null, `name`. Empty SDK events selects `DEFAULT_EVENTS`. | Unwrapped `WebhookEndpoint`, plus `secret` when signing is enabled. | `200; 400 duplicate URL, 401, 403 past the plan's endpoint limit, 500` |
+| `createEndpoint($url, $email, $events = [], ?$name = null, $isActive = true, $signingEnabled = false)` | [`POST /v1/accounts/{accountId}/webhooks/endpoints`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Fendpoints) | Workspace (`webhooks:write`) | Required JSON `{url, email, events}`, plus `is_active`, `signing_enabled` and, when not null, `name`. New URLs require HTTPS. Empty SDK events selects `DEFAULT_EVENTS`. | Unwrapped `WebhookEndpoint`, plus `secret` when signing is enabled. | `200; 400 duplicate/invalid URL, 401, 403 past the plan's endpoint limit, 500` |
 | `getEndpoint($endpointId)` | [`GET /v1/accounts/{accountId}/webhooks/endpoints/{endpointId}`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Fendpoints%2F%7BendpointId%7D) | Workspace (`account:read`) | Endpoint path ID. | Unwrapped `WebhookEndpoint`. | `200; 401, 404, 500` |
-| `updateEndpoint($endpointId, $changes)` | [`PUT /v1/accounts/{accountId}/webhooks/endpoints/{endpointId}`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Fendpoints%2F%7BendpointId%7D) | Workspace (`webhooks:write`) | Non-empty partial JSON of `url`, `email`, `events`, `name`, `is_active`, `signing_enabled`; validated locally. Event keys are reindexed to send a JSON array. Enabling signing creates a secret only when none exists; disabling discards it. | Unwrapped `WebhookEndpoint`. | `200; 400, 401, 404, 500` |
+| `updateEndpoint($endpointId, $changes)` | [`PUT /v1/accounts/{accountId}/webhooks/endpoints/{endpointId}`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Fendpoints%2F%7BendpointId%7D) | Workspace (`webhooks:write`) | Non-empty partial JSON of `url`, `email`, `events`, `name`, `is_active`, `signing_enabled`; changed URLs require HTTPS. Event keys are reindexed to send a JSON array. Enabling signing creates and returns a secret only when none exists; disabling discards it. Setting `is_active: true` lifts a delivery hold. | Unwrapped `WebhookEndpoint`, plus a new `secret` when signing is first enabled. | `200; 400, 401, 404, 500` |
 | `deleteEndpoint($endpointId)` | [`DELETE /v1/accounts/{accountId}/webhooks/endpoints/{endpointId}`](https://api.assinafy.com.br/v1/docs/markdown?method=delete&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Fendpoints%2F%7BendpointId%7D) | Workspace (`webhooks:write`) | Endpoint path ID. | `[]`. | `200; 401, 404, 500` |
 | `deleteEndpointByUrl($url)` | [`DELETE /v1/accounts/{accountId}/webhooks/endpoints`](https://api.assinafy.com.br/v1/docs/markdown?method=delete&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Fendpoints) | Workspace (`webhooks:write`) | Required exact `url` query; no body. | `[]`. | `200; 400 missing URL, 401, 404 no matching endpoint, 500` |
 | `endpointSecret($endpointId)` | [`GET /v1/accounts/{accountId}/webhooks/endpoints/{endpointId}/secret`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Fendpoints%2F%7BendpointId%7D%2Fsecret) | API key or user token; not OAuth | Endpoint path ID. | The `whsec_` secret string from `data.secret`. | `200; 400 signing disabled, 401, 404, 500` |
-| `rotateEndpointSecret($endpointId)` | [`POST /v1/accounts/{accountId}/webhooks/endpoints/{endpointId}/secret/rotate`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Fendpoints%2F%7BendpointId%7D%2Fsecret%2Frotate) | API key or user token; not OAuth | No body. The previous secret stops working immediately. | The new `whsec_` secret string. | `200; 400 signing disabled, 401, 404, 500` |
-| `register($url, $email, $events, $isActive)` | [`PUT /v1/accounts/{accountId}/webhooks/subscriptions`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Fsubscriptions) | Workspace | Required JSON `{events: string[], is_active: boolean, url: URI, email: email}`. The URL must be absolute and use HTTP or HTTPS; HTTPS is recommended. Empty SDK events selects `DEFAULT_EVENTS`. | Unwrapped `WebhookSubscription`. | `200; 400, 401, 500` |
+| `rotateEndpointSecret($endpointId)` | [`POST /v1/accounts/{accountId}/webhooks/endpoints/{endpointId}/secret/rotate`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Fendpoints%2F%7BendpointId%7D%2Fsecret%2Frotate) | Workspace (`webhooks:write` for OAuth) | No body. The previous secret stops working immediately. | The new `whsec_` secret string. | `200; 400 signing disabled, 401, 404, 500` |
+| `register($url, $email, $events, $isActive)` | [`PUT /v1/accounts/{accountId}/webhooks/subscriptions`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Fsubscriptions) | Workspace | Required JSON `{events: string[], is_active: boolean, url: URI, email: email}`. New or changed URLs require HTTPS. Empty SDK events selects `DEFAULT_EVENTS`. | Unwrapped `WebhookSubscription`. | `200; 400, 401, 500` |
 | `get()` | [`GET /v1/accounts/{accountId}/webhooks/subscriptions`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Fsubscriptions) | Workspace | Account path only. | Unwrapped `WebhookSubscription`, or null when the returned data is empty. | `200; 401, 500` |
 | `deactivate()` | [`PUT /v1/accounts/{accountId}/webhooks/inactivate`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Finactivate) | Workspace | No body. | Unwrapped `WebhookSubscription`. | `200; 401, 500` |
 | `activate()` | Composite over [`GET`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Fsubscriptions) and [`PUT /v1/accounts/{accountId}/webhooks/subscriptions`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Fsubscriptions) | Workspace | Reads the stored subscription and re-sends it with `is_active=true`; throws when no URL is configured. | Unwrapped `WebhookSubscription`. | Combined get/update behavior. |
 | `eventTypes()` | [`GET /v1/webhooks/event-types`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fwebhooks%2Fevent-types) | Workspace | No parameters. | Unwrapped `WebhookEventType[]`. | `200; 401, 500` |
-| `dispatches($filters)` | [`GET /v1/accounts/{accountId}/webhooks`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks) | Workspace | Query `event`, `delivered: "true"\|"false"`, Unix `from`, Unix `to`, `page`, `per-page`. | Envelope with `data: WebhookDispatch[]` and normalized `pagination`. | `200; 401, 500` |
+| `dispatches($filters)` | [`GET /v1/accounts/{accountId}/webhooks`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks) | Workspace | Query `endpoint_id`, `event`, `delivered: "true"\|"false"`, Unix `from`, Unix `to`, `page`, `per-page`. | Envelope with `data: WebhookDispatch[]` and normalized `pagination`. | `200; 401, 500` |
 | `retryDispatch($dispatchId)` | [`POST /v1/accounts/{accountId}/webhooks/{historyId}/retry`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2F%7BhistoryId%7D%2Fretry) | Workspace | Dispatch history path ID. | Unwrapped new `WebhookDispatch`. | `200; 400, 401, 404, 500` |
 
 ## Schema dictionary
@@ -786,7 +823,7 @@ Operations above refer to the shared response schemas below. `?` means nullable.
 | `AuthSession` | `access_token: string`, `user: AuthUser`, `accounts: AuthAccount[]`. |
 | `AuthUser` | `id`, `name`, `email`, `telephone?`, `government_id?`, `is_email_verified`, `has_accepted_terms`, `created_at`, `to_be_deleted_at?`. Dates are ISO-8601 date-times. |
 | `AuthAccount` | `id`, `name`, `roles: string[]`, `is_delete_allowed: boolean`, `created_at`. |
-| `NotificationPreferences` | Nine boolean keys: `DocumentCompleted`, `SignerDeclined`, `DocumentCancelled`, `DocumentAboutToExpire`, `DocumentExpired`, `DocumentExpirationReset`, `DocumentProcessingFailed`, `TemplateProcessingFailed`, `SignerWhatsappFailed`. All are returned and default to true. |
+| `NotificationPreferences` | 13 boolean keys: `DocumentCompleted`, `SignerDeclined`, `DocumentCancelled`, `DocumentAboutToExpire`, `DocumentExpired`, `DocumentExpirationReset`, `DocumentProcessingFailed`, `TemplateProcessingFailed`, `SignerWhatsappFailed`, `ContractRenewalNotice`, `ContractExpiring`, `ContractExpired`, `ContractRenewed`. All are returned and default to true. |
 
 ### Account, signer, and tag schemas
 
@@ -802,7 +839,7 @@ Operations above refer to the shared response schemas below. `?` means nullable.
 
 | Schema | Fields |
 |---|---|
-| `Document` | `resource`, `id`, `account_id`, `template_id?`, `name`, `status`, `artifacts: object`, `is_closed`, `signing_url`, `decline_reason?`, `declined_by: Signer?`, `tags: {id,name}[]`, `assignment: Assignment?`, `pages: DocumentPage[]`, `created_at`, `updated_at`. |
+| `Document` | `resource`, `id`, `account_id`, `template_id?`, `name`, `status`, `artifacts: object`, `is_closed`, `has_contract`, `signing_url`, `decline_reason?`, `declined_by: Signer?`, `tags: {id,name}[]`, `assignment: Assignment?`, `pages: DocumentPage[]`, `created_at`, `updated_at`. |
 | `DocumentPage` | `id`, `number: integer`, `height: integer`, `width: integer`, `download_url`. |
 | `DocumentStatus` | `code`, `deletable: boolean`. Catalog codes: `uploading`, `uploaded`, `metadata_processing`, `metadata_ready`, `expired`, `certificating`, `certificated`, `rejected_by_signer`, `pending_signature`, `pending_identity_review`, `rejected_by_user`, `failed`. Webhook/runtime status `ready` is also supported through `STATUS_READY`. |
 | `DocumentVerification` | `hash`, `id?`, `agreement_code?: string?` (the agreement code printed on the certificate; may be absent — sandbox omits it — or null, so read it with `$result['agreement_code'] ?? null`), `status?`, `page_count: string?`, `signer_count: string?`, `completed_count: integer?`, `completed_at?`, `verified_at`, `is_valid`, `message`. Note that the published types of page and signer count are strings. |
@@ -815,11 +852,19 @@ breakdown. A signer notified on more than one channel counts once in each channe
 sum to at least `signature_requests`. The four `signature_requests_verification_*` counters are
 mutually exclusive and always sum to `signature_requests`.
 
+### Contract schemas
+
+| Schema | Fields |
+|---|---|
+| `DocumentContract` | `resource: document_contract`, `document_id`, `status: draft\|active\|expired\|terminated`, `counterparty_name?`, `counterparty_taxpayer_id?`, `value: number?`, `currency?`, `start_date?`, `end_date?`, `auto_renew`, `renewal_term_months: integer?`, `notice_period_days: integer?`, `term: integer`, `owner_id?`, `metadata: object?`, `external_references: {system,id}[]?`, optional expanded `document: Document`, optional `amendments: DocumentContractAmendment[]`, `created_at`, `updated_at`. |
+| `DocumentContractAmendment` | `resource: document_contract_amendment`, `document_id`, `document_name`, `parent_document_id`, `relation_type: amendment\|renewal\|termination`, `number: integer?`, `status: pending\|applied`, `document_status`, `apply_error?`, `currency?`, `terms: object?`, `changes: object?`, `applied_at?`, `created_at`, `updated_at`. |
+| `DocumentContractInput` | Optional `status`, `counterparty_name?`, `counterparty_taxpayer_id?`, `value?`, `currency?`, `start_date?`, `end_date?`, `auto_renew`, `renewal_term_months?`, `notice_period_days?`, `owner_id?`, `metadata?`, `external_references?`, `parent_document_id?`, `relation_type`, `updated_at`. A request must contain at least one field. |
+
 ### Assignment schemas
 
 | Schema | Fields |
 |---|---|
-| `Assignment` | `resource`, `id`, `sender_email`, `method: "virtual"\|"collect"`, `expires_at?`, `message?`, `signers: AssignmentSigner[]`, `copy_receivers: object[]`, `items: AssignmentItem[]`, `summary: AssignmentSummary`, `signing_urls: SigningUrl[]`. |
+| `Assignment` | `resource`, `id`, `document_id`, `sender_email`, `method: "virtual"\|"collect"`, `expires_at?`, `message?`, `signers: AssignmentSigner[]`, `copy_receivers: object[]`, `items: AssignmentItem[]`, `summary: AssignmentSummary`, `signing_urls: SigningUrl[]`, `created_at`. |
 | `IdentityVerificationState` | `can_start: boolean`, `status: string?`, `url: string?` (Pending only), `expires_at: date-time?`, `completed_at: date-time?`. |
 | `IdentityVerificationSession` | `id: string`, `url: string`, `expires_at: date-time?`. Open the capture URL unchanged, including `#t=`; keep this bearer link out of logs and browser storage. |
 | `SignerIdentityReview` | `id`, `status: Pending\|InReview\|Approved\|Declined\|Expired\|Abandoned`, `provider: AssinafyVerify`, `verification_method: IdDocumentFaceMatchBasic`, `reason_codes: {code,description}[]`, `evidence_available: boolean`, `expected: {name?,cpf?}?`, `document: {type?,name?,cpf?}?`, `matches: {cpf: boolean?,name: number?,birth_date: boolean?}?`, `checks: {name,result,score: number?,reasons: string[]}[]`, `images: string[]`, `ruleset_version?`, `evidence_sha256?`, `reviewed_by: {id,name}?`, `reviewed_at: date-time?`, `review_note?`, `completed_at: date-time?`. Images exist only during InReview. Provider-approved evidence without review is in the signer_identity_verified activity. |
@@ -877,10 +922,10 @@ Template status is one of `Uploading`, `Uploaded`, `Processing`, `Ready`, or `Fa
 
 | Schema | Fields |
 |---|---|
-| `WebhookEndpoint` | `id`, `name: string?`, `url`, `email`, `events: string[]`, `is_active`, `signing_enabled`, `created_at`, `updated_at`. |
+| `WebhookEndpoint` | Single responses add `resource`; all responses include `id`, `name: string?`, `url`, `email`, `events: string[]`, `is_active`, `is_held`, `held_since?`, `signing_enabled`, `created_at`, `updated_at`. |
 | `WebhookEndpointSecret` | `secret: string`, a `whsec_` prefix followed by the base64-encoded HMAC key. Secret reads and rotation return this object inside `data`; SDK methods return the string. |
 | `WebhookSubscription` | `events: string[]`, `is_active`, `url?`, `email?`, `updated_at?`. |
-| `WebhookDispatch` | `resource`, `id`, `event`, `activity_id: integer`, `endpoint?`, `payload: object?`, `delivered`, `http_status: integer?`, `response_body?`, `error?`, `created_at`, `updated_at`. Stored response body is truncated to 2,000 characters. |
+| `WebhookDispatch` | `resource`, `id`, `event`, `activity_id: integer`, `endpoint_id?`, `endpoint?`, `payload: object?`, `delivered`, `webhook_id?`, `attempt: integer?`, `kind: scheduled\|probe\|manual`, `will_retry`, `http_status: integer?`, `response_body?`, `error?`, `created_at`, `updated_at`. Stored response body is truncated to 2,000 characters. |
 | `WebhookEvent` | Required `id: integer`, `event: string`, `created_at: integer` Unix seconds, `subject: object`, `object: object`, `account_id: string`; nullable `message`, `payload: object?`, `origin: {ip,user-agent}?`. See the complete incoming body and event catalog below. |
 | `WebhookEventType` | `id`, `description`. |
 | `WhatsappNotification` | `sent_at: integer` Unix timestamp, `header`, `body`, `buttons: {text}[]`, `phone_number`, `signer_id`. |
@@ -905,9 +950,9 @@ Webhook deliveries are outbound requests from Assinafy to every active endpoint 
 |---|---|
 | Method and media type | `POST`, `Content-Type: application/json`, `Connection: close`. |
 | Success | Any 2xx response. |
-| Attempts | Initial attempt plus one retry (two total), with three seconds between attempts. |
-| Circuit breaker | After ten consecutive failed events, delivery pauses and approximately 5% of events are probed until one succeeds. Manual retry forces another delivery. |
-| Response capture | First 2,000 response-body characters are stored in dispatch history. |
+| Attempts | Up to six attempts per event, approximately ten minutes apart, for connection failures, timeouts, 408, 429, and 5xx responses. Other HTTP responses are final. |
+| Delivery hold | After ten failed deliveries in a row, the endpoint is held. The oldest missed event is probed after about 3, 15, and 60 minutes, then every 6 hours. A successful probe or manual retry lifts the hold and delivers the backlog oldest first; changing the URL or setting `is_active: true` also lifts it. |
+| Response capture | First 2,000 response-body characters are stored. Dispatch entries are retained for seven days. |
 | `webhook-id` header | Message ID, identical on every attempt of the same event to the same endpoint; the deduplication key. |
 | `webhook-timestamp` header | Unix timestamp (seconds) of the attempt. |
 | `webhook-signature` header | Present when the endpoint has `signing_enabled`: space-separated `v1,<base64 HMAC-SHA256>` entries following Standard Webhooks. Verify with `WebhookEventParser::verifySignature()`. |
@@ -940,6 +985,14 @@ polymorphic objects without imposing a fixed resource shape.
 | `assignment_created` | User → Document | `user_name`, `user_email`, `user_telephone` |
 | `document_ready` | Account → Document | none |
 | `document_processing_failed` | Account → Document | `error_message` |
+| `document_contract_updated` | User or Account → Document | `user_name` for a user change, `end_date`, `changed` |
+| `document_contract_renewal_notice` | Account → Document | `end_date` |
+| `document_contract_expiring` | Account → Document | `days_before`, `end_date` |
+| `document_contract_expired` | Account → Document | `end_date`, `changed` |
+| `document_contract_renewed` | User or Account → Document | optional `user_name`, `end_date`, `changed` |
+| `document_contract_terminated` | User → Document | `user_name`, `reason`, `end_date`, `changed` |
+| `document_contract_amended` | User or Account → parent Document | related `document_id`, `relation_type`, `number`, `changes`, `end_date`, `changed`, optional `user_name` |
+| `document_contract_amendment_updated` | User → related Document | `user_name`, `parent_document_id`, `relation_type`, `terms`, `changed` |
 | `signature_requested` | User → Document | `signer_full_name`, `signer_email`, `signer_whatsapp_phone_number`, `notification_method` |
 | `signer_created` | User → Signer | `signer_full_name` |
 | `signer_email_verified` | Signer → Document | `signer_full_name`, `signer_email` |
@@ -958,7 +1011,7 @@ polymorphic objects without imposing a fixed resource shape.
 | `template_processed` | User → Template | none |
 | `template_processing_failed` | Account → Template | `error_message` |
 
-`assignment_created` and `document_metadata_ready` have no guaranteed order in the virtual pre-metadata flow. Consumers must tolerate new event fields and unknown event codes. The SDK exposes constants for all 23 documented events; `eventTypes()` remains the authoritative runtime catalog for future additions.
+`assignment_created` and `document_metadata_ready` have no guaranteed order in the virtual pre-metadata flow. Consumers must tolerate new event fields and unknown event codes. The SDK exposes constants for all 31 documented events; `eventTypes()` remains the authoritative runtime catalog for future additions.
 
 `document_ready` deliveries use document status `ready`. Consumers should use the actual
 `Document.status` value delivered and tolerate future status values.

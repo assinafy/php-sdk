@@ -271,6 +271,20 @@ final class OAuthResourceTest extends TestCase
         }
     }
 
+    public function testHandleCallbackRejectsAStoredTransactionWithoutAnIssuer(): void
+    {
+        $start = $this->oauth->startAuthorization(self::REDIRECT, [OAuthResource::SCOPE_ACCOUNT_READ]);
+        unset($start['issuer']);
+
+        $this->expectException(ValidationException::class);
+        $this->expectExceptionMessage('transaction is missing its issuer');
+        $this->oauth->handleCallback([
+            'code' => 'authorization-code',
+            'state' => $start['state'],
+            'iss' => OAuthResource::DEFAULT_ISSUER,
+        ], $start);
+    }
+
     public function testHandleCallbackPreservesTheConfiguredIssuerIdentifier(): void
     {
         $issuer = 'https://auth.example.test/tenant/';
@@ -387,6 +401,16 @@ final class OAuthResourceTest extends TestCase
     {
         $this->expectException(ValidationException::class);
         $this->oauth->exchangeCode('authorization-code', ['redirect_uri' => self::REDIRECT]);
+    }
+
+    public function testExchangeCodeRejectsAStoredTransactionWithoutAResource(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->expectExceptionMessage('transaction is missing its resource');
+        $this->oauth->exchangeCode('authorization-code', [
+            'code_verifier' => OAuthResource::createCodeVerifier(),
+            'redirect_uri' => self::REDIRECT,
+        ]);
     }
 
     public function testExchangeCodeRejectsAnEmptyCode(): void

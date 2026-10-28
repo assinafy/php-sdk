@@ -4,6 +4,27 @@ Install a published 2.x release with `composer require assinafy/php-sdk:^2.7`. R
 VCS/path repository overrides if they prevent Composer from resolving the Packagist package.
 Use the documentation shipped with the installed tag; `main` may include unreleased changes.
 
+## Upgrading to 2.8.0
+
+`AssinafyClient::contracts()` adds document contract tracking. Existing integrations need no code
+change. OAuth connections need `documents:read` for contract reads and `documents:write` for
+contract updates, renewals, and terminations. Contract writes may return 403 when the workspace's
+plan does not include contract tracking. `users()->notificationPreferences()` now recognizes and
+returns the four contract lifecycle email preferences, for a complete 13-key map.
+
+New or changed webhook URLs must use HTTPS. Existing stored HTTP endpoints remain addressable by
+`listEndpoints($url)` and `deleteEndpointByUrl($url)`, and `activate()` can re-enable an unchanged
+legacy subscription. OAuth applications with `webhooks:write` may call
+`rotateEndpointSecret()`; `endpointSecret()` remains unavailable to OAuth tokens.
+
+Persist the complete array returned by `OAuthResource::startAuthorization()`. Callback validation
+now rejects a stored transaction without its original `issuer`, and code exchange rejects one
+without its original `resource`. `DigitalCertificate` signers require a valid CPF in
+`government_id`; A1 and A3 continue to use the same verification method and payload. Template
+certificate requests now reach the API and work when the template has no placed signer fields;
+templates that derive `collect` return `400`. The SDK
+User-Agent is `Assinafy-PHP-SDK/v2.8.0`.
+
 ## Upgrading to 2.7.1
 
 `DigitalCertificate` signers now require `AssignmentResource::METHOD_VIRTUAL`. Ordinary
@@ -23,7 +44,8 @@ existing signer ID for this verification method. See the complete flow in README
 
 `listEndpoints()` accepts an optional exact URL; `deleteEndpointByUrl()` deletes that endpoint.
 Signed endpoint creation returns the secret in `secret`: OAuth applications must store it then,
-since later secret reads and rotations are unavailable to them.
+because later secret reads are unavailable to them. Applications with `webhooks:write` may rotate
+the secret and must persist the replacement immediately.
 
 Pass the issuer exactly as authorization-server metadata publishes it. Authorization transactions
 preserve trailing slashes, and callback `iss` must match byte-for-byte. Scope tokens containing
@@ -248,7 +270,7 @@ A new workspace can return a subscription object with an empty URL; `get()` retu
 - Signer updates accept `government_id`. Responses may omit or mask the identifier. Updating a
   verified channel on an in-flight assignment may be rejected; changing an unverified channel can
   rotate its codes, requiring invitation resend.
-- DigitalCertificate assignments require the account feature, CPF/CNPJ and an isolated signing
+- DigitalCertificate assignments require the account feature, a valid CPF and an isolated signing
   step. Use `pades` only for certificate-signed documents. The ordinary signer-session sign method
   does not implement certificate completion.
 - Public send-token uses `{recipient, channel: 'email'}` for a signer already assigned to the

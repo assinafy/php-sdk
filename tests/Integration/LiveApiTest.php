@@ -10,6 +10,7 @@ use Assinafy\SDK\Exceptions\ApiException;
 use Assinafy\SDK\Resources\AssignmentResource;
 use Assinafy\SDK\Resources\DocumentResource;
 use Assinafy\SDK\Resources\OAuthResource;
+use Assinafy\SDK\Resources\UserResource;
 use Assinafy\SDK\Resources\WebhookResource;
 use PHPUnit\Framework\TestCase;
 
@@ -25,6 +26,7 @@ use PHPUnit\Framework\TestCase;
  *   ASSINAFY_NOTIFICATION_TESTS – set to 1 to enable notification flows
  *   ASSINAFY_TEST_EMAIL / ASSINAFY_TEST_EMAIL_ALT – controlled notification recipients
  *   ASSINAFY_STATEFUL_TESTS – set to 1 to modify and restore shared account settings
+ *   ASSINAFY_REQUIRE_PLAN_FEATURES – set to 1 to reject feature-gate 403 responses
  *
  * The OAuth tests need no registered application: they read public discovery documents
  * and assert that an unknown client is refused. OAuth is deployed to production and
@@ -348,6 +350,94 @@ final class LiveApiTest extends TestCase
         if (isset($page['pagination'])) {
             $this->assertSame(1, $page['pagination']['per_page']);
         }
+    }
+
+    public function testContractListWhenDeployedToSandbox(): void
+    {
+        try {
+            $page = $this->client->contracts()->list(1, 1, [
+                'sort' => '-updated_at',
+                'expand' => 'document',
+            ]);
+        } catch (ApiException $e) {
+            if ($e->getStatusCode() === 404) {
+                $this->markTestSkipped('Documented contract routes are not deployed to sandbox');
+            }
+            throw $e;
+        }
+
+        $this->assertIsArray($page['data'] ?? null);
+        if (isset($page['pagination'])) {
+            $this->assertSame(1, $page['pagination']['per_page']);
+        }
+    }
+
+    public function testContractLifecycleWhenAvailable(): void
+    {
+        $document = $this->retryRateLimited(
+            fn () => $this->client->documents()->upload($this->makePdfFixture())
+        );
+        $documentId = (string) $document['id'];
+        $this->createdDocuments[] = $documentId;
+        $this->client->documents()->waitUntilReady($documentId, 60, 2);
+
+        $today = new \DateTimeImmutable('today');
+        $externalId = 'sdk-' . bin2hex(random_bytes(6));
+        try {
+            $contract = $this->retryRateLimited(fn () => $this->client->contracts()->update(
+                $documentId,
+                [
+                    'status' => 'active',
+                    'counterparty_name' => 'Example Company',
+                    'start_date' => $today->format('Y-m-d'),
+                    'end_date' => $today->modify('+1 year')->format('Y-m-d'),
+                    'renewal_term_months' => 12,
+                    'external_references' => [['system' => 'sdk', 'id' => $externalId]],
+                ]
+            ));
+        } catch (ApiException $e) {
+            if ($e->getStatusCode() === 404) {
+                $this->markTestSkipped('Documented contract routes are not deployed to this environment');
+            }
+            if (
+                $e->getStatusCode() === 403
+                && getenv('ASSINAFY_REQUIRE_PLAN_FEATURES') !== '1'
+            ) {
+                $this->markTestSkipped('The workspace plan does not include contract tracking');
+            }
+            throw $e;
+        }
+
+        $this->assertSame($documentId, $contract['document_id'] ?? null);
+        $this->assertSame('active', $contract['status'] ?? null);
+
+        $fetched = $this->retryRateLimited(fn () => $this->client->contracts()->get($documentId));
+        $this->assertSame($externalId, $fetched['external_references'][0]['id'] ?? null);
+
+        $listed = $this->retryRateLimited(fn () => $this->client->contracts()->list(1, 10, [
+            'external_system' => 'sdk',
+            'external_id' => $externalId,
+        ]));
+        $this->assertContains($documentId, array_column($listed['data'] ?? [], 'document_id'));
+
+        $related = $this->retryRateLimited(fn () => $this->client->contracts()->related($documentId));
+        $this->assertSame($documentId, $related['document_id'] ?? null);
+        $this->assertSame([], $related['amendments'] ?? null);
+
+        $renewed = $this->retryRateLimited(fn () => $this->client->contracts()->renew($documentId, [
+            'term' => $contract['term'],
+            'updated_at' => $contract['updated_at'],
+        ]));
+        $this->assertSame(((int) $contract['term']) + 1, $renewed['term'] ?? null);
+
+        $terminated = $this->retryRateLimited(fn () => $this->client->contracts()->terminate(
+            $documentId,
+            [
+                'reason' => 'SDK integration cleanup',
+                'updated_at' => $renewed['updated_at'],
+            ]
+        ));
+        $this->assertSame('terminated', $terminated['status'] ?? null);
     }
 
     public function testTemplatesList(): void
@@ -773,18 +863,80 @@ final class LiveApiTest extends TestCase
             ];
         }
 
+        $editorRoleIds = [];
+        foreach ($template['roles'] ?? [] as $role) {
+            if (strcasecmp((string) ($role['assignment_type'] ?? ''), 'Editor') === 0) {
+                $editorRoleIds[(string) $role['id']] = true;
+            }
+        }
+        $editorFields = [];
+        foreach ($template['pages'] ?? [] as $page) {
+            foreach ($page['fields'] ?? [] as $field) {
+                $fieldId = $field['field_id'] ?? null;
+                if (
+                    isset($editorRoleIds[(string) ($field['role_id'] ?? '')])
+                    && is_string($fieldId)
+                    && $fieldId !== ''
+                ) {
+                    $editorFields[$fieldId] = [
+                        'field_id' => $fieldId,
+                        'value' => 'SDK integration',
+                    ];
+                }
+            }
+        }
+
+        $options = [
+            'name' => 'SDK integration ' . uniqid(),
+            'expires_at' => '2099-12-31T23:59:00Z',
+        ];
+        if ($editorFields !== []) {
+            $options['editor_fields'] = array_values($editorFields);
+        }
+
         $newDoc = $this->client->documents()->createFromTemplate(
             $template['id'],
             $signerEntries,
-            [
-                'name' => 'SDK integration ' . uniqid(),
-                'expires_at' => '2099-12-31T23:59:00Z',
-            ]
+            $options
         );
         $this->assertArrayHasKey('id', $newDoc);
         $this->createdDocuments[] = $newDoc['id'];
         $ready = $this->client->documents()->waitUntilReady((string) $newDoc['id'], 60, 2);
         $this->assertContains($ready['status'] ?? null, DocumentResource::READY_STATUSES);
+    }
+
+    public function testTemplateDigitalCertificateEligibilityReachesTheApi(): void
+    {
+        $signingTemplate = $this->findTemplateWithSigningRole();
+        if ($signingTemplate === null) {
+            $this->markTestSkipped('No template with a signing role in this account');
+        }
+
+        [$template, $roleIds] = $signingTemplate;
+        $signers = array_map(
+            static fn (string $roleId): array => [
+                'role_id' => $roleId,
+                'verification_method' => AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE,
+                'notification_methods' => [AssignmentResource::NOTIFICATION_EMAIL],
+            ],
+            $roleIds
+        );
+
+        try {
+            $estimate = $this->client->documents()->estimateCostFromTemplate(
+                (string) $template['id'],
+                $signers
+            );
+            $this->assertArrayHasKey('has_sufficient_resources', $estimate);
+        } catch (ApiException $e) {
+            if (
+                $e->getStatusCode() === 403
+                && getenv('ASSINAFY_REQUIRE_PLAN_FEATURES') === '1'
+            ) {
+                throw $e;
+            }
+            $this->assertContains($e->getStatusCode(), [400, 403], $e->getMessage());
+        }
     }
 
     /** Webhook register / get / deactivate / activate round-trip. */
@@ -933,7 +1085,6 @@ final class LiveApiTest extends TestCase
         }
     }
 
-    /** Read-only webhook discovery endpoints. */
     /**
      * Every event the API advertises must have an `EVENT_*` constant.
      *
@@ -1158,7 +1309,11 @@ final class LiveApiTest extends TestCase
             throw $e;
         }
 
-        $this->assertCount(9, $preferences);
+        $this->assertCount(count(UserResource::NOTIFICATION_PREFERENCE_CODES), $preferences);
+        $this->assertSame(
+            [],
+            array_values(array_diff(UserResource::NOTIFICATION_PREFERENCE_CODES, array_keys($preferences)))
+        );
         foreach ($preferences as $enabled) {
             $this->assertIsBool($enabled);
         }
@@ -1324,7 +1479,9 @@ final class LiveApiTest extends TestCase
 
     public function testRenameWorksWhileTheDocumentIsStillEditable(): void
     {
-        $doc = $this->client->documents()->upload($this->makePdfFixture());
+        $doc = $this->retryRateLimited(
+            fn () => $this->client->documents()->upload($this->makePdfFixture())
+        );
         $this->createdDocuments[] = $doc['id'];
 
         $ready = $this->client->documents()->waitUntilReady($doc['id']);
@@ -1341,7 +1498,9 @@ final class LiveApiTest extends TestCase
      */
     public function testRenameNormalisesDiacritics(): void
     {
-        $doc = $this->client->documents()->upload($this->makePdfFixture());
+        $doc = $this->retryRateLimited(
+            fn () => $this->client->documents()->upload($this->makePdfFixture())
+        );
         $this->createdDocuments[] = $doc['id'];
         $this->client->documents()->waitUntilReady($doc['id']);
 
@@ -1385,16 +1544,9 @@ final class LiveApiTest extends TestCase
         $this->assertArrayHasKey('has_sufficient_resources', $estimate);
     }
 
-    // ---------------------------------------------------------------------------------
-    // Signer session — guards the published signer-access-code query contract.
-    // ---------------------------------------------------------------------------------
-
     /**
-     * A bogus query code must produce 401 "invalid credentials" (the server found and
-     * rejected it), rather than a route miss or missing-parameter response.
-     */
-    /**
-     * WhatsApp and digital-certificate assignments use the same request shape as Email.
+     * WhatsApp, digital-certificate, and identity-document assignments use the same
+     * request shape as Email.
      * Plans without those features answer 403 on both the estimate and the creation; a
      * plan that has them accepts the request. Either answer proves the shape was accepted
      * up to the plan check.
@@ -1422,6 +1574,10 @@ final class LiveApiTest extends TestCase
                 'id' => $certificate['id'],
                 'verification_method' => AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE,
             ]],
+            [[
+                'id' => $certificate['id'],
+                'verification_method' => AssignmentResource::VERIFICATION_ID_DOCUMENT_FACE_MATCH_BASIC,
+            ]],
         ];
         foreach ($cases as $signers) {
             $document = $this->client->documents()->upload($this->makePdfFixture());
@@ -1435,6 +1591,9 @@ final class LiveApiTest extends TestCase
                     );
                     $this->assertIsArray($result);
                 } catch (ApiException $e) {
+                    if (getenv('ASSINAFY_REQUIRE_PLAN_FEATURES') === '1') {
+                        throw $e;
+                    }
                     $this->assertSame(403, $e->getStatusCode(), $e->getMessage());
                 }
             }
@@ -1480,6 +1639,10 @@ final class LiveApiTest extends TestCase
         }
     }
 
+    /**
+     * A bogus query code must produce 401 "invalid credentials" (the server found and
+     * rejected it), rather than a route miss or missing-parameter response.
+     */
     public function testSignerAccessCodeQueryParameterIsRecognized(): void
     {
         try {
@@ -1645,7 +1808,7 @@ final class LiveApiTest extends TestCase
             $template = $this->client->templates()->get($id);
             $roleIds = [];
             foreach ($template['roles'] ?? [] as $role) {
-                if (strcasecmp((string) ($role['assignment_type'] ?? ''), 'Editor') !== 0) {
+                if (strcasecmp((string) ($role['assignment_type'] ?? ''), 'Signer') === 0) {
                     $roleIds[] = (string) $role['id'];
                 }
             }

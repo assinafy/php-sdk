@@ -10,6 +10,7 @@ use Assinafy\SDK\Http\HttpClientInterface;
 use Assinafy\SDK\Resources\AccountResource;
 use Assinafy\SDK\Resources\AssignmentResource;
 use Assinafy\SDK\Resources\AuthResource;
+use Assinafy\SDK\Resources\ContractResource;
 use Assinafy\SDK\Resources\DocumentResource;
 use Assinafy\SDK\Resources\FieldResource;
 use Assinafy\SDK\Resources\OAuthResource;
@@ -34,6 +35,7 @@ class AssinafyClient
     private MutableLogger $loggerProxy;
 
     private ?AccountResource $accounts = null;
+    private ?ContractResource $contracts = null;
     private ?DocumentResource $documents = null;
     private ?SignerResource $signers = null;
     private ?AssignmentResource $assignments = null;
@@ -151,6 +153,21 @@ class AssinafyClient
         }
 
         return $this->documents;
+    }
+
+    /**
+     * Contracts: track document terms, relationships, renewals, and terminations.
+     *
+     * Reads require the OAuth `documents:read` scope. Writes require `documents:write`
+     * and a workspace plan that includes contract tracking. Account-scoped.
+     */
+    public function contracts(): ContractResource
+    {
+        if ($this->contracts === null) {
+            $this->contracts = new ContractResource($this->httpClient, $this->config, $this->loggerProxy);
+        }
+
+        return $this->contracts;
     }
 
     /**
@@ -398,6 +415,7 @@ class AssinafyClient
      *             'thumbnail' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/thumbnail',
      *         ],
      *         'is_closed' => false,
+     *         'has_contract' => false,
      *         'signing_url' => 'https://app-sandbox.assinafy.com.br/sign/signing-token',
      *         'decline_reason' => null,
      *         'declined_by' => null,
@@ -418,10 +436,12 @@ class AssinafyClient
      *     'assignment' => [
      *         'resource' => 'assignment',
      *         'id' => 'assignment-id',
+     *         'document_id' => 'document-id',
      *         'sender_email' => 'person@example.com',
      *         'method' => 'virtual',
      *         'expires_at' => null,
      *         'message' => null,
+     *         'created_at' => '2026-09-01T12:00:00Z',
      *         'signers' => [
      *             [
      *                 'id' => 'signer-id',

@@ -131,12 +131,12 @@ to `OAuthResource::DEFAULT_ISSUER` when you pass nothing.
 
 | Constant | Scope | Lets your app |
 | --- | --- | --- |
-| `SCOPE_DOCUMENTS_READ` | `documents:read` | Read documents, signers, assignments, activity, WhatsApp notifications, webhook event types and delivery history |
-| `SCOPE_DOCUMENTS_WRITE` | `documents:write` | Create documents and send them for signature |
+| `SCOPE_DOCUMENTS_READ` | `documents:read` | Read documents, contract terms, signers, assignments, activity, WhatsApp notifications, webhook event types and delivery history |
+| `SCOPE_DOCUMENTS_WRITE` | `documents:write` | Create documents, send them for signature, and update, renew, or terminate contract terms |
 | `SCOPE_TEMPLATES_READ` | `templates:read` | Read templates |
 | `SCOPE_TEMPLATES_WRITE` | `templates:write` | Create and change templates |
 | `SCOPE_ACCOUNT_READ` | `account:read` | Read the workspace profile, theme, logo and webhook endpoints/subscription |
-| `SCOPE_WEBHOOKS_WRITE` | `webhooks:write` | Create, update and delete webhook endpoints, and configure/deactivate the legacy subscription |
+| `SCOPE_WEBHOOKS_WRITE` | `webhooks:write` | Create, update and delete webhook endpoints, rotate signing secrets, and configure/deactivate the legacy subscription |
 | `SCOPE_OPENID` | `openid` | Receive an `id_token` identifying the user |
 | `SCOPE_PROFILE` | `profile` | Read the user's name |
 | `SCOPE_EMAIL` | `email` | Read the user's email and whether it is verified |
@@ -234,8 +234,9 @@ try {
 ```
 
 The code is single-use and expires **60 seconds** after approval, so exchange it from your server
-immediately. `exchangeCode()` reads `code_verifier`, `redirect_uri` and `resource` from the stored
-transaction so they match the authorization request byte for byte.
+immediately. Store the complete transaction: `handleCallback()` requires its original `issuer`,
+and `exchangeCode()` requires its `code_verifier`, `redirect_uri`, and `resource`, all byte-for-byte
+identical to the authorization request.
 
 `refresh_token` is present only when `offline_access` was requested **and** approved; `id_token`
 only with `openid`. Read the returned `scope` instead of assuming every requested permission was

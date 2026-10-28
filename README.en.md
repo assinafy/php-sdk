@@ -3,8 +3,8 @@
 *[Leia em português](README.md) · English*
 
 Framework-independent PHP client for the [Assinafy v1 API](https://api.assinafy.com.br/v1/docs).
-It covers workspace administration, document preparation, signature requests, signer sessions,
-artifacts, templates, tags, fields, and webhooks.
+It covers workspace administration, document preparation, contract tracking, signature requests,
+signer sessions, artifacts, templates, tags, fields, and webhooks.
 
 This guide follows a document from upload through certification. Every SDK method also carries
 its own request and response payloads in its docblock, so an IDE shows the exact shapes at the
@@ -27,7 +27,8 @@ structure, and [Testing](#testing) below describes the quality gate and the live
   [7. Monitor progress](#7-monitor-progress) ·
   [8. Download and verify](#8-download-and-verify)
 - [Organize documents with tags](#organize-documents-with-tags) ·
-  [Reuse a template](#reuse-a-template) · [Receive webhooks](#receive-webhooks)
+  [Reuse a template](#reuse-a-template) · [Track contracts](#track-contracts) ·
+  [Receive webhooks](#receive-webhooks)
 - [Responses and pagination](#responses-and-pagination) ·
   [Errors, logging, and secrets](#errors-logging-and-secrets) ·
   [Resource map](#resource-map)
@@ -54,7 +55,7 @@ composer require assinafy/php-sdk
 The package is published on Packagist as
 [`assinafy/php-sdk`](https://packagist.org/packages/assinafy/php-sdk); no repository
 configuration is needed. See [docs/INSTALLATION.md](docs/INSTALLATION.md) for version constraints
-and development setup. Keep API keys and account identifiers in a secret manager or environment
+and versioned [GitHub release packages](https://github.com/assinafy/php-sdk/releases). Keep API keys and account identifiers in a secret manager or environment
 variables, never in `composer.json`, source code, fixtures, or CI configuration.
 
 ## Document workflow
@@ -362,7 +363,7 @@ before sending the request.
 | `VERIFICATION_EMAIL` | `Email` | An email address on the signer | 0 |
 | `VERIFICATION_WHATSAPP` | `Whatsapp` | `whatsapp_phone_number` and a paid subscription | 0.45 |
 | `VERIFICATION_ID_DOCUMENT_FACE_MATCH_BASIC` | `Email` or `Whatsapp` | Account ID Document + Face Match feature and valid CPF in `government_id` | Per-signer fee returned by the estimate |
-| `VERIFICATION_DIGITAL_CERTIFICATE` | `Email` or `Whatsapp` | The `virtual` method, the account's Digital Certificate feature (Standard and Pro plans), a CPF/CNPJ in `government_id`, and the signer alone in its step | 0.5 for the signature, on top of its notification |
+| `VERIFICATION_DIGITAL_CERTIFICATE` | `Email` or `Whatsapp` | The `virtual` method, the account's Digital Certificate feature (Standard and Pro plans), a valid CPF in `government_id`, and the signer alone in its step | 0.5 for the signature, on top of its notification |
 
 `DigitalCertificate` covers the ICP-Brasil **A1** (a software file on the device) and **A3** (a
 smart card or token) certificates. Both use this one value and the same payload — they differ only
@@ -372,9 +373,9 @@ protocol. The result is a qualified PAdES signature, downloadable as the `pades`
 artifact and billed in the breakdown under `SignatureDigitalCertificate`.
 Certificate completion only handles the signer's `virtual` item; a certificate signer cannot
 complete a `collect` assignment. `estimateCost()` and `create()` therefore reject that combination
-with `ValidationException` code `digital_certificate_requires_virtual_assignment`. Because a
-template's method is derived from its placed fields and is not exposed to the SDK, both template
-document calls reject `DigitalCertificate` until the API can guarantee `virtual`.
+with `ValidationException` code `digital_certificate_requires_virtual_assignment`. Template
+requests may use `DigitalCertificate` when the template has no placed signer fields; the API
+rejects templates that resolve to `collect` with `400`.
 
 Exactly one notification method is allowed per signer; an explicit empty list is preserved rather
 than replaced.
@@ -397,8 +398,8 @@ $assignment = $client->assignments()->create(
 $assignmentId = $assignment['id'];
 ```
 
-The assignment includes its ID, method, expiration, message, signers, items, summary, copy
-receivers, and signing URLs. Treat signing URLs as credentials even though the separate signer
+The assignment includes its ID, document ID, method, expiration, message, creation time, signers,
+items, summary, copy receivers, and signing URLs. Treat signing URLs as credentials even though the separate signer
 access code is delivered through the selected channel.
 
 Before resending, estimate the additional cost:
@@ -660,7 +661,7 @@ $templateId = (string) getenv('ASSINAFY_TEMPLATE_ID');
 $template = $client->templates()->get($templateId);
 $signingRoles = array_values(array_filter(
     $template['roles'],
-    static fn (array $role): bool => $role['assignment_type'] !== 'Editor',
+    static fn (array $role): bool => strcasecmp($role['assignment_type'], 'Signer') === 0,
 ));
 if ($signingRoles === []) {
     throw new RuntimeException('Configure a signing role in the Assinafy template editor');
@@ -694,12 +695,73 @@ Template management also provides list, get, update, delete, and rendered-page d
 This example assumes one signing role and no required editor fields. For other templates, provide
 one signer binding per required role and include every required editor-field value.
 
+## Track contracts
+
+This is Contract Lifecycle Management (CLM), named contract tracking by the API.
+
+After uploading or generating a document, store the terms used for renewal and expiration alerts
+and for amendment relationships. OAuth reads require `documents:read`; updates, renewals, and
+terminations require `documents:write` and a workspace plan with contract tracking.
+
+```php
+$contract = $client->contracts()->update($documentId, [
+    'status' => 'active',
+    'counterparty_name' => 'Example Company',
+    'counterparty_taxpayer_id' => '11.222.333/0001-81',
+    'value' => 120000.50,
+    'currency' => 'BRL',
+    'start_date' => '2026-11-01',
+    'end_date' => '2027-10-31',
+    'auto_renew' => true,
+    'renewal_term_months' => 12,
+    'notice_period_days' => 30,
+    'metadata' => ['crm_stage' => 'won'],
+    'external_references' => [['system' => 'erp', 'id' => 'C-1042']],
+]);
+
+$sameContract = $client->contracts()->get($documentId);
+$activeContracts = $client->contracts()->list(1, 25, [
+    'status' => 'active',
+    'ending_within_days' => 90,
+    'sort' => 'end_date',
+    'expand' => 'document',
+]);
+```
+
+Send the `updated_at` you read with the next write to receive 409 if another update won the race.
+Link a signed instrument to the family by naming the root document and the terms it changes:
+
+```php
+$amendment = $client->contracts()->update($amendmentDocumentId, [
+    'parent_document_id' => $documentId,
+    'relation_type' => 'amendment',
+    'value' => 130000,
+    'end_date' => '2028-06-30',
+]);
+
+$family = $client->contracts()->related($amendmentDocumentId);
+$renewed = $client->contracts()->renew($documentId, [
+    'term' => $contract['term'],
+    'updated_at' => $contract['updated_at'],
+]);
+$terminated = $client->contracts()->terminate($documentId, [
+    'reason' => 'Supplier replaced',
+    'updated_at' => $renewed['updated_at'],
+]);
+```
+
+A pending amendment applies its terms to the root after that document is certificated; an applied
+relationship is read-only. `external_references` replaces the whole list, and `[]` or `null`
+clears it. Document responses expose `has_contract`, and `document_contract_*` events cover changes
+and lifecycle alerts.
+
 ## Receive webhooks
 
 An account can register 1 webhook endpoint, or up to 3 on paid plans. Each endpoint has its own
 URL, events, active flag and signing setting, and every active endpoint subscribed to an event
 receives it independently. Enable `signingEnabled` so each delivery carries a
 [Standard Webhooks](https://www.standardwebhooks.com) signature:
+New or changed endpoint URLs must use HTTPS.
 
 ```php
 use Assinafy\SDK\Resources\WebhookResource;
@@ -716,9 +778,9 @@ $endpoint = $client->webhooks()->createEndpoint(
 $secret = $endpoint['secret']; // 'whsec_...'
 ```
 
-OAuth applications must store the secret at creation; they cannot read or rotate it later.
-If it is lost, delete the endpoint and create another. API-key and user-session clients can read
-it with `endpointSecret()` and replace it with `rotateEndpointSecret()`.
+OAuth applications must store the secret at creation because they cannot read it later. With the
+`webhooks:write` scope they can call `rotateEndpointSecret()` and must persist the replacement
+immediately. API-key and user-session clients can also read it with `endpointSecret()`.
 
 In the receiver, verify the **raw** body before decoding it:
 
@@ -744,10 +806,13 @@ $messageId = $_SERVER['HTTP_WEBHOOK_ID']; // identical on every attempt: dedupli
 `webhook-timestamp` more than 300 seconds from the local clock. `rotateEndpointSecret()` replaces
 the secret immediately, so update the receiver at the same time.
 
-Return 2xx quickly and process through an application queue. Each event gets two attempts three
-seconds apart; ten consecutive failures pause the endpoint. Do not rely on ordering between
-`assignment_created` and `document_metadata_ready`, and re-fetch the referenced object before
-acting on state that may have changed.
+Return 2xx quickly and process through an application queue. Each event can receive up to six
+attempts, about ten minutes apart, for connection failures, timeouts, 408, 429, and 5xx responses.
+After ten failed deliveries the endpoint is held; it probes the oldest missed event after about
+3, 15, and 60 minutes, then every 6 hours. A successful probe or manual retry lifts the hold and
+delivers the backlog oldest first. Dispatch history remains available for seven days and stores
+the first 2,000 response characters. Do not rely on ordering between `assignment_created` and
+`document_metadata_ready`; re-fetch the referenced object before acting on its state.
 
 | Method | Route |
 | --- | --- |
@@ -820,6 +885,7 @@ or signature data.
 | `accounts()` | Workspace profile, theme, logo, and document statistics |
 | `users()` | Authenticated user, notification preferences, and user statistics |
 | `documents()` | Upload, metadata, status, artifacts, public access, tags, and template documents |
+| `contracts()` | Contract terms, amendment families, renewals, expiration, and termination |
 | `signers()` | Workspace signer CRUD and search |
 | `assignments()` | Cost estimates, signature requests, resend, expiration, and delivery history |
 | `templates()` | Template upload, metadata, lifecycle, and page rendering |
@@ -845,9 +911,9 @@ from the selected environment's metadata. Token exchange and refresh require a r
 application and consent. A workspace API key cannot replace OAuth application credentials or a
 signer's access code.
 
-Webhook endpoints (`listEndpoints()` and related methods, signing secrets) and two-factor
-authentication are deployed to production; the sandbox answers those routes with a framework 404
-until it is updated. The legacy subscription methods work in both environments.
+Webhook endpoints and signing-secret operations are deployed to production and sandbox.
+Two-factor authentication remains production-only; the sandbox answers those routes with a
+framework 404. The legacy subscription methods work in both environments.
 
 A framework routing 404 (`name: Not Found`) is different from a resource-not-found API envelope.
 Keep supported resource methods when an environment has not deployed a route yet.
@@ -903,6 +969,10 @@ export ASSINAFY_SIGNER_ID='sandbox-signer-id'
 read -rs ASSINAFY_SIGNER_ACCESS_CODE
 export ASSINAFY_SIGNER_ACCESS_CODE
 ```
+
+Set `ASSINAFY_REQUIRE_PLAN_FEATURES=1` to require successful WhatsApp, DigitalCertificate, and
+biometric estimate/create calls. Without it, the live suite also accepts the documented `403`
+from a workspace whose plan does not include one of those features.
 
 State-changing shared-account checks and permanent disposable-account deletion have separate
 switches:

@@ -3,7 +3,8 @@
 *Português · [Read in English](README.en.md)*
 
 Cliente PHP independente de framework para a [API Assinafy v1](https://api.assinafy.com.br/v1/docs).
-Este guia acompanha um documento do upload até a assinatura e o download dos arquivos finais.
+Este guia acompanha um documento do upload até a assinatura, o acompanhamento contratual e o
+download dos arquivos finais.
 A [referência de métodos](docs/API_REFERENCE.md) contém os parâmetros, autenticação e formatos de
 retorno de todo o SDK. Os docblocks dos recursos incluem exemplos completos de requisição e resposta.
 
@@ -11,6 +12,7 @@ retorno de todo o SDK. Os docblocks dos recursos incluem exemplos completos de r
 - [Fluxo completo do documento](#fluxo-completo-do-documento)
 - [Campos e assinatura collect](#campos-e-assinatura-collect)
 - [Templates e organização](#templates-e-organização)
+- [Acompanhar contratos](#acompanhar-contratos)
 - [Webhooks](#webhooks)
 - [Aplicativos de marketplace e OAuth](#aplicativos-de-marketplace-e-oauth)
 - [Respostas, paginação e erros](#respostas-paginação-e-erros)
@@ -29,6 +31,8 @@ composer require assinafy/php-sdk
 ```
 
 O pacote está disponível no [Packagist](https://packagist.org/packages/assinafy/php-sdk).
+Pacotes ZIP e tar.gz com versão e checksum também são publicados nos
+[Releases do GitHub](https://github.com/assinafy/php-sdk/releases).
 Use a documentação da versão instalada; o código em `main` pode conter alterações ainda não publicadas.
 Veja também o [guia de instalação](docs/INSTALLATION.md).
 
@@ -127,7 +131,7 @@ ou `null`. Reutilizar um signatário não altera seu nome ou telefone; use `upda
 Números de WhatsApp precisam incluir `+` e o código do país, com 8–15 dígitos.
 `create()` aceita um quarto argumento opcional `governmentId` (CPF ou CNPJ; a formatação é
 aceita e o valor é normalizado no servidor) — informe-o já na criação de signatários que usarão
-`VERIFICATION_DIGITAL_CERTIFICATE`.
+verificação por documento. `DigitalCertificate` exige especificamente um CPF válido.
 
 ### 3. Estimar os recursos necessários
 
@@ -161,7 +165,7 @@ notificação (como recebe o convite). O SDK valida a matriz antes de enviar a r
 | `VERIFICATION_EMAIL` | `Email` | Email cadastrado no signatário | 0 |
 | `VERIFICATION_WHATSAPP` | `Whatsapp` | `whatsapp_phone_number` e assinatura paga | 0,45 |
 | `VERIFICATION_ID_DOCUMENT_FACE_MATCH_BASIC` | `Email` ou `Whatsapp` | Recurso ID Document + Face Match na conta e CPF válido em `government_id` | Tarifa por signatário retornada pela estimativa |
-| `VERIFICATION_DIGITAL_CERTIFICATE` | `Email` ou `Whatsapp` | Método `virtual`, recurso Certificado Digital na conta (planos Standard e Pro), CPF/CNPJ em `government_id` e o signatário sozinho na sua etapa | 0,5 pela assinatura, além da notificação |
+| `VERIFICATION_DIGITAL_CERTIFICATE` | `Email` ou `Whatsapp` | Método `virtual`, recurso Certificado Digital na conta (planos Standard e Pro), CPF válido em `government_id` e o signatário sozinho na sua etapa | 0,5 pela assinatura, além da notificação |
 
 `DigitalCertificate` cobre os certificados ICP-Brasil **A1** (arquivo de software no dispositivo) e
 **A3** (cartão ou token). Os dois usam esse mesmo valor e o mesmo payload — mudam apenas onde a
@@ -172,8 +176,8 @@ Nos custos, ela aparece no breakdown sob o código `SignatureDigitalCertificate`
 O fluxo de certificado conclui somente o item `virtual`; `collect` não pode ser assinado por esse
 signatário. Por isso, `estimateCost()` e `create()` recusam essa combinação com
 `ValidationException` e o código estável `digital_certificate_requires_virtual_assignment`.
-Como o método do template é derivado dos campos posicionados e não é exposto ao SDK, os dois
-métodos de criação por template recusam `DigitalCertificate` até que a API garanta `virtual`.
+Templates sem campos de signatário posicionados podem usar `DigitalCertificate`; a API recusa com
+`400` os templates que resultam no método `collect`.
 
 ### 4. Solicitar a assinatura
 
@@ -190,8 +194,8 @@ $assignment = $client->assignments()->create(
 $assignmentId = $assignment['id'];
 ```
 
-A atribuição contém `id`, `method`, `expires_at`, `message`, `signers`, `copy_receivers`, `items`,
-`summary` e `signing_urls`. As notificações seguem a ordem de assinatura: etapas posteriores são
+A atribuição contém `id`, `document_id`, `method`, `expires_at`, `message`, `created_at`, `signers`,
+`copy_receivers`, `items`, `summary` e `signing_urls`. As notificações seguem a ordem de assinatura: etapas posteriores são
 notificadas quando ficam disponíveis. URLs de assinatura são dados sensíveis.
 
 Reenvio e alteração do prazo usam a atribuição existente:
@@ -397,7 +401,7 @@ $templateId = (string) getenv('ASSINAFY_TEMPLATE_ID');
 $template = $client->templates()->get($templateId);
 $roles = array_values(array_filter(
     $template['roles'],
-    static fn (array $role): bool => $role['assignment_type'] !== 'Editor',
+    static fn (array $role): bool => strcasecmp($role['assignment_type'], 'Signer') === 0,
 ));
 if ($roles === []) {
     throw new RuntimeException('Configure uma função de assinatura no template');
@@ -415,12 +419,74 @@ O exemplo usa uma função de assinatura, sem campos de editor obrigatórios. Vi
 funções necessárias e preencha `editor_fields` quando o template exigir.
 As tags padrão do template são combinadas com as tags informadas.
 
+## Acompanhar contratos
+
+Este fluxo cobre Gestão de Contratos (Contract Lifecycle Management, CLM), chamada de
+Contract Tracking na API.
+
+Depois de enviar ou gerar um documento, associe os termos usados para alertas de renovação,
+vencimento e relacionamento com aditivos. Leituras OAuth exigem `documents:read`; alterações,
+renovações e encerramentos exigem `documents:write` e um plano com acompanhamento de contratos.
+
+```php
+$contract = $client->contracts()->update($documentId, [
+    'status' => 'active',
+    'counterparty_name' => 'Empresa de exemplo',
+    'counterparty_taxpayer_id' => '11.222.333/0001-81',
+    'value' => 120000.50,
+    'currency' => 'BRL',
+    'start_date' => '2026-11-01',
+    'end_date' => '2027-10-31',
+    'auto_renew' => true,
+    'renewal_term_months' => 12,
+    'notice_period_days' => 30,
+    'metadata' => ['crm_stage' => 'won'],
+    'external_references' => [['system' => 'erp', 'id' => 'C-1042']],
+]);
+
+$sameContract = $client->contracts()->get($documentId);
+$activeContracts = $client->contracts()->list(1, 25, [
+    'status' => 'active',
+    'ending_within_days' => 90,
+    'sort' => 'end_date',
+    'expand' => 'document',
+]);
+```
+
+Envie o `updated_at` lido na alteração seguinte para receber 409 se outra gravação tiver ocorrido.
+Para ligar um documento de aditivo à família, informe o documento raiz e os termos alterados:
+
+```php
+$amendment = $client->contracts()->update($amendmentDocumentId, [
+    'parent_document_id' => $documentId,
+    'relation_type' => 'amendment',
+    'value' => 130000,
+    'end_date' => '2028-06-30',
+]);
+
+$family = $client->contracts()->related($amendmentDocumentId);
+$renewed = $client->contracts()->renew($documentId, [
+    'term' => $contract['term'],
+    'updated_at' => $contract['updated_at'],
+]);
+$terminated = $client->contracts()->terminate($documentId, [
+    'reason' => 'Fornecedor substituído',
+    'updated_at' => $renewed['updated_at'],
+]);
+```
+
+Um aditivo pendente aplica seus termos ao contrato raiz quando o documento é certificado. Relações
+aplicadas são somente leitura. `external_references` substitui a lista inteira; `[]` ou `null` a
+limpa. A resposta de documento contém `has_contract`, e os eventos `document_contract_*` permitem
+acompanhar mudanças e alertas.
+
 ## Webhooks
 
 Uma conta pode ter 1 endpoint de webhook, ou até 3 nos planos pagos. Cada endpoint tem URL,
 eventos, estado e assinatura próprios, e todo endpoint ativo inscrito em um evento o recebe de forma
 independente. Ative `signingEnabled` para que cada entrega seja assinada no padrão
 [Standard Webhooks](https://www.standardwebhooks.com).
+URLs novas ou alteradas precisam usar HTTPS.
 
 ```php
 use Assinafy\SDK\Resources\WebhookResource;
@@ -437,9 +503,10 @@ $endpoint = $client->webhooks()->createEndpoint(
 $secret = $endpoint['secret']; // 'whsec_...'
 ```
 
-Aplicativos OAuth devem guardar o segredo na criação: não podem lê-lo nem rotacioná-lo depois.
-Se o perderem, excluam o endpoint e criem outro. Com API key ou sessão de usuário,
-`endpointSecret()` lê o segredo atual e `rotateEndpointSecret()` o substitui.
+Aplicativos OAuth devem guardar o segredo na criação porque não podem lê-lo depois. Com o escopo
+`webhooks:write`, podem usar `rotateEndpointSecret()` e precisam persistir o novo valor
+imediatamente. Clientes com API key ou sessão de usuário também podem ler o segredo atual com
+`endpointSecret()`.
 
 No receptor, verifique a assinatura com o corpo **bruto** antes de decodificá-lo:
 
@@ -467,10 +534,13 @@ segredo imediatamente; atualize o receptor na mesma hora.
 
 O envelope contém `id`, `event`, `message`, `subject`, `origin`, `account_id`, `created_at`, `object`
 e `payload`. `getEventData()` lê `object`, e `getEventPayload()` lê `payload`. Retorne 2xx
-rapidamente e processe por uma fila da aplicação. Há duas tentativas, separadas por três segundos;
-dez falhas consecutivas pausam o endpoint. Não dependa da ordem entre `assignment_created` e
-`document_metadata_ready`, e consulte o objeto pela API antes de agir sobre um estado que pode ter
-mudado.
+rapidamente e processe por uma fila da aplicação. Cada evento pode ter até seis tentativas,
+aproximadamente dez minutos entre elas, para falhas de conexão, timeout, 408, 429 ou 5xx. Após dez
+entregas com falha, o endpoint fica suspenso e testa o evento pendente mais antigo após cerca de
+3, 15 e 60 minutos e depois a cada 6 horas. Um teste ou reenvio manual bem-sucedido libera o
+endpoint e entrega o backlog do mais antigo para o mais novo. O histórico fica disponível por sete
+dias e guarda os primeiros 2.000 caracteres da resposta. Não dependa da ordem entre
+`assignment_created` e `document_metadata_ready`, e consulte o objeto pela API antes de agir.
 
 | Método | Rota |
 | --- | --- |
@@ -619,6 +689,7 @@ credenciais. Respostas e contextos de exceção podem conter dados pessoais: nã
 | `accounts()` | Descoberta, criação/edição/exclusão, tema, logo e estatísticas |
 | `users()` | Perfil, preferências de notificação e estatísticas do usuário |
 | `documents()` | Upload, busca, metadados, artefatos, verificação pública, tags e geração por template |
+| `contracts()` | Termos de contratos, famílias de aditivos, renovação, vencimento e encerramento |
 | `signers()` | Cadastro, atualização, busca e exclusão de signatários |
 | `assignments()` | Estimativa, atribuição, reenvio, prazo e histórico WhatsApp |
 | `templates()` | Upload, consulta, edição, processamento e páginas de templates |
@@ -631,8 +702,9 @@ credenciais. Respostas e contextos de exceção podem conter dados pessoais: nã
 Estatísticas de conta/usuário e preferências de notificação estão disponíveis no sandbox.
 Recursos sujeitos ao plano, como notificações WhatsApp e Certificado Digital, podem responder 403.
 OAuth está publicado em produção e no sandbox; confirme o issuer pela descoberta do ambiente escolhido.
-Endpoints de webhook, segredos de assinatura e autenticação em dois fatores estão publicados em
-produção; o sandbox responde a essas rotas com 404 de roteamento até ser atualizado.
+Endpoints de webhook e segredos de assinatura estão publicados em produção e no sandbox.
+Autenticação em dois fatores permanece disponível somente em produção; o sandbox responde a essas
+rotas com 404 de roteamento.
 
 ## Testes e desenvolvimento
 
@@ -661,6 +733,7 @@ usuário. Opções adicionais:
 | --- | --- |
 | `ASSINAFY_NOTIFICATION_TESTS=1` | Usa `ASSINAFY_TEST_EMAIL` e `ASSINAFY_TEST_EMAIL_ALT`, caixas controladas pelo operador |
 | `ASSINAFY_SIGNER_ID` + `ASSINAFY_SIGNER_ACCESS_CODE` | Exercita leituras autenticadas de uma sessão atual |
+| `ASSINAFY_REQUIRE_PLAN_FEATURES=1` | Exige sucesso, em vez de aceitar `403`, para WhatsApp, Certificado Digital e biometria |
 | `ASSINAFY_STATEFUL_TESTS=1` | Altera preferências/configuração compartilhadas e restaura os valores |
 | `ASSINAFY_DESTRUCTIVE_TESTS=1` | Cria e exclui uma conta descartável, incluindo seu ciclo de webhooks |
 

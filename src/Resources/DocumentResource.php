@@ -96,6 +96,7 @@ class DocumentResource extends AbstractResource
      *         'original' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/download/original',
      *     ],
      *     'is_closed' => false,
+     *     'has_contract' => false,
      *     'signing_url' => 'https://app-sandbox.assinafy.com.br/sign/signing-token',
      *     'decline_reason' => null,
      *     'declined_by' => null,
@@ -149,6 +150,7 @@ class DocumentResource extends AbstractResource
      *         'thumbnail' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/thumbnail',
      *     ],
      *     'is_closed' => false,
+     *     'has_contract' => false,
      *     'signing_url' => 'https://app-sandbox.assinafy.com.br/sign/signing-token',
      *     'decline_reason' => null,
      *     'declined_by' => null,
@@ -206,6 +208,7 @@ class DocumentResource extends AbstractResource
      *                 'thumbnail' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/thumbnail',
      *             ],
      *             'is_closed' => false,
+     *             'has_contract' => false,
      *             'signing_url' => 'https://app-sandbox.assinafy.com.br/sign/signing-token',
      *             'decline_reason' => null,
      *             'declined_by' => null,
@@ -278,6 +281,7 @@ class DocumentResource extends AbstractResource
      *                 'thumbnail' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/thumbnail',
      *             ],
      *             'is_closed' => false,
+     *             'has_contract' => false,
      *             'signing_url' => 'https://app-sandbox.assinafy.com.br/sign/signing-token',
      *             'decline_reason' => null,
      *             'declined_by' => null,
@@ -340,6 +344,7 @@ class DocumentResource extends AbstractResource
      *         'thumbnail' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/thumbnail',
      *     ],
      *     'is_closed' => false,
+     *     'has_contract' => false,
      *     'signing_url' => 'https://app-sandbox.assinafy.com.br/sign/signing-token',
      *     'decline_reason' => null,
      *     'declined_by' => null,
@@ -992,6 +997,7 @@ class DocumentResource extends AbstractResource
      *         'thumbnail' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/thumbnail',
      *     ],
      *     'is_closed' => false,
+     *     'has_contract' => false,
      *     'signing_url' => 'https://app-sandbox.assinafy.com.br/sign/signing-token',
      *     'decline_reason' => null,
      *     'declined_by' => null,
@@ -1016,8 +1022,7 @@ class DocumentResource extends AbstractResource
      * @param array<string, mixed>             $options optional `name`, `message`, `editor_fields`,
      *     `expires_at`, and `tags`
      * @return array<string, mixed> the created document
-     * @throws ValidationException when `$signers` is empty, an entry is malformed, or a
-     *     DigitalCertificate signer is supplied because the template method cannot be guaranteed virtual
+     * @throws ValidationException when `$signers` is empty or an entry is malformed
      */
     public function createFromTemplate(
         string $templateId,
@@ -1088,8 +1093,7 @@ class DocumentResource extends AbstractResource
      * @param array<int, array<string, mixed>> $signers each entry: `{ role_id,
      *     verification_method?, notification_methods? }`
      * @return array<string, mixed>
-     * @throws ValidationException when `$signers` is empty, an entry is malformed, or a
-     *     DigitalCertificate signer is supplied because the template method cannot be guaranteed virtual
+     * @throws ValidationException when `$signers` is empty or an entry is malformed
      */
     public function estimateCostFromTemplate(
         string $templateId,
@@ -1143,6 +1147,7 @@ class DocumentResource extends AbstractResource
      *         'thumbnail' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/thumbnail',
      *     ],
      *     'is_closed' => false,
+     *     'has_contract' => false,
      *     'signing_url' => 'https://app-sandbox.assinafy.com.br/sign/signing-token',
      *     'decline_reason' => null,
      *     'declined_by' => null,
@@ -1433,16 +1438,6 @@ class DocumentResource extends AbstractResource
             }
             if ($signerId !== null && (!is_string($signerId) || trim($signerId) === '')) {
                 throw new ValidationException('Template signer id must be a non-empty string');
-            }
-
-            if (
-                ($signer['verification_method'] ?? null)
-                === AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE
-            ) {
-                throw new ValidationException(
-                    'DigitalCertificate template assignments cannot be guaranteed to be virtual',
-                    ['code' => AssignmentResource::ERROR_DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL]
-                );
             }
 
             if (array_key_exists('notification_methods', $signer)) {

@@ -36,7 +36,7 @@ class AssignmentResource extends AbstractResource
      * {@see DocumentResource::ARTIFACT_PADES}.
      *
      * A1 and A3 differ only in where the private key lives; both use this one value and the
-     * same payload. Needs the account's Digital Certificate feature, CPF/CNPJ in the signer's
+     * same payload. Needs the account's Digital Certificate feature, a valid CPF in the signer's
      * `government_id`, and the signer alone in its signing step. Costs 0.5 credits per signer
      * under the `SignatureDigitalCertificate` breakdown code, on top of its notification.
      * Requires a `virtual` assignment and pairs with either notification method. The browser
@@ -132,10 +132,12 @@ class AssignmentResource extends AbstractResource
      * [
      *     'resource' => 'assignment',
      *     'id' => 'assignment-id',
+     *     'document_id' => 'document-id',
      *     'sender_email' => 'person@example.com',
      *     'method' => 'virtual',
      *     'expires_at' => '2026-12-31T23:59:59Z',
      *     'message' => 'Please sign this contract',
+     *     'created_at' => '2026-09-01T12:00:00Z',
      *     'signers' => [
      *         [
      *             'id' => 'signer-id',
@@ -289,10 +291,12 @@ class AssignmentResource extends AbstractResource
      *     'data' => [
      *         [
      *             'id' => 'assignment-id',
+     *             'document_id' => 'document-id',
      *             'sender_email' => 'person@example.com',
      *             'method' => 'virtual',
      *             'expires_at' => null,
      *             'message' => null,
+     *             'created_at' => '2026-09-01T12:00:00Z',
      *             'signers' => [
      *                 [
      *                     'id' => 'signer-id',
@@ -575,10 +579,12 @@ class AssignmentResource extends AbstractResource
      * [
      *     'resource' => 'assignment',
      *     'id' => 'assignment-id',
+     *     'document_id' => 'document-id',
      *     'sender_email' => 'person@example.com',
      *     'method' => 'virtual',
      *     'expires_at' => '2026-12-31T23:59:59Z',
      *     'message' => null,
+     *     'created_at' => '2026-09-01T12:00:00Z',
      *     'signers' => [
      *         [
      *             'id' => 'signer-id',

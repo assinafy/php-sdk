@@ -5,6 +5,26 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-10-28
+
+### Added
+
+- Track document contracts with `contracts()->list()`, `get()`, `update()`, `related()`, `renew()` and `terminate()`.
+- Add constants for contract lifecycle and amendment webhook events.
+- Add the four contract lifecycle notification preference codes.
+- Publish versioned ZIP and tar.gz packages with SHA-256 checksums on GitHub releases.
+
+### Changed
+
+- Require HTTPS when registering, creating, or changing webhook URLs while preserving existing HTTP URLs for lookup, deletion, and reactivation.
+- Allow OAuth applications with `webhooks:write` to rotate endpoint signing secrets; secret reads still require an API key or user token.
+- Allow `DigitalCertificate` in template requests; the API accepts templates without placed signer fields and rejects `collect` templates.
+
+### Fixed
+
+- Reject incomplete stored OAuth transactions that omit the original issuer or resource instead of deriving replacement values during callback validation or code exchange.
+- Document the valid-CPF requirement for `DigitalCertificate` signers and the current document, assignment, webhook endpoint, dispatch, and delivery payloads.
+
 ## [2.7.1] - 2026-10-19
 
 ### Fixed

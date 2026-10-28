@@ -334,6 +334,7 @@ class SignerSessionResource extends AbstractResource
      *         'thumbnail' => 'https://sandbox.assinafy.com.br/v1/documents/document-id/thumbnail',
      *     ],
      *     'is_closed' => false,
+     *     'has_contract' => false,
      *     'signing_url' => 'https://app-sandbox.assinafy.com.br/sign/signing-token',
      *     'decline_reason' => null,
      *     'declined_by' => null,
