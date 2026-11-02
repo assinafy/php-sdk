@@ -1,8 +1,18 @@
 # Upgrading
 
-Install a published 2.x release with `composer require assinafy/php-sdk:^2.7`. Remove obsolete
+Install a published 2.x release with `composer require assinafy/php-sdk:^2.8`. Remove obsolete
 VCS/path repository overrides if they prevent Composer from resolving the Packagist package.
 Use the documentation shipped with the installed tag; `main` may include unreleased changes.
+
+## Upgrading to 2.8.1
+
+Assignment creation, expiration reset, and `uploadAndRequestSignatures()` now accept the production
+API's complete expiration forms: an ISO-8601 date-time without an offset is UTC, and a date alone
+expires at 23:59 UTC. Existing values with `Z` or an explicit offset remain unchanged.
+
+`DigitalCertificate` signers may use a valid CPF or CNPJ in `government_id`. A CPF uses an e-CPF or
+an e-CNPJ naming that person as legal representative; a CNPJ uses an e-CNPJ for that company. Biometric verification remains
+CPF-only. The SDK User-Agent is `Assinafy-PHP-SDK/v2.8.1`.
 
 ## Upgrading to 2.8.0
 
@@ -270,7 +280,7 @@ A new workspace can return a subscription object with an empty URL; `get()` retu
 - Signer updates accept `government_id`. Responses may omit or mask the identifier. Updating a
   verified channel on an in-flight assignment may be rejected; changing an unverified channel can
   rotate its codes, requiring invitation resend.
-- DigitalCertificate assignments require the account feature, a valid CPF and an isolated signing
+- DigitalCertificate assignments require the account feature, a valid CPF or CNPJ and an isolated signing
   step. Use `pades` only for certificate-signed documents. The ordinary signer-session sign method
   does not implement certificate completion.
 - Public send-token uses `{recipient, channel: 'email'}` for a signer already assigned to the

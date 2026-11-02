@@ -146,11 +146,11 @@ if (!($estimate['has_sufficient_resources'] ?? false)) {
 `DigitalCertificate` is supported on ordinary `virtual` assignments and templates without placed
 signer fields.
 Each certificate signer costs 0.5 credits in addition to notification cost, requires the account's
-Digital Certificate feature, must have a valid CPF in `government_id`, and must be alone in its
+Digital Certificate feature, must have a valid CPF or CNPJ in `government_id`, and must be alone in its
 signing step. Pass `government_id` when creating the signer
 (`signers()->create($name, $email, null, $governmentId)`), or update an existing signer first.
-Formatted CPF input is accepted and normalized to digits by the
-server. The update response may omit or mask `government_id`; do not require it to echo the identifier.
+Formatted CPF or CNPJ input is accepted and normalized by the server; a CNPJ may be alphanumeric.
+The update response may omit or mask `government_id`; do not require it to echo the identifier.
 The SDK rejects certificate signers on ordinary `collect` calls with `ValidationException` code
 `digital_certificate_requires_virtual_assignment`. Template requests are forwarded; the API
 returns `400` when placed signer fields make the generated assignment `collect`.

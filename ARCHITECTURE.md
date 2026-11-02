@@ -192,6 +192,9 @@ the caller supplies explicit consent. It returns the provider URL unchanged, inc
 and submits the reviewer's decision. It shares path validation and transport error handling.
 `pending_identity_review` counts as fully signed while account review holds certification.
 
+`DigitalCertificate` accepts an existing signer with a CPF or CNPJ in `government_id`; biometric
+identity verification remains CPF-only. A certificate signer is isolated in a `virtual` step.
+
 ### Webhook parsing
 
 Endpoints with `signing_enabled` sign each delivery following Standard Webhooks. `WebhookEventParser::verifySignature()` recomputes the HMAC-SHA256 over `{webhook-id}.{webhook-timestamp}.{raw body}` with the endpoint's `whsec_` secret, compares it in constant time, and rejects stale timestamps. The parser then decodes the delivery envelope and reads its type, entity data, event-specific payload, and account ID.

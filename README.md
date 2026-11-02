@@ -2,42 +2,18 @@
 
 *Português · [Read in English](README.en.md)*
 
-Cliente PHP independente de framework para a [API Assinafy v1](https://api.assinafy.com.br/v1/docs).
-Este guia acompanha um documento do upload até a assinatura, o acompanhamento contratual e o
-download dos arquivos finais.
-A [referência de métodos](docs/API_REFERENCE.md) contém os parâmetros, autenticação e formatos de
-retorno de todo o SDK. Os docblocks dos recursos incluem exemplos completos de requisição e resposta.
+Cliente PHP 8.2–8.5, independente de framework, para a [API Assinafy v1](https://api.assinafy.com.br/v1/docs).
+A [referência completa](docs/API_REFERENCE.md) documenta cada método, autenticação, pré-condição e
+payload; veja também [OAuth](docs/OAUTH.md), [exemplos](docs/EXAMPLES.md) e [instalação](docs/INSTALLATION.md).
 
-- [Instalação e configuração](#instalação-e-configuração)
-- [Fluxo completo do documento](#fluxo-completo-do-documento)
-- [Campos e assinatura collect](#campos-e-assinatura-collect)
-- [Templates e organização](#templates-e-organização)
-- [Acompanhar contratos](#acompanhar-contratos)
-- [Webhooks](#webhooks)
-- [Aplicativos de marketplace e OAuth](#aplicativos-de-marketplace-e-oauth)
-- [Respostas, paginação e erros](#respostas-paginação-e-erros)
-- [Recursos disponíveis](#recursos-disponíveis)
-- [Testes e desenvolvimento](#testes-e-desenvolvimento)
-
-## Instalação e configuração
-
-Requisitos: PHP 8.2–8.5, Composer 2 e extensões `json` e `mbstring`. O cliente padrão exige TLS 1.2 ou superior.
-PHP usa ciclos de suporte, sem uma edição LTS; PHP 8.5 é a versão recomendada para novos projetos.
-Consulte a [política de suporte do PHP](https://www.php.net/supported-versions.php).
-Guzzle é instalado como dependência de execução.
+## Instalação e cliente
 
 ```bash
 composer require assinafy/php-sdk
 ```
 
-O pacote está disponível no [Packagist](https://packagist.org/packages/assinafy/php-sdk).
-Pacotes ZIP e tar.gz com versão e checksum também são publicados nos
-[Releases do GitHub](https://github.com/assinafy/php-sdk/releases).
-Use a documentação da versão instalada; o código em `main` pode conter alterações ainda não publicadas.
-Veja também o [guia de instalação](docs/INSTALLATION.md).
-
-Carregue a chave e o identificador da conta pelo gerenciador de segredos da aplicação ou pelo ambiente.
-O SDK não lê arquivos `.env` automaticamente. Nunca coloque credenciais em código, logs ou commits.
+PHP não possui edição LTS. O SDK suporta PHP 8.2–8.5 e recomenda PHP 8.5 para projetos novos.
+Use TLS 1.2 ou superior e carregue segredos pelo ambiente ou por um gerenciador de segredos.
 
 ```php
 <?php
@@ -58,715 +34,141 @@ $client = AssinafyClient::create(
 );
 ```
 
-Em produção, use `Configuration::DEFAULT_BASE_URL` (`https://api.assinafy.com.br/v1`).
-O sandbox usa `https://sandbox.assinafy.com.br/v1`; as credenciais são específicas do ambiente.
-URLs remotas exigem HTTPS. HTTP é permitido somente para desenvolvimento em loopback.
-
-Para configurar timeouts e um logger PSR-3:
-
-```php
-$configuration = new Configuration(
-    apiKey: (string) getenv('ASSINAFY_API_KEY'),
-    accountId: (string) getenv('ASSINAFY_ACCOUNT_ID'),
-    baseUrl: Configuration::SANDBOX_BASE_URL,
-    timeout: 30,
-    connectTimeout: 10,
-);
-$client = new AssinafyClient($configuration, logger: new \Psr\Log\NullLogger());
-```
-
-Para operar como usuário (e-mail e senha), faça login por um cliente sem credenciais. Contas com
-autenticação em dois fatores recebem um desafio `mfa_token`, válido por cinco minutos:
-
-```php
-$public = AssinafyClient::forAuth(Configuration::DEFAULT_BASE_URL);
-$session = $public->auth()->login('developer@example.com', (string) getenv('ASSINAFY_PASSWORD'));
-if (isset($session['mfa_token'])) {
-    $session = $public->auth()->verifyMfa($session['mfa_token'], $codigoDoAplicativoAutenticador);
-}
-$bearer = AssinafyClient::forBearer($session['access_token'], $session['accounts'][0]['id']);
-```
-
-O usuário gerencia o segundo fator com `users()->mfaMethods()`, `startTotpEnrollment()`,
-`confirmTotpEnrollment()`, `regenerateRecoveryCodes()` e `removeMfaMethod()`.
-
-O transporte envia `Assinafy-PHP-SDK/v{SDK_VERSION}` como User-Agent em todas as requisições.
-Implementações próprias de `HttpClientInterface` devem enviar o mesmo cabeçalho.
+Produção usa `Configuration::DEFAULT_BASE_URL`; credenciais de sandbox e produção são distintas.
+Para uma sessão de usuário, use `AssinafyClient::forAuth()`, `auth()->login()` e, quando houver
+`mfa_token`, `auth()->verifyMfa()`. Para um token Bearer já emitido, use `forBearer()`.
 
 ## Fluxo completo do documento
 
-### 1. Enviar o PDF e aguardar o processamento
-
-O arquivo precisa ser um PDF legível, com cabeçalho e marcador final válidos e até 25 MB.
-O servidor processa as páginas de forma assíncrona e aplica o limite de 2.000 páginas.
+O fluxo é: upload → preparação → signatário → estimativa → atribuição → assinatura → certificação → download.
 
 ```php
-$document = $client->documents()->upload('/caminho/absoluto/contrato.pdf');
+// 1. Envie um PDF legível de até 25 MB e aguarde as páginas.
+$document = $client->documents()->upload('/caminho/contrato.pdf');
 $documentId = $document['id'];
+$document = $client->documents()->waitUntilReady($documentId);
+$client->documents()->rename($documentId, 'Contrato de serviços.pdf');
 
-$document = $client->documents()->waitUntilReady(
-    documentId: $documentId,
-    maxWaitSeconds: 60,
-    pollIntervalSeconds: 2,
-);
-
-$document = $client->documents()->rename($documentId, 'Contrato de serviços.pdf');
-```
-
-Guarde o `documentId` imediatamente após o upload. A renomeação deve acontecer enquanto o documento
-estiver em `uploaded` ou `metadata_ready`, antes da solicitação de assinatura. `waitUntilReady()`
-aguarda a preparação do documento; ele não aguarda que os destinatários assinem.
-
-### 2. Criar ou reutilizar o signatário
-
-```php
+// 2. Reutilize ou crie o signatário.
 $email = 'signer@example.com';
 $signer = $client->signers()->findByEmail($email)
     ?? $client->signers()->create('Signatário de exemplo', $email);
 $signerId = $signer['id'];
-```
 
-`findByEmail()` percorre a busca paginada e retorna a correspondência exata, ignorando maiúsculas,
-ou `null`. Reutilizar um signatário não altera seu nome ou telefone; use `update()` para isso.
-Números de WhatsApp precisam incluir `+` e o código do país, com 8–15 dígitos.
-`create()` aceita um quarto argumento opcional `governmentId` (CPF ou CNPJ; a formatação é
-aceita e o valor é normalizado no servidor) — informe-o já na criação de signatários que usarão
-verificação por documento. `DigitalCertificate` exige especificamente um CPF válido.
-
-### 3. Estimar os recursos necessários
-
-```php
-$signerPlan = [[
+// 3. Modele e estime antes de criar.
+$signers = [[
     'id' => $signerId,
     'verification_method' => AssignmentResource::VERIFICATION_EMAIL,
     'notification_methods' => [AssignmentResource::NOTIFICATION_EMAIL],
     'step' => 1,
 ]];
-
-$estimate = $client->assignments()->estimateCost($documentId, $signerPlan);
+$estimate = $client->assignments()->estimateCost($documentId, $signers);
 if (!($estimate['has_sufficient_resources'] ?? false)) {
     throw new RuntimeException($estimate['blocking_reason'] ?? 'Recursos insuficientes');
 }
-```
 
-A resposta inclui `documents`, `credits`, `needs_extra_document`, `extra_document_cost`,
-`total_credits`, `breakdown`, `document_balance`, `credit_balance`, `has_sufficient_resources`,
-`blocking_reason` e `message`. IDs de signatário podem ser omitidos na estimativa.
-
-Uma atribuição comum aceita no máximo um canal de notificação por signatário. Se um lado for
-omitido, o servidor infere o outro; omitir ambos seleciona Email. Etapas informadas devem ser
-contíguas a partir de 1 e existir para todos os signatários.
-
-Cada signatário tem um método de verificação (como comprova a identidade) acoplado a um método de
-notificação (como recebe o convite). O SDK valida a matriz antes de enviar a requisição.
-
-| Verificação | Notificação permitida | Requisitos | Créditos por signatário |
-| --- | --- | --- | --- |
-| `VERIFICATION_EMAIL` | `Email` | Email cadastrado no signatário | 0 |
-| `VERIFICATION_WHATSAPP` | `Whatsapp` | `whatsapp_phone_number` e assinatura paga | 0,45 |
-| `VERIFICATION_ID_DOCUMENT_FACE_MATCH_BASIC` | `Email` ou `Whatsapp` | Recurso ID Document + Face Match na conta e CPF válido em `government_id` | Tarifa por signatário retornada pela estimativa |
-| `VERIFICATION_DIGITAL_CERTIFICATE` | `Email` ou `Whatsapp` | Método `virtual`, recurso Certificado Digital na conta (planos Standard e Pro), CPF válido em `government_id` e o signatário sozinho na sua etapa | 0,5 pela assinatura, além da notificação |
-
-`DigitalCertificate` cobre os certificados ICP-Brasil **A1** (arquivo de software no dispositivo) e
-**A3** (cartão ou token). Os dois usam esse mesmo valor e o mesmo payload — mudam apenas onde a
-chave privada fica guardada. A assinatura é concluída no navegador pela extensão Web PKI, então
-`signerSession()->sign()` não a finaliza. O SDK não executa esse protocolo de navegador.
-O resultado é uma assinatura qualificada PAdES, baixável pelo artefato `pades`.
-Nos custos, ela aparece no breakdown sob o código `SignatureDigitalCertificate`.
-O fluxo de certificado conclui somente o item `virtual`; `collect` não pode ser assinado por esse
-signatário. Por isso, `estimateCost()` e `create()` recusam essa combinação com
-`ValidationException` e o código estável `digital_certificate_requires_virtual_assignment`.
-Templates sem campos de signatário posicionados podem usar `DigitalCertificate`; a API recusa com
-`400` os templates que resultam no método `collect`.
-
-### 4. Solicitar a assinatura
-
-```php
+// 4. Crie a atribuição. Datas sem offset são UTC; YYYY-MM-DD expira às 23:59 UTC.
 $assignment = $client->assignments()->create(
     documentId: $documentId,
-    signers: $signerPlan,
+    signers: $signers,
     method: AssignmentResource::METHOD_VIRTUAL,
-    options: [
-        'message' => 'Por favor, revise e assine o contrato.',
-        'expires_at' => (new DateTimeImmutable('+7 days'))->format(DateTimeInterface::ATOM),
-    ],
+    options: ['message' => 'Revise e assine.', 'expires_at' => '2027-12-31'],
 );
 $assignmentId = $assignment['id'];
-```
 
-A atribuição contém `id`, `document_id`, `method`, `expires_at`, `message`, `created_at`, `signers`,
-`copy_receivers`, `items`, `summary` e `signing_urls`. As notificações seguem a ordem de assinatura: etapas posteriores são
-notificadas quando ficam disponíveis. URLs de assinatura são dados sensíveis.
-
-Reenvio e alteração do prazo usam a atribuição existente:
-
-```php
-$resendEstimate = $client->assignments()->estimateResendCost($documentId, $assignmentId, $signerId);
-if ($resendEstimate['has_sufficient_credits'] ?? false) {
-    $client->assignments()->resend($documentId, $assignmentId, $signerId);
-}
-$client->assignments()->resetExpiration(
-    $documentId,
-    $assignmentId,
-    (new DateTimeImmutable('+14 days'))->format(DateTimeInterface::ATOM),
-);
-```
-
-Passe `null` como terceiro argumento de `resetExpiration()` para remover o prazo de expiração
-por completo.
-
-Para a sequência padrão, o helper reúne upload, preparação, resolução dos signatários e atribuição virtual:
-
-```php
-$result = $client->uploadAndRequestSignatures(
-    filePath: '/caminho/absoluto/contrato.pdf',
-    signers: [['full_name' => 'Signatário de exemplo', 'email' => 'signer@example.com']],
-    message: 'Por favor, assine o contrato.',
-);
-$document = $result['document'];
-$assignment = $result['assignment'];
-$signerIds = $result['signer_ids'];
-```
-
-O helper valida as descrições antes do upload, mas não desfaz objetos remotos se uma etapa posterior
-falhar. Use as chamadas separadas quando precisar persistir cada ID e controlar a recuperação.
-
-### 5. Concluir a experiência do signatário
-
-Normalmente o destinatário usa a interface de assinatura da Assinafy. Uma interface própria precisa
-de um `signer-access-code` atual, obtido pelo canal do signatário, e do código de verificação quando
-solicitado. A chave da conta não substitui essas credenciais. Não extraia o código do caminho de
-`signing_urls`.
-
-```php
+// 5. A interface própria usa o código entregue ao signatário, nunca a chave da conta.
 $public = AssinafyClient::forAuth(Configuration::SANDBOX_BASE_URL);
-$delivery = $public->documents()->sendToken($documentId, 'signer@example.com');
-```
-
-O destinatário deve estar atribuído ao documento. O canal suportado pelo SDK é `email`.
-O retorno contém `document`, `channel` e `recipient`; o código enviado não é retornado.
-
-Depois de receber os códigos pelo canal autorizado:
-
-```php
-$accessCode = (string) getenv('ASSINAFY_SIGNER_ACCESS_CODE');
 $session = $public->signerSession();
-$profile = $session->self($accessCode);
+$accessCode = (string) getenv('ASSINAFY_SIGNER_ACCESS_CODE');
 $session->acceptTerms($accessCode);
 $session->verifyCode($accessCode, (string) getenv('ASSINAFY_VERIFICATION_CODE'));
 $session->confirmData($documentId, $accessCode, [
-    'full_name' => 'Signatário de exemplo',
-    'email' => 'signer@example.com',
-    'has_accepted_terms' => true,
+    'full_name' => 'Signatário de exemplo', 'email' => $email, 'has_accepted_terms' => true,
 ]);
-$current = $session->currentDocument($accessCode);
-$session->sign($documentId, $assignmentId, $accessCode, []);
-```
+$session->sign($documentId, $assignmentId, $accessCode, []); // atribuição virtual
 
-O array vazio conclui a atribuição virtual. Em `collect`, envie os valores de cada campo solicitado
-com `itemId`, `fieldId`, `pageId` e `value`. O signatário também pode recusar com `decline()`, enviar
-imagem PNG/JPEG com `uploadSignature()` ou consultar documentos por `signerDocuments()`.
-
-### 6. Acompanhar assinatura e certificação
-
-```php
+// 6. Acompanhe o estado; prefira webhooks para processos assíncronos.
 $progress = $client->documents()->getSigningProgress($documentId);
-// ['signed' => 0, 'total' => 1, 'pending' => 1, 'percentage' => 0.0]
-$fullySigned = $client->documents()->isFullySigned($documentId);
-$activities = $client->documents()->activities($documentId);
-```
+$document = $client->documents()->get($documentId);
 
-`ready`, `certificating` e `certificated` indicam conclusão pelos signatários. A certificação e os
-arquivos finais podem ficar disponíveis depois. `pending_identity_review` indica que todos assinaram,
-mas a certificação aguarda a revisão de identidade pela conta. Use webhooks e consulte o documento
-autenticado para confirmar o estado. Se precisar aguardar em um processo síncrono, limite o tempo:
-
-```php
-$deadline = hrtime(true) + 60_000_000_000;
-do {
-    $document = $client->documents()->get($documentId);
-    if ($document['status'] === DocumentResource::STATUS_CERTIFICATED) {
-        break;
-    }
-    if (in_array($document['status'], DocumentResource::FAILURE_STATUSES, true)) {
-        throw new RuntimeException('Documento encerrado sem certificação');
-    }
-    if (hrtime(true) >= $deadline) {
-        throw new RuntimeException('Certificação pendente; consulte novamente mais tarde');
-    }
-    sleep(2);
-} while (true);
-```
-
-### 7. Baixar os arquivos finais e verificar
-
-```php
+// 7. Após certificated, salve os bytes e valide o hash publicado no documento.
 $pdf = $client->documents()->download($documentId, DocumentResource::ARTIFACT_CERTIFICATED);
-if (file_put_contents('/armazenamento/privado/contrato-assinado.pdf', $pdf, LOCK_EX) === false) {
-    throw new RuntimeException('Não foi possível salvar o arquivo');
-}
-
-$signatureHash = (string) getenv('ASSINAFY_DOCUMENT_SIGNATURE_HASH');
-$verification = $public->documents()->verify($signatureHash);
-if (!$verification['is_valid']) {
-    throw new RuntimeException('Documento não validado');
-}
+file_put_contents('/armazenamento/privado/contrato-assinado.pdf', $pdf, LOCK_EX);
+$verification = $public->documents()->verify((string) getenv('ASSINAFY_DOCUMENT_SIGNATURE_HASH'));
 ```
 
-Artefatos: `original`, `certificated`, `certificate-page`, `pades` e `bundle`. `bundle` contém ZIP;
-os demais são PDFs. `pades` exige documento com assinatura por certificado digital. Miniaturas e
-páginas renderizadas retornam bytes de imagem. Para A1/A3, baixe `pades` para preservar as
-assinaturas criptográficas ICP-Brasil; `certificated` contém a representação achatada dessas
-assinaturas. Um hash desconhecido pode retornar HTTP 200 com
-`is_valid: false`; sempre leia esse campo.
+`waitUntilReady()` aguarda preparação, não assinaturas. Guarde cada ID criado; o helper
+`uploadAndRequestSignatures()` compõe as etapas iniciais, mas não desfaz mutações remotas após falha.
+Use `resetExpiration(..., null)` para remover o prazo. Reenvios devem ser estimados com
+`estimateResendCost()`. Artefatos disponíveis: `original`, `certificated`, `certificate-page`,
+`pades` e `bundle`.
 
-## Campos e assinatura collect
+## Verificação, notificação e assinatura
 
-Uma atribuição `collect` coloca campos em páginas já processadas. Descubra os IDs do catálogo:
+Cada signatário aceita no máximo um canal de notificação. Omitir um lado infere o outro; omitir
+ambos seleciona Email. Etapas, quando usadas, devem ser contíguas a partir de 1.
 
-```php
-$fields = $client->fields()->list(includeStandard: true);
-$signatureFields = array_values(array_filter($fields, static fn (array $f): bool => $f['type'] === 'signature'));
-if ($signatureFields === []) {
-    throw new RuntimeException('Campo de assinatura indisponível');
-}
-$entries = [[
-    'page_id' => $document['pages'][0]['id'],
-    'fields' => [[
-        'signer_id' => $signerId,
-        'field_id' => $signatureFields[0]['id'],
-        'display_settings' => ['left' => 10, 'top' => 10, 'width' => 240, 'height' => 60, 'fontSize' => 18],
-    ]],
-]];
-```
+| Verificação | Notificação | Requisitos principais |
+| --- | --- | --- |
+| `Email` | `Email` | Email cadastrado; sem custo de notificação |
+| `Whatsapp` | `Whatsapp` | Telefone E.164, plano compatível; 0,45 crédito |
+| `IdDocumentFaceMatchBasic` | `Email` ou `Whatsapp` | Recurso biométrico, CPF válido e consentimento explícito |
+| `DigitalCertificate` | `Email` ou `Whatsapp` | `virtual`, recurso habilitado, CPF ou CNPJ válido e signatário sozinho na etapa |
 
-Use esse payload em `estimateCost()` e `create()` com `method: 'collect'` e
-`options: ['entries' => $entries]` em um documento sem atribuição. As coordenadas usam a imagem
-da página a 150 DPI, a partir do canto superior esquerdo; respeite `width` e `height` da página.
+`DigitalCertificate` cobre ICP-Brasil A1 e A3 pelo mesmo payload. Um CPF exige e-CPF, ou e-CNPJ que
+nomeie a pessoa como representante; um CNPJ exige e-CNPJ da empresa. A extensão Web PKI conclui a
+assinatura; o resultado qualificado é `pades` e `signerSession()->sign()` não executa esse protocolo.
+certificado digital custa 0,5 crédito por signatário, além da notificação, e não funciona em
+`collect`. Biometria permanece CPF-only; preserve e proteja a URL de captura com fragmento `#t=`.
 
-Não use `DigitalCertificate` em `collect`: o fluxo ICP-Brasil conclui somente itens `virtual`, e o
-SDK recusa a combinação antes de estimar, cobrar ou enviar convites.
+Em `collect`, obtenha campos com `fields()->list(includeStandard: true)` e envie `entries` com
+`page_id`, `signer_id`, `field_id` e `display_settings`. Os valores finais usam `itemId`, `fieldId`,
+`pageId` e `value`. As coordenadas são pixels da imagem da página a 150 DPI.
 
-## Verificação biométrica de identidade
+Templates criados pela API começam com função Editor. Configure funções e campos na interface web,
+depois use `documents()->estimateCostFromTemplate()` e `createFromTemplate()`.
 
-Na produção, `IdDocumentFaceMatchBasic` usa documento de identidade, foto do signatário com o
-documento e prova de vida. A conta precisa do recurso ID Document + Face Match, e o signatário
-precisa de um CPF válido em `government_id`. No plano de signatários dos passos 3–4, use
-`AssignmentResource::VERIFICATION_ID_DOCUMENT_FACE_MATCH_BASIC` com notificação Email ou Whatsapp.
-Crie o signatário com CPF antes da atribuição e consulte a estimativa para a tarifa vigente.
+## Contratos, webhooks e OAuth
 
-Depois do consentimento explícito do signatário, use o código de acesso dele para abrir a captura:
+`contracts()` lista termos, relaciona aditivos e executa renovação ou encerramento. Envie o
+`updated_at` lido para detectar concorrência. Leituras OAuth usam `documents:read`; alterações usam
+`documents:write` e dependem do plano.
 
-```php
-$state = $client->signerSession()->identityVerification($signerAccessCode);
-if ($state['can_start']) {
-    $state = $client->signerSession()->startIdentityVerification($signerAccessCode, true);
-}
-$captureUrl = $state['url'] ?? null;
-```
-
-Abra a URL retornada sem alterar o fragmento `#t=`; esse link é uma credencial e não deve ir para
-logs ou armazenamento do navegador. Após a captura, o signatário continua a visualização,
-confirmação de dados e assinatura dos passos 5–7. Uma sessão Expired pode ser reiniciada;
-Declined ou Abandoned exige novo documento e nova atribuição. Reenvios preservam a sessão ativa.
-
-Quando houver revisão, a conta usa `assignments()->identityVerification()` para ler o resultado,
-`identityVerificationImage()` para obter as imagens/PDF indicados em `images`, e
-`reviewIdentityVerification()` para enviar a decisão do revisor autorizado (`Approved` ou
-`Rejected`, nota opcional de até 2000 caracteres). As imagens só existem enquanto InReview.
-A aprovação libera a certificação quando todas as assinaturas e revisões terminarem; a rejeição
-cancela o documento e avisa signatários e destinatários de cópia, sem mostrar a nota.
-`pending_identity_review` mantém o progresso de assinatura em 100% até a revisão terminar.
-O [exemplo completo](docs/EXAMPLES.md#biometric-identity-verification) inclui criação, estimativa,
-captura, evidências, decisão e retorno ao fluxo de download e verificação.
-
-## Templates e organização
-
-```php
-$client->documents()->appendTags($documentId, ['contratos', '2026']);
-$tags = $client->documents()->listTags($documentId);
-$client->documents()->detachTag($documentId, $tags[0]['id']);
-$client->documents()->replaceTags($documentId, ['concluídos']);
-```
-
-`appendTags()` e `replaceTags()` recebem nomes e criam os nomes inexistentes; `detachTag()` recebe
-o ID da tag. `tags()` gerencia as definições da conta.
-
-Templates aceitam upload, leitura, edição, exclusão e download de páginas. Um template criado pela
-API recebe uma função `Editor`. Configure funções de assinatura e campos na interface da Assinafy
-antes de gerar documentos com signatários. Selecione um template já preparado:
-
-```php
-$templateId = (string) getenv('ASSINAFY_TEMPLATE_ID');
-$template = $client->templates()->get($templateId);
-$roles = array_values(array_filter(
-    $template['roles'],
-    static fn (array $role): bool => strcasecmp($role['assignment_type'], 'Signer') === 0,
-));
-if ($roles === []) {
-    throw new RuntimeException('Configure uma função de assinatura no template');
-}
-$templateSigners = [['role_id' => $roles[0]['id'], 'id' => $signerId]];
-$estimate = $client->documents()->estimateCostFromTemplate($templateId, $templateSigners);
-$generated = $client->documents()->createFromTemplate($templateId, $templateSigners, [
-    'name' => 'Contrato do template.pdf',
-    'message' => 'Por favor, revise e assine.',
-    'tags' => ['contratos'],
-]);
-```
-
-O exemplo usa uma função de assinatura, sem campos de editor obrigatórios. Vincule todas as
-funções necessárias e preencha `editor_fields` quando o template exigir.
-As tags padrão do template são combinadas com as tags informadas.
-
-## Acompanhar contratos
-
-Este fluxo cobre Gestão de Contratos (Contract Lifecycle Management, CLM), chamada de
-Contract Tracking na API.
-
-Depois de enviar ou gerar um documento, associe os termos usados para alertas de renovação,
-vencimento e relacionamento com aditivos. Leituras OAuth exigem `documents:read`; alterações,
-renovações e encerramentos exigem `documents:write` e um plano com acompanhamento de contratos.
-
-```php
-$contract = $client->contracts()->update($documentId, [
-    'status' => 'active',
-    'counterparty_name' => 'Empresa de exemplo',
-    'counterparty_taxpayer_id' => '11.222.333/0001-81',
-    'value' => 120000.50,
-    'currency' => 'BRL',
-    'start_date' => '2026-11-01',
-    'end_date' => '2027-10-31',
-    'auto_renew' => true,
-    'renewal_term_months' => 12,
-    'notice_period_days' => 30,
-    'metadata' => ['crm_stage' => 'won'],
-    'external_references' => [['system' => 'erp', 'id' => 'C-1042']],
-]);
-
-$sameContract = $client->contracts()->get($documentId);
-$activeContracts = $client->contracts()->list(1, 25, [
-    'status' => 'active',
-    'ending_within_days' => 90,
-    'sort' => 'end_date',
-    'expand' => 'document',
-]);
-```
-
-Envie o `updated_at` lido na alteração seguinte para receber 409 se outra gravação tiver ocorrido.
-Para ligar um documento de aditivo à família, informe o documento raiz e os termos alterados:
-
-```php
-$amendment = $client->contracts()->update($amendmentDocumentId, [
-    'parent_document_id' => $documentId,
-    'relation_type' => 'amendment',
-    'value' => 130000,
-    'end_date' => '2028-06-30',
-]);
-
-$family = $client->contracts()->related($amendmentDocumentId);
-$renewed = $client->contracts()->renew($documentId, [
-    'term' => $contract['term'],
-    'updated_at' => $contract['updated_at'],
-]);
-$terminated = $client->contracts()->terminate($documentId, [
-    'reason' => 'Fornecedor substituído',
-    'updated_at' => $renewed['updated_at'],
-]);
-```
-
-Um aditivo pendente aplica seus termos ao contrato raiz quando o documento é certificado. Relações
-aplicadas são somente leitura. `external_references` substitui a lista inteira; `[]` ou `null` a
-limpa. A resposta de documento contém `has_contract`, e os eventos `document_contract_*` permitem
-acompanhar mudanças e alertas.
-
-## Webhooks
-
-Uma conta pode ter 1 endpoint de webhook, ou até 3 nos planos pagos. Cada endpoint tem URL,
-eventos, estado e assinatura próprios, e todo endpoint ativo inscrito em um evento o recebe de forma
-independente. Ative `signingEnabled` para que cada entrega seja assinada no padrão
-[Standard Webhooks](https://www.standardwebhooks.com).
-URLs novas ou alteradas precisam usar HTTPS.
-
-```php
-use Assinafy\SDK\Resources\WebhookResource;
-
-$endpoint = $client->webhooks()->createEndpoint(
-    url: 'https://hooks.example.com/assinafy',
-    email: 'ops@example.com',
-    events: WebhookResource::DEFAULT_EVENTS,
-    name: 'ERP',
-    signingEnabled: true,
-);
-
-// Guarde o segredo retornado na criação como qualquer credencial.
-$secret = $endpoint['secret']; // 'whsec_...'
-```
-
-Aplicativos OAuth devem guardar o segredo na criação porque não podem lê-lo depois. Com o escopo
-`webhooks:write`, podem usar `rotateEndpointSecret()` e precisam persistir o novo valor
-imediatamente. Clientes com API key ou sessão de usuário também podem ler o segredo atual com
-`endpointSecret()`.
-
-No receptor, verifique a assinatura com o corpo **bruto** antes de decodificá-lo:
+Crie endpoints com `webhooks()->createEndpoint()` e `signingEnabled: true`. Guarde o `secret` da
+criação; clientes OAuth não podem lê-lo depois, mas `webhooks:write` permite rotação. No receptor,
+verifique o corpo bruto antes de decodificar, deduplique por `webhook-id` e busque o recurso novamente:
 
 ```php
 $raw = (string) file_get_contents('php://input');
-$parser = $client->webhookEvents();
-
-if (!$parser->verifySignature($raw, getallheaders(), $secret)) {
+if (!$client->webhookEvents()->verifySignature($raw, getallheaders(), $secret)) {
     http_response_code(401);
     exit;
 }
-
-$event = $parser->extractEvent($raw);
-if ($event === null) {
-    http_response_code(400);
-    exit;
-}
-
-$messageId = $_SERVER['HTTP_WEBHOOK_ID']; // idêntico em todas as tentativas: use para deduplicar
+$event = $client->webhookEvents()->extractEvent($raw);
 ```
 
-`verifySignature()` compara cada entrada `v1,<assinatura>` em tempo constante e rejeita
-`webhook-timestamp` a mais de 300 segundos do relógio local. `rotateEndpointSecret()` troca o
-segredo imediatamente; atualize o receptor na mesma hora.
+Aplicativos de marketplace usam `oauth($clientId, $clientSecret)` com PKCE S256, `state` e `iss`.
+Guarde a transação completa de `startAuthorization()`, valide com `handleCallback()` e troque com
+`exchangeCode()`. Um token autoriza uma única conta. Refresh tokens rotacionam: use lock por conexão,
+persista o novo registro antes de continuar e nunca repita uma renovação ambígua. O SDK não armazena
+tokens, não renova automaticamente e não valida OIDC/JWT. O fluxo completo está em [docs/OAUTH.md](docs/OAUTH.md).
 
-O envelope contém `id`, `event`, `message`, `subject`, `origin`, `account_id`, `created_at`, `object`
-e `payload`. `getEventData()` lê `object`, e `getEventPayload()` lê `payload`. Retorne 2xx
-rapidamente e processe por uma fila da aplicação. Cada evento pode ter até seis tentativas,
-aproximadamente dez minutos entre elas, para falhas de conexão, timeout, 408, 429 ou 5xx. Após dez
-entregas com falha, o endpoint fica suspenso e testa o evento pendente mais antigo após cerca de
-3, 15 e 60 minutos e depois a cada 6 horas. Um teste ou reenvio manual bem-sucedido libera o
-endpoint e entrega o backlog do mais antigo para o mais novo. O histórico fica disponível por sete
-dias e guarda os primeiros 2.000 caracteres da resposta. Não dependa da ordem entre
-`assignment_created` e `document_metadata_ready`, e consulte o objeto pela API antes de agir.
+## Retornos, erros e testes
 
-| Método | Rota |
-| --- | --- |
-| `listEndpoints()` / `getEndpoint($id)` | `GET .../webhooks/endpoints[/{id}]` |
-| `createEndpoint(...)` | `POST .../webhooks/endpoints` |
-| `updateEndpoint($id, $campos)` | `PUT .../webhooks/endpoints/{id}` (atualização parcial) |
-| `deleteEndpoint($id)` | `DELETE .../webhooks/endpoints/{id}` |
-| `listEndpoints($url)` / `deleteEndpointByUrl($url)` | `GET` / `DELETE .../webhooks/endpoints?url=...` (URL exata) |
-| `endpointSecret($id)` / `rotateEndpointSecret($id)` | `.../secret` e `.../secret/rotate` |
-| `dispatches()` / `retryDispatch($id)` | Histórico de entregas e reenvio |
-
-`register()`, `get()`, `deactivate()` e `activate()` continuam funcionando e atuam sobre o endpoint
-mais antigo da conta. O [catálogo completo](docs/API_REFERENCE.md#event-catalog) descreve os eventos.
-
-## Aplicativos de marketplace e OAuth
-
-Use OAuth quando a sua aplicação age sobre a conta **de outra pessoa**, sem nunca receber a senha
-ou a API key dela. Para automatizar a sua própria conta, continue com a API key.
-
-`oauth()` devolve um `OAuthResource` que cobre o fluxo inteiro: material PKCE, URL de autorização,
-validação do callback, troca do código, renovação, revogação, userinfo e os dois documentos de
-descoberta. O [guia OAuth](docs/OAUTH.md) traz os payloads completos, os escopos e a lista de
-verificação para produção.
-
-```php
-use Assinafy\SDK\Resources\OAuthResource;
-
-$oauthBaseUrl = Configuration::SANDBOX_BASE_URL;
-$expectedIssuer = 'https://auth-sandbox.assinafy.com.br';
-$oauthClient = AssinafyClient::forAuth($oauthBaseUrl);
-$oauth = $oauthClient->oauth(
-    (string) getenv('ASSINAFY_OAUTH_CLIENT_ID'),
-    (string) getenv('ASSINAFY_OAUTH_CLIENT_SECRET') ?: null,
-);
-
-$server = $oauth->authorizationServerMetadata($expectedIssuer);
-if (($server['issuer'] ?? null) !== $expectedIssuer) {
-    throw new RuntimeException('Unexpected OAuth issuer');
-}
-
-// 1. Envie o navegador para a Assinafy e guarde a transação na sessão do usuário.
-$start = $oauth->startAuthorization('https://app.example.com/callback', [
-    OAuthResource::SCOPE_DOCUMENTS_READ,
-    OAuthResource::SCOPE_DOCUMENTS_WRITE,
-    OAuthResource::SCOPE_OPENID,
-    OAuthResource::SCOPE_PROFILE,
-    OAuthResource::SCOPE_EMAIL,
-    OAuthResource::SCOPE_OFFLINE_ACCESS,
-], ['issuer' => $server['issuer'], 'authorization_endpoint' => $server['authorization_endpoint']]);
-$_SESSION['assinafy_oauth'] = $start + ['created_at' => time()];
-header('Location: ' . $start['authorization_url'], true, 302);
-exit;
-```
-
-Na rota de callback, reconstrua `$oauthClient` e `$oauth` com o mesmo ambiente e aplicativo:
-
-```php
-// 2. No redirect URI, valide o retorno e troque o código.
-$transaction = $_SESSION['assinafy_oauth'] ?? null;
-unset($_SESSION['assinafy_oauth']);
-if (!is_array($transaction) || time() - ($transaction['created_at'] ?? 0) > 600) {
-    throw new RuntimeException('Invalid or expired OAuth transaction');
-}
-$tokens = $oauth->exchangeCode($oauth->handleCallback($_GET, $transaction), $transaction);
-
-// 3. O token vale para a única conta escolhida pelo usuário.
-$accounts = $oauthClient->accounts()->list($tokens['access_token']);
-$connected = AssinafyClient::forBearer($tokens['access_token'], $accounts['data'][0]['id'], $oauthBaseUrl);
-```
-
-`startAuthorization()` gera um `code_verifier` e um `state` novos a cada tentativa;
-`handleCallback()` compara o `state` com `hash_equals` e exige que `iss` seja o servidor de
-autorização esperado, antes de o código ser usado. Passe `null` como segundo argumento de `oauth()`
-para um aplicativo público, que autentica só com PKCE e não recebe segredo.
-
-As respostas de token são JSON plano, sem o envelope `data`. Leia o `scope` retornado em vez de
-supor que todo escopo pedido foi concedido. `refresh_token` só vem com `offline_access` aprovado e
-`id_token` só com `openid`.
-
-```php
-$renovado = $oauth->refresh($conexao->refreshToken);     // devolve um refresh token NOVO
-$repositorio->salvarTokens($renovado); // gravação atômica sob lock por conexão
-$claims   = $oauth->userinfo($renovado['access_token']); // {sub, name?, email?, email_verified?}
-// Ao desconectar, revogue o token guardado mais recentemente — nunca uma cópia aposentada.
-$oauth->revoke($repositorio->refreshTokenAtual(), OAuthResource::TOKEN_TYPE_HINT_REFRESH);
-```
-
-Cada renovação aposenta o refresh token usado. Um refresh token repetido é indistinguível de um
-roubado, então o servidor encerra a conexão inteira: guarde o novo token antes de qualquer outra
-coisa, renove um de cada vez por conexão e nunca reenvie um refresh token após um timeout: releia o
-que você guardou e, se ainda for o token enviado, peça ao usuário para reconectar. Só uma falha que
-comprovadamente ocorreu antes do envio (DNS, conexão recusada, handshake TLS) pode ser repetida. O
-acesso dura 1 hora. O refresh token vale 30 dias e cada renovação devolve um novo, válido por 30
-dias a partir dela: a conexão só expira se a aplicação passar 30 dias sem renovar.
-
-O SDK não guarda tokens, não mantém locks e não renova nada sozinho. Crie um cliente por conexão e
-nunca compartilhe credencial mutável entre usuários. OAuth está publicado em produção e no
-sandbox (issuer `https://auth-sandbox.assinafy.com.br`); leia o issuer da descoberta do ambiente.
-Os helpers legados `socialLoginUrl()` e `socialLoginCallbackUrl()` são
-separados desse fluxo.
-
-## Respostas, paginação e erros
-
-Métodos de recurso individual normalmente retornam `data` sem envelope. Listagens paginadas
-retornam o envelope com `data` e `pagination`, extraída dos cabeçalhos `X-Pagination-*`:
-
-```php
-$page = $client->documents()->list(page: 1, perPage: 100);
-foreach ($page['data'] as $row) {
-    echo $row['name'], PHP_EOL;
-}
-$totalPages = $page['pagination']['page_count'];
-```
-
-Páginas começam em 1, com até 100 itens. Catálogos e listas sem paginação, como tags, campos,
-atividades e eventos, retornam arrays diretos. Consulte o retorno específico de cada método;
-algumas exclusões preservam o envelope e outras retornam `[]`.
-
-```php
-use Assinafy\SDK\Exceptions\ApiException;
-use Assinafy\SDK\Exceptions\NetworkException;
-use Assinafy\SDK\Exceptions\ValidationException;
-
-try {
-    $document = $client->documents()->get($documentId);
-} catch (ValidationException $exception) {
-    $errors = $exception->getErrors();
-} catch (ApiException $exception) {
-    $status = $exception->getStatusCode();
-    $retryAfter = $exception->getRetryAfter(); // segundos de espera após HTTP 429
-} catch (NetworkException $exception) {
-    // A aplicação decide como recuperar uma falha de transporte ou resposta inválida.
-}
-```
-
-O SDK não repete automaticamente mutações. Após um timeout, confirme o estado remoto antes de
-reenviar upload, atribuição ou renovação OAuth. Em HTTP 429 (`isRateLimited()`), respeite `Retry-After`
-(`getRetryAfter()`); `getRateLimit()` retorna `limit`, `remaining` e `reset` dos cabeçalhos `X-Rate-Limit-*`.
-O transporte desabilita redirecionamentos e registra apenas metadados, sem corpos ou valores de
-credenciais. Respostas e contextos de exceção podem conter dados pessoais: não registre tudo.
-
-## Recursos disponíveis
-
-| Acesso | Operações |
-| --- | --- |
-| `accounts()` | Descoberta, criação/edição/exclusão, tema, logo e estatísticas |
-| `users()` | Perfil, preferências de notificação e estatísticas do usuário |
-| `documents()` | Upload, busca, metadados, artefatos, verificação pública, tags e geração por template |
-| `contracts()` | Termos de contratos, famílias de aditivos, renovação, vencimento e encerramento |
-| `signers()` | Cadastro, atualização, busca e exclusão de signatários |
-| `assignments()` | Estimativa, atribuição, reenvio, prazo e histórico WhatsApp |
-| `templates()` | Upload, consulta, edição, processamento e páginas de templates |
-| `tags()` / `fields()` | Organização, definições de campos e validação de valores |
-| `webhooks()` / `webhookEvents()` | Endpoints, segredos de assinatura, histórico, retry, verificação e leitura de eventos |
-| `auth()` | Login (incluindo o segundo fator com `verifyMfa()`), conta de usuário, API key e senha |
-| `oauth()` | Autorização de marketplace: PKCE, callback, token, renovação, revogação, userinfo e descoberta |
-| `signerSession()` / `signerDocuments()` | Ações e documentos acessíveis ao signatário |
-
-Estatísticas de conta/usuário e preferências de notificação estão disponíveis no sandbox.
-Recursos sujeitos ao plano, como notificações WhatsApp e Certificado Digital, podem responder 403.
-OAuth está publicado em produção e no sandbox; confirme o issuer pela descoberta do ambiente escolhido.
-Endpoints de webhook e segredos de assinatura estão publicados em produção e no sandbox.
-Autenticação em dois fatores permanece disponível somente em produção; o sandbox responde a essas
-rotas com 404 de roteamento.
-
-## Testes e desenvolvimento
+Recursos individuais normalmente retornam `data` sem envelope. Listas paginadas mantêm `data` e
+adicionam `pagination` a partir de `X-Pagination-*`; binários retornam `string` de bytes.
+Trate `ValidationException`, `ApiException` e `NetworkException`. Em 429, consulte `getRetryAfter()`
+e `getRateLimit()`; o SDK não repete chamadas automaticamente.
 
 ```bash
 composer install
 composer check
-```
-
-O comando valida o pacote, executa PHPUnit, PHPStan, PHPCS e a verificação de dependências.
-Os testes de unidade não usam rede. Para integração, forneça os segredos pelo ambiente:
-
-```bash
-read -rs ASSINAFY_API_KEY
-export ASSINAFY_API_KEY
-export ASSINAFY_ACCOUNT_ID='sandbox-account-id'
-export ASSINAFY_BASE_URL='https://sandbox.assinafy.com.br/v1'
-export ASSINAFY_INTEGRATION=1
-vendor/bin/phpunit --testsuite=integration --testdox
-```
-
-A execução padrão usa destinatários únicos em `example.com`, verifica respostas da API e remove
-seus documentos, signatários e templates. Ela não comprova entrega de email ou assinatura pelo
-usuário. Opções adicionais:
-
-| Variável | Pré-requisito/efeito |
-| --- | --- |
-| `ASSINAFY_NOTIFICATION_TESTS=1` | Usa `ASSINAFY_TEST_EMAIL` e `ASSINAFY_TEST_EMAIL_ALT`, caixas controladas pelo operador |
-| `ASSINAFY_SIGNER_ID` + `ASSINAFY_SIGNER_ACCESS_CODE` | Exercita leituras autenticadas de uma sessão atual |
-| `ASSINAFY_REQUIRE_PLAN_FEATURES=1` | Exige sucesso, em vez de aceitar `403`, para WhatsApp, Certificado Digital e biometria |
-| `ASSINAFY_STATEFUL_TESTS=1` | Altera preferências/configuração compartilhadas e restaura os valores |
-| `ASSINAFY_DESTRUCTIVE_TESTS=1` | Cria e exclui uma conta descartável, incluindo seu ciclo de webhooks |
-
-Login, troca de senha e gestão destrutiva da API key precisam de usuário descartável com senha.
-Conclusão de assinatura exige os códigos do signatário; templates exigem uma função de assinatura
-configurada; OAuth exige aplicativo registrado e consentimento. Uma chave de workspace não fornece
-essas credenciais. A integração recusa produção por padrão.
-
-
-Os testes de documento também podem usar um token OAuth já autorizado para a conta configurada,
-com `documents:read`, `documents:write`, `templates:read` e `templates:write`. Os mesmos testes
-exercitam upload, preparação, busca, renomeação, atribuição, campos, tags e templates:
-
-```bash
-read -rs ASSINAFY_OAUTH_ACCESS_TOKEN
-export ASSINAFY_OAUTH_ACCESS_TOKEN
-ASSINAFY_AUTH_MODE=oauth composer test:integration -- --filter 'Document|Assignment|Collect|Template|EstimateCost|Rename|Statuses|SignerLifecycle|TagLifecycle|FieldLifecycle|OAuth'
-```
-
-Mantenha `ASSINAFY_ACCOUNT_ID`, `ASSINAFY_BASE_URL` e `ASSINAFY_INTEGRATION=1` configurados.
-O ID deve ser a única conta autorizada pelo token. Administração de conta, API keys e preferências
-de usuário ficam fora desse conjunto OAuth. A verificação offline compara as requisições e
-retornos dos dois modos; testes live exigem o token obtido após consentimento.
-
-A descoberta e as recusas OAuth podem ser testadas sem chave de conta ou aplicativo registrado:
-
-```bash
 ASSINAFY_INTEGRATION=1 composer test:integration -- --filter OAuth
 ```
 
-GitLab CI é o pipeline principal; GitHub Actions recebe o espelho e executa a matriz PHP 8.2–8.5,
-dependências mínimas/atuais e verificações de qualidade. GitHub não executa testes de sandbox;
-a integração é local e explícita, com um job opcional protegido no GitLab. Consulte
-[ARCHITECTURE.md](ARCHITECTURE.md), [UPGRADING.md](UPGRADING.md) e os [exemplos](docs/EXAMPLES.md).
+Testes unitários não usam rede. Integração completa exige credenciais de sandbox, conta descartável
+para operações destrutivas e caixas controladas para entrega/OTP; o runner recusa produção por padrão.
+GitLab CI é canônico e o espelho GitHub executa apenas verificações offline. Consulte
+[ARCHITECTURE.md](ARCHITECTURE.md), [UPGRADING.md](UPGRADING.md) e [CHANGELOG.md](CHANGELOG.md).
 
 Licença [MIT](LICENSE).

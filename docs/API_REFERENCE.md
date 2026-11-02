@@ -5,7 +5,7 @@ This reference maps every public resource method in this SDK to the Assinafy API
 - <https://api.assinafy.com.br/v1/docs>
 - <https://api.assinafy.com.br/v1/docs/openapi.json>
 
-This reference describes SDK version 2.8.0. Install published releases with
+This reference describes SDK version 2.8.1. Install published releases with
 `composer require assinafy/php-sdk` and use the documentation shipped with the selected tag.
 See [INSTALLATION.md](INSTALLATION.md) for setup.
 
@@ -120,7 +120,7 @@ with `Retry-After` (seconds). The SDK never retries automatically; on `ApiExcept
 | Identity-document verification | `IdDocumentFaceMatchBasic` requires the account feature and a valid CPF in `government_id`, and accepts Email or WhatsApp notification. Signer session methods open the hosted capture after explicit consent. Workspace assignment methods read evidence and decide a review. `pending_identity_review` means every signer has signed while certification awaits review. |
 | Webhook URL operations | New and changed webhook URLs require HTTPS. `listEndpoints($url)` and `deleteEndpointByUrl($url)` still accept an exact stored HTTP URL so legacy endpoints can be found or removed. |
 | Webhook signing secret | A signed endpoint create response includes `secret`. OAuth applications must persist it then because they cannot read it later; with `webhooks:write` they may rotate it and must store the replacement immediately. API-key/user-session clients can use `endpointSecret()`. |
-| Digital-certificate assignment | `DigitalCertificate` requires `method: virtual`, the account feature, a valid signer CPF in `government_id`, and an isolated signing step. The SDK rejects ordinary `collect` calls with stable validation code `digital_certificate_requires_virtual_assignment`. Template requests are forwarded; the API returns `400` when placed signer fields make the generated assignment `collect`. |
+| Digital-certificate assignment | `DigitalCertificate` requires `method: virtual`, the account feature, a valid signer CPF or CNPJ in `government_id`, and an isolated signing step. The SDK rejects ordinary `collect` calls with stable validation code `digital_certificate_requires_virtual_assignment`. Template requests are forwarded; the API returns `400` when placed signer fields make the generated assignment `collect`. |
 | Digital-certificate signer gate | Call `confirmData()` with `has_accepted_terms: true` before `GET /sign`. The confirm-data schema lists only `full_name`, `email`, and `government_id`; the `GET /sign` narrative documents `has_accepted_terms` as part of this body, which is where the SDK sends it. |
 | Template management | `TemplateResource::create()`, `get()`, `update()`, `delete()`, and `downloadPage()` use service routes absent from OpenAPI. They are marked **undocumented** below and may change independently of the specification. |
 | OAuth start/callback | `GET /auth/authenticate` and `GET /login-callback` are absent from OpenAPI. The SDK retains URL builders for legacy social authentication. Marketplace OAuth uses the authorization server described below. |
@@ -250,7 +250,7 @@ An application-supplied `HttpClientInterface` owns its wire behavior and must se
 | `WebhookEventParser::getEventData(?array $event): array` | Returns the polymorphic `object` entity. |
 | `WebhookEventParser::getEventPayload(?array $event): array` | Returns event-specific `payload`. |
 | `WebhookEventParser::getAccountId(?array $event): ?string` | Returns `account_id`. |
-| `Iso8601::reasonInvalid(string $value): ?string` | Returns why an expiration timestamp is unusable, or `null` when it is valid. Requires an explicit `Z` or `±HH:MM` offset and a real calendar date. Shared by `assignments()->create()`, `resetExpiration()` and `uploadAndRequestSignatures()` so all three reject the same values with the same wording. |
+| `Iso8601::reasonInvalid(string $value): ?string` | Returns why an expiration value is unusable, or `null` when it is valid. Accepts a real calendar date, a date-time interpreted as UTC when it has no offset, or a date-time with `Z` or `±HH:MM`. A date alone expires at 23:59 UTC. Shared by `assignments()->create()`, `resetExpiration()` and `uploadAndRequestSignatures()` so all three reject the same values with the same wording. |
 | `MutableLogger::__construct(LoggerInterface $logger)` | Creates the internal logger proxy shared by existing resources and transport. |
 | `MutableLogger::setLogger(LoggerInterface $logger): void` | Replaces the proxy target. |
 | `MutableLogger::getLogger(): LoggerInterface` | Returns the proxy target. |
@@ -312,7 +312,7 @@ both to `Email`.
 | `Email` | `AssignmentResource::VERIFICATION_EMAIL` | Enters a code received by email before signing. | An email address on the signer. |
 | `Whatsapp` | `AssignmentResource::VERIFICATION_WHATSAPP` | Enters a code received over WhatsApp before signing. | A `whatsapp_phone_number` on the signer; paid subscriptions only. Requires the WhatsApp notification channel — the two always travel together. |
 | `IdDocumentFaceMatchBasic` | `AssignmentResource::VERIFICATION_ID_DOCUMENT_FACE_MATCH_BASIC` | Hosted government-ID capture, face matching and liveness. | Account feature, valid CPF in `government_id`, explicit biometric-processing consent before capture; a per-signer fee from `estimateCost()`. |
-| `DigitalCertificate` | `AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE` | Signs with their own ICP-Brasil certificate — **A1** (a software file on the device) or **A3** (a smart card or token) — through the Web PKI browser extension, producing a qualified PAdES signature. | `method: virtual`, the account's Digital Certificate feature (Standard and Pro plans), a valid CPF in the signer's `government_id`, and the signer alone in its signing step. |
+| `DigitalCertificate` | `AssignmentResource::VERIFICATION_DIGITAL_CERTIFICATE` | Signs with their own ICP-Brasil certificate — **A1** (a software file on the device) or **A3** (a smart card or token) — through the Web PKI browser extension, producing a qualified PAdES signature. | `method: virtual`, the account's Digital Certificate feature (Standard and Pro plans), a valid CPF or CNPJ in the signer's `government_id`, and the signer alone in its signing step. A CPF uses an e-CPF or an e-CNPJ naming that person as legal representative; a CNPJ uses an e-CNPJ for that company. |
 
 | Notification | Constant | Delivers | Requirements |
 |---|---|---|---|
@@ -381,7 +381,7 @@ entries[]               required in practice for collect
       fontFamily        optional string presentation metadata
       backgroundColor   optional CSS-compatible color string
 message                 invitation text
-expires_at              ISO-8601 date-time
+expires_at              ISO-8601 date or date-time; missing offset means UTC; date alone means 23:59 UTC
 copy_receivers[]        signer IDs
 ```
 
@@ -396,8 +396,8 @@ non-empty notification must match; if only one side is supplied, the API infers 
 omitting both defaults to Email. DigitalCertificate and IdDocumentFaceMatchBasic accept either notification channel. Explicit
 `notification_methods: []` is preserved instead of replaced.
 
-`DigitalCertificate` requires the account feature and an existing signer whose valid CPF has been
-set through `signers()->create()` or `signers()->update(..., ['government_id' => ...])`. That signer must be alone in its
+`DigitalCertificate` requires the account feature and an existing signer whose valid CPF or CNPJ has
+been set through `signers()->create()` or `signers()->update(..., ['government_id' => ...])`. That signer must be alone in its
 signing step and the assignment method must be `virtual`. Cost estimates add 0.5 credits per
 certificate signer under `SignatureDigitalCertificate`, on top of any notification cost. The SDK
 rejects `collect` during both creation and estimation with `ValidationException`; callers can
@@ -411,7 +411,7 @@ branch on `getErrors()['code'] === AssignmentResource::ERROR_DIGITAL_CERTIFICATE
 | `estimateCost($documentId, $signers, $method, $options)` | [`POST /v1/documents/{documentId}/assignments/estimate-cost`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fassignments%2Festimate-cost) | Workspace | Published JSON properties are optional `method: virtual\|collect`, `signers: [{verification_method?, notification_methods?}]`, and `entries: object[]`; signer IDs are not part of estimate entries. The SDK requires at least one signer in both modes, plus entries for collect, and rejects DigitalCertificate unless the method is `virtual`. | Unwrapped `CostEstimate`. | `200; 400, 401, 500` |
 | `resend($documentId, $assignmentId, $signerId)` | [`PUT /v1/documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/resend`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fassignments%2F%7BassignmentId%7D%2Fsigners%2F%7BsignerId%7D%2Fresend) | Workspace | Path parameters only. | Unwrapped `{is_sent, document_id, signer_id}`. | `200; 401, 500` |
 | `estimateResendCost($documentId, $assignmentId, $signerId)` | [`POST /v1/documents/{documentId}/assignments/{assignmentId}/signers/{signerId}/estimate-resend-cost`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fassignments%2F%7BassignmentId%7D%2Fsigners%2F%7BsignerId%7D%2Festimate-resend-cost) | Workspace | Path parameters only. | Unwrapped `ResendCostEstimate`. | `200; 401, 500` |
-| `resetExpiration($documentId, $assignmentId, $expiresAt)` | [`PUT /v1/documents/{documentId}/assignments/{assignmentId}/reset-expiration`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fassignments%2F%7BassignmentId%7D%2Freset-expiration) | Workspace | Required JSON body with the `expires_at` key: an ISO-8601 date-time at least one hour in the future, or `null` to remove the expiration. Not allowed once the document is closed. | Unwrapped `Assignment`; `expires_at` is `null` after clearing. | `200; 400, 401, 404, 500` |
+| `resetExpiration($documentId, $assignmentId, $expiresAt)` | [`PUT /v1/documents/{documentId}/assignments/{assignmentId}/reset-expiration`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fassignments%2F%7BassignmentId%7D%2Freset-expiration) | Workspace | Required JSON body with the `expires_at` key: an ISO-8601 date or date-time at least one hour in the future, or `null` to remove the expiration. A missing offset means UTC; a date alone means 23:59 UTC. Not allowed once the document is closed. | Unwrapped `Assignment`; `expires_at` is `null` after clearing. | `200; 400, 401, 404, 500` |
 | `whatsappNotifications($documentId, $assignmentId)` | [`GET /v1/documents/{documentId}/assignments/{assignmentId}/whatsapp-notifications`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fassignments%2F%7BassignmentId%7D%2Fwhatsapp-notifications) | Workspace | Path parameters only. | Unwrapped `WhatsappNotification[]`. Sandbox messages are simulated and may expose test signing codes in button URLs. | `200; 401, 500` |
 
 ### Identity-document review

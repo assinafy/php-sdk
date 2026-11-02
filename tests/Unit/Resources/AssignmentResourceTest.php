@@ -317,6 +317,15 @@ final class AssignmentResourceTest extends TestCase
         $this->assertSame(['expires_at' => '2027-01-01T00:00:00Z'], $call['body']);
     }
 
+    public function testCreatePreservesDocumentedDateOnlyExpiration(): void
+    {
+        $this->http->queueJson(201, ['id' => 'a1']);
+
+        $this->assignments->create('doc1', ['s1'], options: ['expires_at' => '2027-01-01']);
+
+        $this->assertSame('2027-01-01', $this->http->lastCall()['body']['expires_at']);
+    }
+
     public function testResetExpirationAcceptsNullToRemoveTheDeadline(): void
     {
         $this->http->queueJson(200, ['id' => 'a1', 'expires_at' => null]);

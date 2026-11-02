@@ -363,7 +363,7 @@ before sending the request.
 | `VERIFICATION_EMAIL` | `Email` | An email address on the signer | 0 |
 | `VERIFICATION_WHATSAPP` | `Whatsapp` | `whatsapp_phone_number` and a paid subscription | 0.45 |
 | `VERIFICATION_ID_DOCUMENT_FACE_MATCH_BASIC` | `Email` or `Whatsapp` | Account ID Document + Face Match feature and valid CPF in `government_id` | Per-signer fee returned by the estimate |
-| `VERIFICATION_DIGITAL_CERTIFICATE` | `Email` or `Whatsapp` | The `virtual` method, the account's Digital Certificate feature (Standard and Pro plans), a valid CPF in `government_id`, and the signer alone in its step | 0.5 for the signature, on top of its notification |
+| `VERIFICATION_DIGITAL_CERTIFICATE` | `Email` or `Whatsapp` | The `virtual` method, the account's Digital Certificate feature (Standard and Pro plans), a valid CPF or CNPJ in `government_id`, and the signer alone in its step | 0.5 for the signature, on top of its notification |
 
 `DigitalCertificate` covers the ICP-Brasil **A1** (a software file on the device) and **A3** (a
 smart card or token) certificates. Both use this one value and the same payload — they differ only
@@ -376,6 +376,9 @@ complete a `collect` assignment. `estimateCost()` and `create()` therefore rejec
 with `ValidationException` code `digital_certificate_requires_virtual_assignment`. Template
 requests may use `DigitalCertificate` when the template has no placed signer fields; the API
 rejects templates that resolve to `collect` with `400`.
+
+A CPF requires that person's certificate (an e-CPF, or an e-CNPJ naming them as legal
+representative). A CNPJ requires an e-CNPJ for that company.
 
 Exactly one notification method is allowed per signer; an explicit empty list is preserved rather
 than replaced.
@@ -418,7 +421,8 @@ if ($resendEstimate['has_sufficient_credits'] ?? false) {
 
 Use `resetExpiration()` to change the assignment deadline — pass `null` instead of a date to
 remove the expiration entirely — and `whatsappNotifications()` to inspect rendered WhatsApp
-delivery history.
+delivery history. Expiration accepts an ISO-8601 date or date-time: a missing offset is UTC, and
+a date alone expires at 23:59 UTC.
 
 For the standard virtual flow, the high-level helper performs upload, readiness polling, signer
 lookup/creation, and assignment creation:

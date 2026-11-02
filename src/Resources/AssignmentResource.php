@@ -36,8 +36,8 @@ class AssignmentResource extends AbstractResource
      * {@see DocumentResource::ARTIFACT_PADES}.
      *
      * A1 and A3 differ only in where the private key lives; both use this one value and the
-     * same payload. Needs the account's Digital Certificate feature, a valid CPF in the signer's
-     * `government_id`, and the signer alone in its signing step. Costs 0.5 credits per signer
+     * same payload. Needs the account's Digital Certificate feature, a valid CPF or CNPJ in the
+     * signer's `government_id`, and the signer alone in its signing step. Costs 0.5 credits per signer
      * under the `SignatureDigitalCertificate` breakdown code, on top of its notification.
      * Requires a `virtual` assignment and pairs with either notification method. The browser
      * completes the signature, so {@see SignerSessionResource::sign()} cannot finish it.
@@ -96,7 +96,7 @@ class AssignmentResource extends AbstractResource
      *         ],
      *     ],
      *     'message' => 'Please sign this contract',
-     *     'expires_at' => '2026-12-31T23:59:59Z',       // ISO 8601, must carry Z or ±HH:MM
+     *     'expires_at' => '2026-12-31T23:59:59Z',       // ISO 8601; date-only is also accepted
      *     'copy_receivers' => [],  // signer IDs CC'd on completion
      * ]
      * ```
@@ -570,7 +570,8 @@ class AssignmentResource extends AbstractResource
      *
      * Request body:
      * ```
-     * ['expires_at' => '2026-12-31T23:59:59Z']  // ISO 8601; a Z or ±HH:MM offset is mandatory
+     * ['expires_at' => '2026-12-31T23:59:59Z']  // ISO 8601; offset is optional and defaults to UTC
+     * ['expires_at' => '2026-12-31']            // expires at 23:59 UTC on this date
      * ['expires_at' => null]                    // removes the expiration
      * ```
      *
@@ -664,10 +665,10 @@ class AssignmentResource extends AbstractResource
      * ]
      * ```
      *
-     * @param string|null $expiresAt ISO 8601 date-time ending in `Z` or an explicit `±HH:MM`
-     *     offset, or null to remove the expiration
+     * @param string|null $expiresAt ISO 8601 date or date-time; a missing offset is UTC,
+     *     a date alone expires at 23:59 UTC, and null removes the expiration
      * @return array<string, mixed>
-     * @throws ValidationException when `$expiresAt` is not a valid ISO 8601 date-time
+     * @throws ValidationException when `$expiresAt` is not a valid ISO 8601 date or date-time
      */
     public function resetExpiration(string $documentId, string $assignmentId, ?string $expiresAt): array
     {

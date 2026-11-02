@@ -5,6 +5,16 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.8.1] - 2026-11-02
+
+### Changed
+
+- Document CPF and CNPJ eligibility for ICP-Brasil digital-certificate signers.
+
+### Fixed
+
+- Accept documented assignment expirations without an explicit UTC offset and date-only expirations at 23:59 UTC.
+
 ## [2.8.0] - 2026-10-28
 
 ### Added

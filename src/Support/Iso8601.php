@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace Assinafy\SDK\Support;
 
 /**
- * Validation for the ISO 8601 / RFC 3339 date-times the API accepts in `expires_at`.
+ * Validation for the ISO 8601 dates and date-times the API accepts in `expires_at`.
  *
- * The API rejects a bare local date-time: the value must end in `Z` or an explicit
- * `±HH:MM` UTC offset, so an expiry is never interpreted in the server's timezone.
+ * A date alone expires at 23:59 UTC. A date-time without an offset is interpreted
+ * as UTC; `Z` and explicit `±HH:MM` offsets are also accepted.
  *
  * Shared by {@see \Assinafy\SDK\AssinafyClient::uploadAndRequestSignatures()} and
  * {@see \Assinafy\SDK\Resources\AssignmentResource}, which apply the same rule but
@@ -28,10 +28,11 @@ final class Iso8601
     /** Correctly shaped and in range, but not a real instant (e.g. February 30th). */
     public const REASON_INVALID = 'must be a valid ISO 8601 date-time';
 
-    private const PATTERN = '/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-](\d{2}):(\d{2}))$/';
+    private const PATTERN =
+        '/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-](\d{2}):(\d{2}))?)?$/';
 
     /**
-     * Explain why `$value` is not an acceptable date-time, or `null` when it is.
+     * Explain why `$value` is not an acceptable expiration, or `null` when it is.
      *
      * @return self::REASON_*|null
      */
