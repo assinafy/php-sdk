@@ -236,6 +236,47 @@ final class DocumentResourceTest extends TestCase
         $this->assertSame('AGREEMENT-CODE', $verification['agreement_code']);
     }
 
+    public function testSignedRendersForwardArtifactAndReturnBytes(): void
+    {
+        $this->http->queueRaw(200, 'SIGNED-THUMB')->queueRaw(200, 'SIGNED-PAGE');
+        $this->assertSame('SIGNED-THUMB', $this->documents->downloadThumbnail('doc1', 'certificated'));
+        $this->assertSame(['artifact' => 'certificated'], $this->http->lastCall()['query']);
+        $this->assertSame('SIGNED-PAGE', $this->documents->downloadPage('doc1', 'p1', 'certificated'));
+        $this->assertSame(['artifact' => 'certificated'], $this->http->lastCall()['query']);
+    }
+
+    public function testActivityPagesRetainMetadataAndLegacyReturnShape(): void
+    {
+        $events = [['id' => 21, 'event' => 'document_uploaded']];
+        $headers = [
+            'X-Pagination-Current-Page' => ['2'], 'X-Pagination-Page-Count' => ['2'],
+            'X-Pagination-Per-Page' => ['20'], 'X-Pagination-Total-Count' => ['21'],
+        ];
+        $this->http->queueJson(200, $events, $headers)->queueJson(200, $events, $headers);
+        $result = $this->documents->activitiesPage('doc/1', 2, 20, 'id');
+        $this->assertSame($events, $result['data']);
+        $this->assertSame([
+            'current_page' => 2, 'page_count' => 2, 'per_page' => 20, 'total_count' => 21,
+        ], $result['pagination']);
+        $this->assertSame('documents/doc%2F1/activities', $this->http->lastCall()['uri']);
+        $this->assertSame(['page' => 2, 'per-page' => 20, 'sort' => 'id'], $this->http->lastCall()['query']);
+        $this->assertSame($events, $this->documents->activities('doc/1', 2, 20, 'id'));
+        $this->http->queueJson(200, []);
+        $this->assertSame([], $this->documents->activities('doc1', 99));
+    }
+
+    public function testActivityPagesRejectInvalidPaginationAndSortBeforeNetwork(): void
+    {
+        foreach ([[0, 20, '-id'], [1, 0, '-id'], [1, 20, 'name']] as [$page, $perPage, $sort]) {
+            try {
+                $this->documents->activitiesPage('doc1', $page, $perPage, $sort);
+                $this->fail('Expected validation failure');
+            } catch (ValidationException) {
+                $this->assertSame([], $this->http->calls);
+            }
+        }
+    }
+
     public function testPublicInfoAndSendToken(): void
     {
         $this->http->queueJson(200, ['id' => 'doc1', 'name' => 'x.pdf']);

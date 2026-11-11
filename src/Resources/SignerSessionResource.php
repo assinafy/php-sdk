@@ -313,7 +313,12 @@ class SignerSessionResource extends AbstractResource
      * the signer's `current_signer` and the assignment `items` they must complete — those
      * `items[].id` values are the `itemId`s {@see self::sign()} expects.
      *
-     * Request (query string): `signer-access-code`, plus `has_accepted_terms` when supplied.
+     * Request: no body; query ['signer-access-code' => '<code>', 'has_accepted_terms' => true,
+     * 'document_id' => 'second-document-id', 'expand' => 'envelope']; all but the code are optional.
+     * With an envelope code, document_id selects another member assigned to this signer and carries
+     * email/WhatsApp verification there once. Other codes ignore document_id. Workspace credentials
+     * are not sent. expand=envelope adds ['id' => 'envelope-id', 'name' => 'Agreement'] to the response
+     * below, or null outside an envelope. Closed codes return reduced metadata; expansion still works.
      *
      * DigitalCertificate signers must first call {@see self::confirmData()} with
      * `has_accepted_terms: true` before opening the document — the query flag here alone
@@ -450,19 +455,32 @@ class SignerSessionResource extends AbstractResource
      *
      * @param bool|null $hasAcceptedTerms sent as a query flag when supplied; it does not
      *     satisfy the DigitalCertificate confirm-data gate — see above
+     * @param string|null $documentId another envelope member assigned to this signer
+     * @param string|null $expand envelope to include envelope identity
      * @return array<string, mixed>
-     * @throws ValidationException when the access code is blank
+     * @throws ValidationException when the access code or supplied document ID is blank
      * @throws \Assinafy\SDK\Exceptions\ApiException 400 when the confirm-data gate is unmet;
      *     401 before the code is verified; 409 while the document is still being prepared
      *     (retry with backoff)
      */
     public function currentDocument(
         #[\SensitiveParameter] string $accessCode,
-        ?bool $hasAcceptedTerms = null
+        ?bool $hasAcceptedTerms = null,
+        ?string $documentId = null,
+        ?string $expand = null
     ): array {
         $query = $this->accessCodeQuery($accessCode);
         if ($hasAcceptedTerms !== null) {
             $query['has_accepted_terms'] = $hasAcceptedTerms ? 'true' : 'false';
+        }
+        if ($documentId !== null) {
+            if (trim($documentId) === '') {
+                throw new ValidationException('Document ID cannot be empty');
+            }
+            $query['document_id'] = $documentId;
+        }
+        if ($expand !== null) {
+            $query['expand'] = $expand;
         }
 
         $response = $this->httpClient->get('sign', $query);

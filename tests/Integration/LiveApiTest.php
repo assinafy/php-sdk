@@ -345,6 +345,11 @@ final class LiveApiTest extends TestCase
 
         $activities = $this->client->documents()->activities($doc['id']);
         $this->assertIsArray($activities);
+        $activityPage = $this->client->documents()->activitiesPage($doc['id'], 1, 1, 'id');
+        $this->assertSame(1, $activityPage['pagination']['per_page']);
+        $this->assertCount(1, $activityPage['data']);
+        $this->assertSame($activityPage['data'], $this->client->documents()->activities($doc['id'], 1, 1, 'id'));
+        $this->assertSame([], $this->client->documents()->activitiesPage($doc['id'], 9999)['data']);
 
         $publicInfo = $this->client->documents()->publicInfo($doc['id']);
         $this->assertSame($doc['id'], $publicInfo['id']);
@@ -615,12 +620,8 @@ final class LiveApiTest extends TestCase
     }
 
     /**
-     * Full assignment lifecycle (estimateCost → create → estimateResendCost → resend →
-     * resetExpiration → whatsappNotifications).
-     *
-     * Runs unconditionally against a reserved `example.com` recipient: every call here is
-     * asserted on its API response, never on a delivered message, so no real inbox is
-     * required. This is the SDK's primary flow and must not be opt-in.
+     * Envelope lifecycle with reserved recipients, virtual/collect documents, idempotency and cleanup.
+     * Feature-gate 403s skip unless ASSINAFY_REQUIRE_PLAN_FEATURES=1.
      */
     public function testEnvelopeLifecycle(): void
     {
@@ -657,25 +658,32 @@ final class LiveApiTest extends TestCase
                 ['id' => $ids[1], 'signer_ids' => [$signer['id']], 'method' => 'collect', 'entries' => $placements],
             ],
         ];
-        $estimate = $resource->estimateCost($body);
-        $this->assertSame(1, $estimate['documents']);
-        $this->assertEquals(0, $estimate['total_credits']);
-        $this->assertTrue($estimate['has_sufficient_resources']);
-        $this->assertSame([], $resource->list(filters: ['search' => $name])['data']);
+        try {
+            $estimate = $resource->estimateCost($body);
+            $this->assertSame(1, $estimate['documents']);
+            $this->assertEquals(0, $estimate['total_credits']);
+            $this->assertTrue($estimate['has_sufficient_resources']);
+            $this->assertSame([], $resource->list(filters: ['search' => $name])['data']);
 
-        $this->assertEnvelopeRefusal(fn () => $resource->create(array_replace($body, [
-            'documents' => [$body['documents'][0], $body['documents'][0]],
-        ])), 400);
-        $this->assertEnvelopeRefusal(fn () => $resource->create(array_replace($body, [
-            'max_total_credits' => -1,
-        ])), 400);
-        $this->assertSame([], $resource->list(filters: ['search' => $name])['data']);
-        foreach (array_slice($ids, 0, 2) as $id) {
-            $this->assertSame('metadata_ready', $this->client->documents()->get($id)['status']);
+            $this->assertEnvelopeRefusal(fn () => $resource->create(array_replace($body, [
+                'documents' => [$body['documents'][0], $body['documents'][0]],
+            ])), 400);
+            $this->assertEnvelopeRefusal(fn () => $resource->create(array_replace($body, [
+                'max_total_credits' => -1,
+            ])), 400);
+            $this->assertSame([], $resource->list(filters: ['search' => $name])['data']);
+            foreach (array_slice($ids, 0, 2) as $id) {
+                $this->assertSame('metadata_ready', $this->client->documents()->get($id)['status']);
+            }
+
+            $key = 'sdk-envelope-' . bin2hex(random_bytes(16));
+            $envelope = $resource->create($body, $key);
+        } catch (ApiException $e) {
+            if ($e->getStatusCode() === 403 && getenv('ASSINAFY_REQUIRE_PLAN_FEATURES') !== '1') {
+                $this->markTestSkipped('The workspace does not permit envelope estimates or creation');
+            }
+            throw $e;
         }
-
-        $key = 'sdk-envelope-' . bin2hex(random_bytes(16));
-        $envelope = $resource->create($body, $key);
         $envelopeId = (string) $envelope['id'];
         $this->createdEnvelopes[] = $envelopeId;
         $this->assertSame('envelope', $envelope['resource']);
@@ -691,6 +699,8 @@ final class LiveApiTest extends TestCase
         $listed = $resource->list(filters: ['search' => $name, 'status' => 'open']);
         $this->assertSame([$envelopeId], array_column($listed['data'], 'id'));
         $this->assertSame(1, $listed['pagination']['total_count']);
+        $matches = $this->client->signerDocuments()->searchAsWorkspace($signer['id'], '', $envelopeId);
+        $this->assertEqualsCanonicalizing(array_slice($ids, 0, 2), array_column($matches, 'id'));
         $this->assertSame($envelopeId, $this->client->documents()->get($ids[0], 'envelope_id')['envelope_id']);
         $this->assertSame(2, $this->client->documents()->list(filters: ['envelope_id' => $envelopeId])['pagination']['total_count']);
 
@@ -704,7 +714,23 @@ final class LiveApiTest extends TestCase
         $this->assertSame([$ids[1], $ids[0]], array_column($updated['documents'], 'id'));
         $this->assertNull($updated['message']);
         $this->assertSame($name . ' updated', $updated['name']);
-        $this->assertStringStartsWith('PK', $resource->download($envelopeId, 'original'));
+        $zip = $resource->download($envelopeId, 'original');
+        $this->assertStringStartsWith('PK', $zip);
+        $archiveBase = tempnam(sys_get_temp_dir(), 'asn-envelope-');
+        $this->assertIsString($archiveBase);
+        $archivePath = $archiveBase . '.zip';
+        $this->temporaryFiles[] = $archiveBase;
+        $this->temporaryFiles[] = $archivePath;
+        $this->assertNotFalse(file_put_contents($archivePath, $zip));
+        $archive = new \PharData($archivePath);
+        $this->assertCount(2, $archive);
+        $position = 1;
+        foreach ($archive as $entry) {
+            $this->assertStringStartsWith($position . ' - ', $entry->getFilename());
+            $this->assertStringStartsWith('%PDF-', $entry->getContent());
+            $position++;
+        }
+        unset($archive);
         $activities = $resource->activities($envelopeId, 1, 2, 'id');
         $this->assertNotEmpty($activities['data']);
         $this->assertGreaterThan(0, $activities['pagination']['total_count']);
@@ -747,12 +773,165 @@ final class LiveApiTest extends TestCase
         $this->createdSigners = [];
     }
 
+    public function testEnvelopeVerificationEstimates(): void
+    {
+        $signer = $this->client->signers()->create(
+            'SDK envelope estimate',
+            $this->reservedEmail('sdk-envelope-estimate'),
+            '+5511999999999',
+            '52998224725'
+        );
+        $this->createdSigners[] = $signer['id'];
+        $documents = [];
+        for ($i = 0; $i < 2; $i++) {
+            $document = $this->client->documents()->upload($this->makePdfFixture());
+            $this->createdDocuments[] = $document['id'];
+            $this->client->documents()->waitUntilReady($document['id'], 60, 2);
+            $documents[] = ['id' => $document['id'], 'signer_ids' => [$signer['id']]];
+        }
+        $cases = [
+            ['Email', 'Email'], ['Whatsapp', 'Whatsapp'],
+            ['DigitalCertificate', 'Email'], ['DigitalCertificate', 'Whatsapp'],
+            ['IdDocumentFaceMatchBasic', 'Email'], ['IdDocumentFaceMatchBasic', 'Whatsapp'],
+        ];
+        $unavailable = [];
+        foreach ($cases as [$verification, $notification]) {
+            $previous = null;
+            foreach ([1, 2] as $documentCount) {
+                try {
+                    $estimate = $this->client->envelopes()->estimateCost([
+                        'name' => 'SDK estimate only',
+                        'signers' => [['id' => $signer['id'], 'verification_method' => $verification,
+                            'notification_methods' => [$notification]]],
+                        'documents' => array_slice($documents, 0, $documentCount),
+                        'max_total_credits' => 0,
+                    ]);
+                } catch (ApiException $e) {
+                    if ($e->getStatusCode() !== 403 || getenv('ASSINAFY_REQUIRE_PLAN_FEATURES') === '1') {
+                        throw $e;
+                    }
+                    $unavailable[] = $verification . '/' . $notification;
+                    break;
+                }
+                $this->assertSame(1, $estimate['documents']);
+                $this->assertEqualsWithDelta(
+                    array_sum(array_column($estimate['breakdown'], 'cost')),
+                    $estimate['credits'],
+                    0.000001
+                );
+                $this->assertEqualsWithDelta(
+                    $estimate['credits'] + ($estimate['needs_extra_document'] ? $estimate['extra_document_cost'] : 0),
+                    $estimate['total_credits'],
+                    0.000001
+                );
+                $breakdown = array_column($estimate['breakdown'], null, 'code');
+                if ($notification === 'Whatsapp') {
+                    $this->assertEqualsWithDelta(
+                        $breakdown['NotificationWhatsapp']['unit_cost'] * $breakdown['NotificationWhatsapp']['quantity'],
+                        $breakdown['NotificationWhatsapp']['cost'],
+                        0.000001
+                    );
+                    $this->assertSame(1, $breakdown['NotificationWhatsapp']['quantity']);
+                }
+                if ($verification === 'DigitalCertificate') {
+                    $this->assertEquals(
+                        $breakdown['SignatureDigitalCertificate']['unit_cost'] * $documentCount,
+                        $breakdown['SignatureDigitalCertificate']['cost']
+                    );
+                    $this->assertSame($documentCount, $breakdown['SignatureDigitalCertificate']['quantity']);
+                }
+                if ($verification === 'IdDocumentFaceMatchBasic') {
+                    $this->assertGreaterThan(0, $breakdown['VerificationIdDocumentFaceMatchBasic']['cost']);
+                    $this->assertSame(1, $breakdown['VerificationIdDocumentFaceMatchBasic']['quantity']);
+                }
+                if ($previous !== null) {
+                    $this->assertEqualsWithDelta(
+                        $previous + ($verification === 'DigitalCertificate'
+                            ? $breakdown['SignatureDigitalCertificate']['unit_cost'] : 0),
+                        $estimate['credits'],
+                        0.000001
+                    );
+                }
+                $previous = $estimate['credits'];
+            }
+        }
+        foreach ($documents as $document) {
+            $this->assertSame('metadata_ready', $this->client->documents()->get($document['id'])['status']);
+        }
+        if ($unavailable !== []) {
+            $this->markTestSkipped('Envelope estimates unavailable (403): ' . implode(', ', $unavailable));
+        }
+    }
+
+    public function testCompletedEnvelopeArtifacts(): void
+    {
+        $envelopeId = (string) getenv('ASSINAFY_TEST_COMPLETED_ENVELOPE_ID');
+        if ($envelopeId === '') {
+            $this->markTestSkipped('Set ASSINAFY_TEST_COMPLETED_ENVELOPE_ID to a fully certified test envelope');
+        }
+        $envelope = $this->client->envelopes()->get($envelopeId);
+        $this->assertNotEmpty($envelope['documents']);
+        $expectedHashes = [];
+        foreach ($envelope['documents'] as $document) {
+            $id = $document['id'];
+            $full = $this->client->documents()->get($id);
+            $this->assertSame('certificated', $full['status']);
+            $this->assertTrue($this->client->documents()->isFullySigned($id));
+            $this->assertSame(100.0, $this->client->documents()->getSigningProgress($id)['percentage']);
+            $this->assertNotEmpty($full['verification_code']);
+            $verification = $this->client->documents()->verify($full['verification_code']);
+            $this->assertTrue($verification['is_valid']);
+            $thumbnail = $this->client->documents()->downloadThumbnail($id, 'certificated');
+            $pageImage = $this->client->documents()->downloadPage($id, $full['pages'][0]['id'], 'certificated');
+            $this->assertNotFalse(getimagesizefromstring($thumbnail));
+            $this->assertNotFalse(getimagesizefromstring($pageImage));
+            foreach (['original', 'certificated', 'certificate-page'] as $artifact) {
+                $bytes = $this->client->documents()->download($id, $artifact);
+                $this->assertStringStartsWith('%PDF-', $bytes);
+                $expectedHashes[$artifact][$document['position']] = hash('sha256', $bytes);
+            }
+        }
+        foreach (['original', 'certificated', 'certificate-page', 'bundle'] as $artifact) {
+            $bytes = $this->client->envelopes()->download($envelopeId, $artifact);
+            $this->assertStringStartsWith('PK', $bytes);
+            $base = tempnam(sys_get_temp_dir(), 'asn-envelope-artifact-');
+            $this->assertIsString($base);
+            $path = $base . '.zip';
+            $this->temporaryFiles[] = $base;
+            $this->temporaryFiles[] = $path;
+            $this->assertNotFalse(file_put_contents($path, $bytes));
+            $archive = new \PharData($path);
+            $pdfCount = 0;
+            foreach (new \RecursiveIteratorIterator($archive) as $entry) {
+                if ($entry->isDir() || !str_ends_with(strtolower($entry->getFilename()), '.pdf')) {
+                    continue;
+                }
+                $content = $entry->getContent();
+                $this->assertStringStartsWith('%PDF-', $content);
+                $pdfCount++;
+                if ($artifact !== 'bundle') {
+                    $this->assertSame(1, preg_match('/^(\d+) - /', $entry->getFilename(), $match));
+                    $this->assertSame($expectedHashes[$artifact][(int) $match[1]], hash('sha256', $content));
+                }
+            }
+            if ($artifact === 'bundle') {
+                $this->assertGreaterThanOrEqual(count($envelope['documents']), $pdfCount);
+            } else {
+                $this->assertSame(count($envelope['documents']), $pdfCount);
+            }
+            unset($archive);
+        }
+    }
+
     private function assertEnvelopeRefusal(callable $operation, int $status, ?string $code = null): void
     {
         try {
             $operation();
             self::fail('Expected envelope request refusal');
         } catch (ApiException $exception) {
+            if ($exception->getStatusCode() === 403) {
+                throw $exception;
+            }
             $this->assertSame($status, $exception->getStatusCode());
             if ($code !== null) {
                 $this->assertSame($code, $exception->getResponseData()['code'] ?? null);

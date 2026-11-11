@@ -474,25 +474,33 @@ class DocumentResource extends AbstractResource
      *
      * A preview of the first page, available once the document reaches `metadata_ready`.
      *
-     * Request: no parameters.
+     * Request: no body; optional query ['artifact' => 'certificated'] for the signed render.
+     * Only workspace credentials can request signed renders of certificated documents (otherwise 404).
+     * Rendering may return 503 with Retry-After; the SDK does not retry automatically.
+     * Certificate-only pages have no page IDs; the digital-certificate seal is in the PAdES file.
+     * Omit artifact for the original render; the API ignores values other than certificated.
      *
      * Response: raw `image/jpeg` bytes — not the JSON envelope.
      *
      * Authentication: configured API key or workspace Bearer token (`documents:read` for OAuth).
      * ```php
-     * $jpeg = $client->documents()->downloadThumbnail('document-id');
-     * // $jpeg is the complete JPEG byte string; no query or request body is sent.
+     * $jpeg = $client->documents()->downloadThumbnail('document-id', 'certificated');
+     * // $jpeg is the complete signed JPEG byte string; no request body is sent.
      * ```
      *
      * @param string $documentId the prepared document ID
+     * @param string|null $artifact certificated for signed renders; null for the original
      * @return string raw JPEG bytes
      * @throws ValidationException when `$documentId` is empty
      * @throws \Assinafy\SDK\Exceptions\ApiException 404 before page rendering finishes
      */
-    public function downloadThumbnail(string $documentId): string
+    public function downloadThumbnail(string $documentId, ?string $artifact = null): string
     {
         $documentId = $this->pathSegment($documentId, 'document ID');
-        $response = $this->httpClient->get("documents/{$documentId}/thumbnail");
+        $response = $this->httpClient->get(
+            "documents/{$documentId}/thumbnail",
+            $artifact === null ? [] : ['artifact' => $artifact]
+        );
 
         return $response->getBody();
     }
@@ -505,26 +513,34 @@ class DocumentResource extends AbstractResource
      * position fields when building a `collect` assignment — the `width`/`height` reported
      * alongside each page are the coordinate space `display_settings` is expressed in.
      *
-     * Request: no parameters.
+     * Request: no body; optional query ['artifact' => 'certificated'] for the signed render.
+     * Only workspace credentials can request signed renders of certificated documents (otherwise 404).
+     * Rendering may return 503 with Retry-After; the SDK does not retry automatically.
+     * Certificate-only pages have no page IDs; the digital-certificate seal is in the PAdES file.
+     * Omit artifact for the original render; the API ignores values other than certificated.
      *
      * Response: raw `image/jpeg` bytes — not the JSON envelope.
      *
      * Authentication: configured API key or workspace Bearer token (`documents:read` for OAuth).
      * ```php
-     * $jpeg = $client->documents()->downloadPage('document-id', 'page-id');
-     * // $jpeg is the complete JPEG byte string; no query or request body is sent.
+     * $jpeg = $client->documents()->downloadPage('document-id', 'page-id', 'certificated');
+     * // $jpeg is the complete signed JPEG byte string; no request body is sent.
      * ```
      *
      * @param string $documentId the prepared document ID
      * @param string $pageId an ID from the document's pages array
+     * @param string|null $artifact certificated for signed renders; null for the original
      * @return string raw JPEG bytes
      * @throws ValidationException when either identifier is empty
      */
-    public function downloadPage(string $documentId, string $pageId): string
+    public function downloadPage(string $documentId, string $pageId, ?string $artifact = null): string
     {
         $documentId = $this->pathSegment($documentId, 'document ID');
         $pageId = $this->pathSegment($pageId, 'page ID');
-        $response = $this->httpClient->get("documents/{$documentId}/pages/{$pageId}/download");
+        $response = $this->httpClient->get(
+            "documents/{$documentId}/pages/{$pageId}/download",
+            $artifact === null ? [] : ['artifact' => $artifact]
+        );
 
         return $response->getBody();
     }
@@ -540,7 +556,10 @@ class DocumentResource extends AbstractResource
      * ({@see \Assinafy\SDK\Resources\WebhookResource} `EVENT_*`), so one switch can handle
      * both. `origin` is null for events the platform raised itself rather than a request.
      *
-     * Request: no parameters.
+     * Authentication: workspace API key or Bearer token (OAuth documents:read).
+     * Request: no body; query ['page' => 1, 'per-page' => 20, 'sort' => '-id'].
+     * Returns only this page as a direct array for compatibility. Use {@see self::activitiesPage()}
+     * for pagination metadata; keep requesting pages until page_count or an empty data array.
      *
      * Example response (SDK return; optional fields depend on state):
      * ```php
@@ -567,15 +586,46 @@ class DocumentResource extends AbstractResource
      * ]
      * ```
      *
-     * @return array<int, array<string, mixed>>
-     * @throws ValidationException when `$documentId` is empty
+     * @param string $documentId existing document ID; no signing-state restriction
+     * @param int $page positive page number
+     * @param int $perPage positive page size
+     * @param string $sort -id (newest first) or id (oldest first)
+     * @return array<int, array<string, mixed>> one page of activities
+     * @throws ValidationException for empty IDs, invalid pagination or sort
      */
-    public function activities(string $documentId): array
+    public function activities(string $documentId, int $page = 1, int $perPage = 20, string $sort = '-id'): array
+    {
+        return $this->extractData($this->activitiesPage($documentId, $page, $perPage, $sort));
+    }
+
+    /**
+     * Read one page of document activities with pagination metadata.
+     * GET /documents/{documentId}/activities. Authentication: workspace API key or Bearer (documents:read).
+     * The document must be accessible to the workspace; no signing-state restriction.
+     * Request: no body; query ['page' => 2, 'per-page' => 20, 'sort' => 'id'].
+     * Response: ['status' => 200, 'message' => '', 'data' => [
+     *     ['id' => 21, 'event' => 'document_uploaded', 'message' => 'Uploaded', 'payload' => [],
+     *      'origin' => null, 'created_at' => '2026-11-01T12:00:00Z']],
+     *     'pagination' => ['current_page' => 2, 'page_count' => 2, 'per_page' => 20, 'total_count' => 21]].
+     * Pagination is omitted if the server omits its headers. A page past the end has empty data.
+     * @param string $documentId existing document ID
+     * @param int $page positive page number
+     * @param int $perPage positive page size
+     * @param string $sort -id (newest first) or id (oldest first)
+     * @return array<string, mixed> response envelope with pagination when supplied by the API
+     * @throws ValidationException for empty IDs, invalid pagination or sort
+     */
+    public function activitiesPage(string $documentId, int $page = 1, int $perPage = 20, string $sort = '-id'): array
     {
         $documentId = $this->pathSegment($documentId, 'document ID');
-        $response = $this->httpClient->get("documents/{$documentId}/activities");
+        if (!in_array($sort, ['id', '-id'], true)) {
+            throw new ValidationException('Document activity sort must be id or -id');
+        }
 
-        return $this->extractData($response->getData() ?? []);
+        return $this->withPagination($this->httpClient->get(
+            "documents/{$documentId}/activities",
+            $this->paginationQuery($page, $perPage, ['sort' => $sort])
+        ));
     }
 
     /**

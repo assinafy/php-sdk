@@ -32,7 +32,11 @@ class SignerDocumentResource extends AbstractResource
      * verified session, marks the document as viewed, and enforces the DigitalCertificate
      * confirm-data gate.
      *
-     * Request (query string): `signer-access-code`.
+     * Request: no body; query ['signer-access-code' => '<code>', 'expand' => 'envelope'].
+     * Expansion is optional and adds ['id' => 'envelope-id', 'name' => 'Agreement'] to the response
+     * below, or null for a link outside an envelope. It works before certificate/identity confirmation
+     * and after the code closes (when the response contains reduced document metadata).
+     * Authentication is solely the signer code; workspace credentials are not sent.
      *
      * Example response (SDK return; optional fields depend on state):
      * ```php
@@ -162,16 +166,24 @@ class SignerDocumentResource extends AbstractResource
      * ]
      * ```
      *
+     * @param string|null $expand envelope to include envelope identity
      * @return array<string, mixed>
      * @throws ValidationException when the signer ID or access code is blank
      * @throws \Assinafy\SDK\Exceptions\ApiException 401 when the access code is wrong
      */
-    public function current(string $signerId, #[\SensitiveParameter] string $accessCode): array
-    {
+    public function current(
+        string $signerId,
+        #[\SensitiveParameter] string $accessCode,
+        ?string $expand = null
+    ): array {
         $signerId = $this->pathSegment($signerId, 'signer ID');
+        $query = $this->accessCodeQuery($accessCode);
+        if ($expand !== null) {
+            $query['expand'] = $expand;
+        }
         $response = $this->httpClient->get(
             "signers/{$signerId}/document",
-            $this->accessCodeQuery($accessCode)
+            $query
         );
 
         return $this->extractData($response->getData() ?? []);
@@ -337,8 +349,13 @@ class SignerDocumentResource extends AbstractResource
      * ]
      * ```
      *
+     * Request: no body; query ['search' => 'agreement', 'signer-access-code' => '<code>',
+     * 'envelope_id' => 'envelope-id']. envelope_id is optional; results retain the compact shape above.
+     * Signer-code access remains limited to reached signing steps and, for envelope codes, that envelope.
+     *
      * @param string $accessCode signer access code
      * @param string $term       substring to match against the document name
+     * @param string|null $envelopeId restrict matches to this envelope
      * @return array<int, array<string, mixed>>
      * @throws ValidationException when the signer ID or access code is blank
      * @throws \Assinafy\SDK\Exceptions\ApiException 401 on invalid credentials
@@ -346,9 +363,10 @@ class SignerDocumentResource extends AbstractResource
     public function search(
         string $signerId,
         #[\SensitiveParameter] string $accessCode,
-        string $term
+        string $term,
+        ?string $envelopeId = null
     ): array {
-        return $this->searchDocuments($signerId, $this->accessCodeQuery($accessCode), $term);
+        return $this->searchDocuments($signerId, $this->accessCodeQuery($accessCode), $term, $envelopeId);
     }
 
     /**
@@ -359,9 +377,10 @@ class SignerDocumentResource extends AbstractResource
      * workspace credentials instead of a signer access code. The signer must belong to the
      * configured workspace.
      *
-     * Request: no body; query `['search' => 'agreement']`.
+     * Request: no body; query ['search' => 'agreement', 'envelope_id' => 'envelope-id'].
+     * envelope_id is optional and restricts matches to that envelope.
      * ```php
-     * $result = $client->signerDocuments()->searchAsWorkspace('signer-id', 'agreement');
+     * $result = $client->signerDocuments()->searchAsWorkspace('signer-id', 'agreement', 'envelope-id');
      * // Complete SDK response when there are no matches:
      * []
      * ```
@@ -370,15 +389,16 @@ class SignerDocumentResource extends AbstractResource
      *
      * @param string $signerId the workspace signer ID
      * @param string $term substring to match against the document name
+     * @param string|null $envelopeId restrict matches to this envelope
      * @return array<int, array<string, mixed>>
      * @throws ValidationException when the signer ID is blank, or the client was built with
      *     {@see \Assinafy\SDK\Configuration::forPublic()}
      * @throws \Assinafy\SDK\Exceptions\ApiException 401 on invalid credentials, 404 when the
      *     signer is not in the workspace
      */
-    public function searchAsWorkspace(string $signerId, string $term): array
+    public function searchAsWorkspace(string $signerId, string $term, ?string $envelopeId = null): array
     {
-        return $this->searchDocuments($signerId, $this->workspaceQuery(), $term);
+        return $this->searchDocuments($signerId, $this->workspaceQuery(), $term, $envelopeId);
     }
 
     /**
@@ -577,12 +597,20 @@ class SignerDocumentResource extends AbstractResource
      * @param array<string, string> $authQuery signer access code query, or empty for workspace credentials
      * @return array<int, array<string, mixed>>
      */
-    private function searchDocuments(string $signerId, array $authQuery, string $term): array
-    {
+    private function searchDocuments(
+        string $signerId,
+        array $authQuery,
+        string $term,
+        ?string $envelopeId
+    ): array {
         $signerId = $this->pathSegment($signerId, 'signer ID');
+        $query = ['search' => $term];
+        if ($envelopeId !== null) {
+            $query['envelope_id'] = $envelopeId;
+        }
         $response = $this->httpClient->get(
             "signers/{$signerId}/documents/search",
-            array_merge(['search' => $term], $authQuery)
+            array_merge($query, $authQuery)
         );
 
         return $this->extractData($response->getData() ?? []);

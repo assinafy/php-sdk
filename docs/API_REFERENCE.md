@@ -5,7 +5,7 @@ This reference maps every public resource method in this SDK to the Assinafy API
 - <https://api.assinafy.com.br/v1/docs>
 - <https://api.assinafy.com.br/v1/docs/openapi.json>
 
-This reference describes SDK version 2.9.0. Install published releases with
+This reference describes SDK version 2.9.1. Install published releases with
 `composer require assinafy/php-sdk` and use the documentation shipped with the selected tag.
 See [INSTALLATION.md](INSTALLATION.md) for setup.
 
@@ -381,7 +381,7 @@ addition is the certificate signature itself.
 |---|---|
 | Email verification and notification | 0 |
 | WhatsApp verification and notification | 0.45 |
-| DigitalCertificate signature | 0.5, charged at assignment creation under the `SignatureDigitalCertificate` breakdown code, on top of its notification |
+| DigitalCertificate signature | Current `unit_cost` from the `SignatureDigitalCertificate` estimate breakdown, charged per signature on top of notification |
 
 Notification cost is charged per signer, on top of the document cost: two signers notified by
 email cost 0 credits, two notified by WhatsApp cost 0.9. Use `estimateCost()` to preview the exact
@@ -439,7 +439,7 @@ omitting both defaults to Email. DigitalCertificate and IdDocumentFaceMatchBasic
 
 `DigitalCertificate` requires the account feature and an existing signer whose valid CPF or CNPJ has
 been set through `signers()->create()` or `signers()->update(..., ['government_id' => ...])`. That signer must be alone in its
-signing step and the assignment method must be `virtual`. Cost estimates add 0.5 credits per
+signing step and the assignment method must be `virtual`. Cost estimates report the current price per
 certificate signer under `SignatureDigitalCertificate`, on top of any notification cost. The SDK
 rejects `collect` during both creation and estimation with `ValidationException`; callers can
 branch on `getErrors()['code'] === AssignmentResource::ERROR_DIGITAL_CERTIFICATE_REQUIRES_VIRTUAL`
@@ -604,9 +604,10 @@ file fails locally. The API still performs authoritative PDF parsing and enforce
 | `rename($documentId, $name)` | [`PATCH /v1/documents/{documentId}`](https://api.assinafy.com.br/v1/docs/markdown?method=patch&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D) | Workspace | Required JSON `{name}`. Only valid before signing starts. | Unwrapped `Document`. | `200; 400, 401, 404, 500` |
 | `delete($documentId)` | [`DELETE /v1/documents/{documentId}`](https://api.assinafy.com.br/v1/docs/markdown?method=delete&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D) | Workspace | Path ID only. | Envelope with `data: []`. | `200; 401, 404, 500` |
 | `download($documentId, $artifact)` | [`GET /v1/documents/{documentId}/download/{artifactName}`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fdownload%2F%7BartifactName%7D) | Workspace | `artifactName`: `original`, `certificated`, `certificate-page`, `pades`, or `bundle`. `pades` preserves ICP-Brasil cryptographic signatures; `certificated` flattens them. `pades` exists only for a document with digital-certificate signers; `bundle` is a ZIP and includes it when present. | Raw binary bytes (published content entry is `application/pdf`). | `200; 401, 404, 500` |
-| `downloadThumbnail($documentId)` | [`GET /v1/documents/{documentId}/thumbnail`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fthumbnail) | Workspace | Path ID only. | Raw image bytes. | `200; 401, 404, 500` |
-| `downloadPage($documentId, $pageId)` | [`GET /v1/documents/{documentId}/pages/{pageId}/download`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fpages%2F%7BpageId%7D%2Fdownload) | Workspace | Document and page path IDs. | Raw image bytes. | `200; 401, 404, 500` |
-| `activities($documentId)` | [`GET /v1/documents/{documentId}/activities`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Factivities) | Workspace | Path ID only. | Unwrapped `DocumentActivity[]`. | `200; 401, 500` |
+| `downloadThumbnail($documentId, $artifact = null)` | [`GET /v1/documents/{documentId}/thumbnail`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fthumbnail) | Workspace | Path ID; optional query `artifact=certificated` for a signed render. | Raw image bytes. | `200; 401, 404, 500` |
+| `downloadPage($documentId, $pageId, $artifact = null)` | [`GET /v1/documents/{documentId}/pages/{pageId}/download`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fpages%2F%7BpageId%7D%2Fdownload) | Workspace | Document/page path IDs; optional query `artifact=certificated`. | Raw image bytes. | `200; 401, 404, 500` |
+| `activities($documentId, $page = 1, $perPage = 20, $sort = '-id')` | [`GET /v1/documents/{documentId}/activities`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Factivities) | Workspace | Query `page`, `per-page`, `sort` (`id` or `-id`). | One page of unwrapped `DocumentActivity[]`. | `200; 401, 500` |
+| `activitiesPage($documentId, $page = 1, $perPage = 20, $sort = '-id')` | [`GET /v1/documents/{documentId}/activities`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Factivities) | Workspace | Query `page`, `per-page`, `sort` (`id` or `-id`). | Envelope containing `data: DocumentActivity[]` and header-derived `pagination`. | `200; 401, 500` |
 | `statuses()` | [`GET /v1/documents/statuses`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fdocuments%2Fstatuses) | Workspace | No parameters. | Unwrapped `DocumentStatus[]`. | `200; 401, 500` |
 | `verify($signatureHash)` | [`GET /v1/documents/{documentSignatureHash}/verify`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fdocuments%2F%7BdocumentSignatureHash%7D%2Fverify) | Public | Signature hash path value. | Unwrapped `DocumentVerification`. | `200; 500` |
 | `publicInfo($documentId)` | [`GET /v1/public/documents/{documentId}`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fpublic%2Fdocuments%2F%7BdocumentId%7D) | Public | Document path ID. | Unwrapped `{resource, id, name, page_count, created_by}` public projection. | `200; 404, 500` |
@@ -680,6 +681,40 @@ The permission approved by consent must cover the call; inspect `WWW-Authenticat
 
 The [test instructions](../README.en.md#testing) show how to run the same sandbox document tests
 with each authentication mode. Token issuance still requires a registered application and consent.
+
+### Activity pages and signed renders
+
+The workspace must have access to the document; OAuth requires `documents:read`.
+`activities()` preserves its direct-array return and now accepts page, page size and order.
+Use `activitiesPage()` to retain pagination headers. Neither method fetches additional pages automatically.
+
+```php
+$page = $client->documents()->activitiesPage('document-id', 2, 20, 'id');
+// GET /documents/document-id/activities; no body
+// Query: ['page' => 2, 'per-page' => 20, 'sort' => 'id']
+// SDK return:
+[
+    'status' => 200, 'message' => '',
+    'data' => [[
+        'id' => 21, 'event' => 'document_uploaded', 'message' => 'Uploaded',
+        'payload' => [], 'origin' => null, 'created_at' => '2026-11-01T12:00:00Z',
+    ]],
+    'pagination' => ['current_page' => 2, 'page_count' => 2, 'per_page' => 20, 'total_count' => 21],
+];
+$events = $client->documents()->activities('document-id', 2, 20, 'id');
+// Same request; returns only the data array above. A page past the end is [].
+$thumbnail = $client->documents()->downloadThumbnail('document-id', 'certificated');
+$pageImage = $client->documents()->downloadPage('document-id', 'page-id', 'certificated');
+// GET /documents/document-id/thumbnail or /documents/document-id/pages/page-id/download
+// Query for each: ['artifact' => 'certificated']; no body. Return: raw image/jpeg bytes.
+```
+
+Activity pagination is omitted when the API supplies no pagination headers. `page` starts at 1,
+`perPage` is 1–100, and `sort` is `-id` (newest first) or `id` (oldest first).
+Signed renders require a certificated document and workspace credentials; otherwise the API
+returns 404. Rendering can return 503 with `Retry-After`; the SDK does not retry automatically.
+Omitting `artifact` retains the original render; the API ignores other values. Certificate-only
+pages have no page IDs, and the digital-certificate seal is visible in the PAdES file.
 
 ## Contracts (`ContractResource`)
 
@@ -764,7 +799,7 @@ signer's inbox after `sendToken()`. Assignment `signing_urls` do not contain the
 | `confirmData($documentId, $accessCode, $data)` | [`PUT /v1/documents/{documentId}/signers/confirm-data`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fsigners%2Fconfirm-data) | Signer | Required JSON object. Schema lists optional `full_name`, `email`, `government_id`; `GET /sign` prose additionally requires `has_accepted_terms: true` in this body for DigitalCertificate, which is where the SDK sends it. Access code query. | Unwrapped `Signer`. | `200; 401, 500` |
 | `uploadSignature($accessCode, $type, $imageBytes, $mimeType, $reuse)` | [`POST /v1/signature`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Fsignature) | Signer | Access code query; `type` (`signature` or `initial`) and optional `reuse: boolean`; required raw image body. OpenAPI lists PNG; SDK also accepts JPEG for runtime compatibility. | Success envelope fields. | `200; 401, 500` |
 | `downloadSignature($accessCode, $type)` | [`GET /v1/signature/{signatureType}`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fsignature%2F%7BsignatureType%7D) | Signer | Signature type path plus access code query. | Raw image bytes. | `200; 401, 404, 500` |
-| `currentDocument($accessCode, $hasAcceptedTerms)` | [`GET /v1/sign`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fsign) | Signer | Access code query and optional `has_accepted_terms: boolean`. For DigitalCertificate this query is too late to satisfy the gate; call `confirmData(..., ['has_accepted_terms' => true, ...])` first. | Unwrapped `Document`. | `200; 400, 401, 409, 500` |
+| `currentDocument($accessCode, $hasAcceptedTerms = null, $documentId = null, $expand = null)` | [`GET /v1/sign`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fsign) | Signer | Access code query; optional `has_accepted_terms: boolean`, `document_id` (another assigned envelope member), and `expand=envelope`. For DigitalCertificate this query is too late to satisfy the gate; call `confirmData(..., ['has_accepted_terms' => true, ...])` first. | Unwrapped `Document`. | `200; 400, 401, 409, 500` |
 | `sign($documentId, $assignmentId, $accessCode, $fields)` | [`POST /v1/documents/{documentId}/assignments/{assignmentId}`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fassignments%2F%7BassignmentId%7D) | Signer | Access code query; body is directly an array of `{itemId, fieldId, pageId, value}` objects. The SDK permits `[]`, matching the absence of `minItems`. | Unwrapped result object. | `200; 400, 401, 409, 500` |
 | `decline($documentId, $assignmentId, $accessCode, $reason)` | [`PUT /v1/documents/{documentId}/assignments/{assignmentId}/reject`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fassignments%2F%7BassignmentId%7D%2Freject) | Signer | Access code query; required JSON `{decline_reason}`. | Unwrapped empty list. | `200; 401, 500` |
 | `identityVerification($accessCode)` | [`GET /v1/signers/identity-verification`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fsigners%2Fidentity-verification) | Signer | Signer access-code query; no body. | Unwrapped `IdentityVerificationState`. | 200; 401, 500 |
@@ -785,14 +820,43 @@ The SDK does not implement that Web PKI browser protocol.
 
 | SDK method | Official operation | Auth | Request | SDK success return | Statuses |
 |---|---|---|---|---|---|
-| `current($signerId, $accessCode)` | [`GET /v1/signers/{signerId}/document`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fsigners%2F%7BsignerId%7D%2Fdocument) | Signer | Signer path ID plus access code query. | Unwrapped `Document`. | `200; 401, 404, 500` |
+| `current($signerId, $accessCode, $expand = null)` | [`GET /v1/signers/{signerId}/document`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fsigners%2F%7BsignerId%7D%2Fdocument) | Signer | Signer path ID plus access code query; optional `expand=envelope`. | Unwrapped `Document`. | `200; 401, 404, 500` |
 | `list($signerId, $accessCode, $filters)` | [`GET /v1/signers/{signerId}/documents`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fsigners%2F%7BsignerId%7D%2Fdocuments) | Signer | Published query `page`, `per-page`; SDK accepts those filters and adds the access code. | Envelope with `data: Document[]` and normalized `pagination`. | `200; 401, 500` |
 | `listAsWorkspace($signerId, $filters)` | [`GET /v1/signers/{signerId}/documents`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fsigners%2F%7BsignerId%7D%2Fdocuments) | Workspace API key or Bearer | Same query as `list`, without an access code. The signer must belong to the workspace; rejected on a `Configuration::forPublic()` client. | Same as `list`. | `200; 401, 404, 500` |
-| `search($signerId, $accessCode, $term)` | [`GET /v1/signers/{signerId}/documents/search`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fsigners%2F%7BsignerId%7D%2Fdocuments%2Fsearch) | Signer | Signer path ID, access code query, `search` query. | Unwrapped list of the compact document shape (no `assignment` or `pages`). | `200; 401, 500` |
-| `searchAsWorkspace($signerId, $term)` | [`GET /v1/signers/{signerId}/documents/search`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fsigners%2F%7BsignerId%7D%2Fdocuments%2Fsearch) | Workspace API key or Bearer | Signer path ID and `search` query, without an access code. The signer must belong to the workspace; rejected on a `Configuration::forPublic()` client. | Same as `search`. | `200; 401, 404, 500` |
+| `search($signerId, $accessCode, $term, $envelopeId = null)` | [`GET /v1/signers/{signerId}/documents/search`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fsigners%2F%7BsignerId%7D%2Fdocuments%2Fsearch) | Signer | Signer path ID, access code query, `search` query. | Unwrapped list of the compact document shape (no `assignment` or `pages`). | `200; 401, 500` |
+| `searchAsWorkspace($signerId, $term, $envelopeId = null)` | [`GET /v1/signers/{signerId}/documents/search`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fsigners%2F%7BsignerId%7D%2Fdocuments%2Fsearch) | Workspace API key or Bearer | Signer path ID, `search` and optional `envelope_id` query, without an access code. The signer must belong to the workspace; rejected on a `Configuration::forPublic()` client. | Same as `search`. | `200; 401, 404, 500` |
 | `signMultiple($accessCode, $documentIds)` | [`PUT /v1/signers/documents/sign-multiple`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Fsigners%2Fdocuments%2Fsign-multiple) | Signer | Access code query; required JSON `{document_ids: string[]}`. SDK rejects an empty list. | Unwrapped empty list. | `200; 401, 500` |
 | `declineMultiple($accessCode, $documentIds, $reason)` | [`PUT /v1/signers/documents/decline-multiple`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Fsigners%2Fdocuments%2Fdecline-multiple) | Signer | Access code query; required JSON `{document_ids: string[], decline_reason: string}`. | Unwrapped empty list. | `200; 401, 500` |
 | `download($signerId, $documentId, $accessCode, $artifact)` | [`GET /v1/signers/{signerId}/documents/{documentId}/download/{artifactName}`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fsigners%2F%7BsignerId%7D%2Fdocuments%2F%7BdocumentId%7D%2Fdownload%2F%7BartifactName%7D) | Public in spec; SDK requires signer code | Artifact is `original`, `certificated`, `certificate-page`, `pades`, or `bundle`; certificate rules match workspace download. | Raw binary bytes. | `200; 404, 500` |
+
+### Envelope document selection
+
+`current($signerId, $accessCode, 'envelope')` uses only the signer code and can discover the
+envelope before certificate or identity confirmation. `currentDocument()` requires the verified
+session and applicable confirmation gates. Both add `envelope: ['id' => 'envelope-id',
+'name' => 'Agreement']`, or `null` outside an envelope, to their documented document response.
+Closed codes retain this expansion in their reduced metadata response.
+
+```php
+$current = $public->signerDocuments()->current('signer-id', $accessCode, 'envelope');
+// GET query: ['signer-access-code' => $accessCode, 'expand' => 'envelope']
+$selected = $public->signerSession()->currentDocument(
+    $accessCode, documentId: 'second-document-id', expand: 'envelope'
+);
+// GET query: ['signer-access-code' => $accessCode,
+//             'document_id' => 'second-document-id', 'expand' => 'envelope']
+$matches = $public->signerDocuments()->search('signer-id', $accessCode, 'agreement', 'envelope-id');
+// GET query: ['search' => 'agreement', 'envelope_id' => 'envelope-id',
+//             'signer-access-code' => $accessCode]
+$workspaceMatches = $client->signerDocuments()->searchAsWorkspace('signer-id', 'agreement', 'envelope-id');
+// GET query: ['search' => 'agreement', 'envelope_id' => 'envelope-id']
+// Both searches return the compact document array documented above, or [] if no matches.
+```
+
+Selection only applies to another document in the code's envelope assigned to this signer;
+email/WhatsApp verification is carried to it once. Other codes ignore `document_id`.
+Envelope filtering never broadens the signer's permitted document set. Workspace search requires
+an API key or OAuth `documents:read` token for the signer's workspace. All calls above send no body.
 
 ## Tags (`TagResource`)
 
@@ -920,10 +984,11 @@ mutually exclusive and always sum to `signature_requests`.
 | `ResendCostEstimate` | `total: number`, `breakdown: {code, name, cost: number}[]`, `credit_balance: number`, `has_sufficient_credits: boolean`. |
 
 `CostEstimate.blocking_reason` is one of `PendingPayment`, `InsufficientDocuments`, or
-`InsufficientCredits`. Published pricing is one document per assignment, one credit for an extra
-document, zero credits for Email notification, 0.45 credits for WhatsApp notification, and 0.5
-credits for each DigitalCertificate signer (breakdown code `SignatureDigitalCertificate`) in
-addition to notification cost.
+`InsufficientCredits`. Use the returned `unit_cost`, `quantity` and `cost` values for current prices.
+`credits` sums the breakdown; `total_credits` also includes `extra_document_cost` when
+`needs_extra_document` is true. An envelope consumes one document allowance; notification and
+biometric verification are priced once per signer, while DigitalCertificate is priced per signed
+document. Balances can be null when unlimited. Estimates do not reserve resources.
 
 A resend estimate returns the following SDK value for Email notifications. Use
 `has_sufficient_credits` to decide whether to resend:

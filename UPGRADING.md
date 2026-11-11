@@ -4,6 +4,16 @@ Install a published 2.x release with `composer require assinafy/php-sdk:^2.9`. R
 VCS/path repository overrides if they prevent Composer from resolving the Packagist package.
 Use the documentation shipped with the installed tag; `main` may include unreleased changes.
 
+## Upgrading to 2.9.1
+
+Existing return shapes and optional-argument defaults are preserved. `documents()->activities()`
+returns one page as a direct array; pass page, page size and sort to navigate, or use
+`activitiesPage()` for the response envelope with pagination metadata. There is no automatic pagination.
+Signer document reads can expand envelope identity, `currentDocument()` can select another assigned
+envelope member, and signer searches can filter by envelope. Document thumbnails and page images
+accept `artifact: 'certificated'` for signed renders. See [API_REFERENCE.md](docs/API_REFERENCE.md).
+The SDK User-Agent is `Assinafy-PHP-SDK/v2.9.1`.
+
 ## Upgrading to 2.9.0
 
 Existing calls keep their defaults and return shapes. New `envelopes()` and `embeddedSigning()`
@@ -282,7 +292,8 @@ A new workspace can return a subscription object with an empty URL; `get()` retu
 
 - Read native `id` fields. Paginated list methods retain the envelope and add `pagination` from
   response headers. Use `pagination.page_count` and `pagination.total_count`; do not read `meta`.
-  Unpaginated tags, fields, catalogs and activities return direct arrays.
+  Unpaginated tags, fields and catalogs return direct arrays. Document `activities()` returns one
+  page as a direct array; `activitiesPage()` retains pagination metadata.
 - Upload readable PDFs up to 25 MB with valid header/EOF markers. Rename before signing starts.
   `waitUntilReady()` waits for preparation; `isFullySigned()` recognizes `ready`, `certificating`
   and `certificated`. Final artifact availability may lag signature completion.

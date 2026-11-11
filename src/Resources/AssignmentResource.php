@@ -37,7 +37,7 @@ class AssignmentResource extends AbstractResource
      *
      * A1 and A3 differ only in where the private key lives; both use this one value and the
      * same payload. Needs the account's Digital Certificate feature, a valid CPF or CNPJ in the
-     * signer's `government_id`, and the signer alone in its signing step. Costs 0.5 credits per signer
+     * signer's `government_id`, and the signer alone in its signing step. Estimate the per-signer cost
      * under the `SignatureDigitalCertificate` breakdown code, on top of its notification.
      * Requires a `virtual` assignment and pairs with either notification method. The browser
      * completes the signature, so {@see SignerSessionResource::sign()} cannot finish it.

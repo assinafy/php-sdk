@@ -50,6 +50,26 @@ final class SignerDocumentResourceTest extends TestCase
         $this->assertSame(['signer-access-code' => 'CODE'], $call['query']);
     }
 
+    public function testCurrentCanExpandEnvelopeBeforeSignerConfirmation(): void
+    {
+        $document = ['id' => 'd1', 'envelope' => ['id' => 'env1', 'name' => 'Agreement']];
+        $this->http->queueJson(200, $document);
+        $this->assertSame($document, $this->docs->current('s1', 'CODE', 'envelope'));
+        $this->assertSame(['signer-access-code' => 'CODE', 'expand' => 'envelope'], $this->http->lastCall()['query']);
+    }
+
+    public function testSearchFiltersEnvelopeWithEitherAuthenticationMode(): void
+    {
+        $documents = [['id' => 'd1']];
+        $this->http->queueJson(200, $documents)->queueJson(200, $documents);
+        $this->assertSame($documents, $this->docs->search('s1', 'CODE', 'contract', 'env/1'));
+        $this->assertSame([
+            'search' => 'contract', 'envelope_id' => 'env/1', 'signer-access-code' => 'CODE',
+        ], $this->http->lastCall()['query']);
+        $this->assertSame($documents, $this->docs->searchAsWorkspace('s1', 'contract', 'env/1'));
+        $this->assertSame(['search' => 'contract', 'envelope_id' => 'env/1'], $this->http->lastCall()['query']);
+    }
+
     public function testListMergesFilters(): void
     {
         $this->http->queueJson(200, []);

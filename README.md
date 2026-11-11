@@ -121,7 +121,7 @@ ambos seleciona Email. Etapas, quando usadas, devem ser contíguas a partir de 1
 `DigitalCertificate` cobre ICP-Brasil A1 e A3 pelo mesmo payload. Um CPF exige e-CPF, ou e-CNPJ que
 nomeie a pessoa como representante; um CNPJ exige e-CNPJ da empresa. A extensão Web PKI conclui a
 assinatura; o resultado qualificado é `pades` e `signerSession()->sign()` não executa esse protocolo.
-O certificado digital custa 0,5 crédito por signatário, além da notificação, e não funciona em
+O custo do certificado digital vem de `estimateCost()`, além da notificação, e não funciona em
 `collect`. Biometria permanece CPF-only; preserve e proteja a URL de captura com fragmento `#t=`.
 
 Em `collect`, obtenha campos com `fields()->list(includeStandard: true)` e envie `entries` com

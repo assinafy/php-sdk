@@ -5,6 +5,16 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.9.1] - 2026-11-11
+
+### Fixed
+
+- Select another assigned envelope document and expand envelope identity from signer sessions.
+- Filter signer document searches by envelope with signer-code or workspace authentication.
+- Request signed document thumbnails and page images with `artifact=certificated`.
+- Navigate document activity pages and retain pagination metadata through `activitiesPage()` while preserving `activities()` array returns.
+- Honor optional plan features in envelope integration tests and use returned notification prices.
+
 ## [2.9.0] - 2026-11-11
 
 ### Added

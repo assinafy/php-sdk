@@ -363,7 +363,7 @@ before sending the request.
 | `VERIFICATION_EMAIL` | `Email` | An email address on the signer | 0 |
 | `VERIFICATION_WHATSAPP` | `Whatsapp` | `whatsapp_phone_number` and a paid subscription | 0.45 |
 | `VERIFICATION_ID_DOCUMENT_FACE_MATCH_BASIC` | `Email` or `Whatsapp` | Account ID Document + Face Match feature and valid CPF in `government_id` | Per-signer fee returned by the estimate |
-| `VERIFICATION_DIGITAL_CERTIFICATE` | `Email` or `Whatsapp` | The `virtual` method, the account's Digital Certificate feature (Standard and Pro plans), a valid CPF or CNPJ in `government_id`, and the signer alone in its step | 0.5 for the signature, on top of its notification |
+| `VERIFICATION_DIGITAL_CERTIFICATE` | `Email` or `Whatsapp` | The `virtual` method, the account's Digital Certificate feature (Standard and Pro plans), a valid CPF or CNPJ in `government_id`, and the signer alone in its step | Use the signature price returned by `estimateCost()`, plus its notification |
 
 `DigitalCertificate` covers the ICP-Brasil **A1** (a software file on the device) and **A3** (a
 smart card or token) certificates. Both use this one value and the same payload — they differ only
@@ -555,7 +555,9 @@ if ($client->documents()->isFullySigned($documentId)) {
     // Certification may still be finishing; poll get() for the desired artifact state.
 }
 
-$activity = $client->documents()->activities($documentId);
+$activityPage = $client->documents()->activitiesPage($documentId, 1, 20);
+$activity = $activityPage['data'];
+// Continue through $activityPage['pagination']['page_count'] when present.
 ```
 
 Document status constants live on `DocumentResource`. `ready`, `certificating`, and

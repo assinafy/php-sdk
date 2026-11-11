@@ -198,6 +198,23 @@ final class SignerSessionResourceTest extends TestCase
         );
     }
 
+    public function testCurrentDocumentSelectsEnvelopeMemberWithoutChangingSignerCode(): void
+    {
+        $document = ['id' => 'second/document', 'envelope' => ['id' => 'envelope', 'name' => 'Agreement']];
+        $this->http->queueJson(200, $document);
+        $this->assertSame($document, $this->session->currentDocument('CODE', false, 'second/document', 'envelope'));
+        $this->assertSame([
+            'signer-access-code' => 'CODE', 'has_accepted_terms' => 'false',
+            'document_id' => 'second/document', 'expand' => 'envelope',
+        ], $this->http->lastCall()['query']);
+    }
+
+    public function testCurrentDocumentRejectsBlankSelectionBeforeNetwork(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->session->currentDocument('CODE', documentId: ' ');
+    }
+
     public function testSignPostsFieldArrayWithAccessCodeOnQuery(): void
     {
         $this->http->queueJson(200, []);

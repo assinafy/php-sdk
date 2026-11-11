@@ -145,7 +145,7 @@ if (!($estimate['has_sufficient_resources'] ?? false)) {
 
 `DigitalCertificate` is supported on ordinary `virtual` assignments and templates without placed
 signer fields.
-Each certificate signer costs 0.5 credits in addition to notification cost, requires the account's
+Each certificate signer adds the price returned by `estimateCost()` to notification cost, requires the account's
 Digital Certificate feature, must have a valid CPF or CNPJ in `government_id`, and must be alone in its
 signing step. Pass `government_id` when creating the signer
 (`signers()->create($name, $email, null, $governmentId)`), or update an existing signer first.

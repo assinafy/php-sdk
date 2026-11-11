@@ -104,6 +104,10 @@ final class GuzzleHttpClientTest extends TestCase
                     'thumbnail' => fn () => $documents->downloadThumbnail('d1'),
                     'page' => fn () => $documents->downloadPage('d1', 'p1'),
                     'activities' => fn () => $documents->activities('d1'),
+                    'activityPage' => fn () => $documents->activitiesPage('d1', 2, 10, 'id'),
+                    'signedThumbnail' => fn () => $documents->downloadThumbnail('d1', 'certificated'),
+                    'signedPage' => fn () => $documents->downloadPage('d1', 'p1', 'certificated'),
+                    'workspaceEnvelopeSearch' => fn () => $client->signerDocuments()->searchAsWorkspace('s1', 'agreement', 'e1'),
                     'statuses' => fn () => $documents->statuses(),
                     'verify' => fn () => $documents->verify('signature-hash'),
                     'publicInfo' => fn () => $documents->publicInfo('d1'),
@@ -135,6 +139,9 @@ final class GuzzleHttpClientTest extends TestCase
                     'signerUploadImage' => fn () => $client->signerSession()->uploadSignature('signer-code', 'signature', 'png-bytes'),
                     'signerImage' => fn () => $client->signerSession()->downloadSignature('signer-code', 'signature'),
                     'signerCurrent' => fn () => $client->signerSession()->currentDocument('signer-code'),
+                    'signerEnvelopeCurrent' => fn () => $client->signerSession()->currentDocument('signer-code', null, 'd2', 'envelope'),
+                    'signerEnvelopeDocument' => fn () => $client->signerDocuments()->current('s1', 'signer-code', 'envelope'),
+                    'signerEnvelopeSearch' => fn () => $client->signerDocuments()->search('s1', 'signer-code', 'agreement', 'e1'),
                     'signerSign' => fn () => $client->signerSession()->sign('d1', 'a1', 'signer-code', []),
                     'signerDecline' => fn () => $client->signerSession()->decline('d1', 'a1', 'signer-code', 'Declined'),
                     'signerDocument' => fn () => $client->signerDocuments()->current('s1', 'signer-code'),
@@ -158,7 +165,12 @@ final class GuzzleHttpClientTest extends TestCase
                     $data = ['id' => 'd1', 'status' => 'metadata_ready'];
                     $body = json_encode(['status' => 200, 'message' => '', 'data' => $data], JSON_THROW_ON_ERROR);
                     $contentType = 'application/json';
-                    if (in_array($name, ['download', 'thumbnail', 'page', 'signerImage', 'signerDownload', 'identityEvidence'], true)) {
+                    if (
+                        in_array($name, [
+                        'download', 'thumbnail', 'page', 'signedThumbnail', 'signedPage',
+                        'signerImage', 'signerDownload', 'identityEvidence',
+                        ], true)
+                    ) {
                         $isPdf = in_array($name, ['download', 'signerDownload'], true);
                         $body = $isPdf ? '%PDF-1.4 binary' : 'image-bytes';
                         $contentType = $isPdf ? 'application/pdf' : 'image/jpeg';

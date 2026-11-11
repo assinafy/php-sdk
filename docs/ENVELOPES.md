@@ -205,3 +205,29 @@ places each document's bundle files in its own folder.
 $bytes = $client->envelopes()->download('envelope-id', 'bundle');
 file_put_contents('/private/storage/agreement.zip', $bytes, LOCK_EX);
 ```
+
+## Signer navigation
+
+Discover the envelope before certificate or identity confirmation with
+`$public->signerDocuments()->current($signerId, $accessCode, 'envelope')`.
+After verification and any required data confirmation, open another assigned document with
+`$public->signerSession()->currentDocument($accessCode, documentId: $documentId, expand: 'envelope')`.
+The API carries email/WhatsApp verification to that document once. Use the selected document's
+assignment items when submitting collect fields; keep the signer code private.
+`signerDocuments()->search($signerId, $accessCode, $term, $envelopeId)` filters to envelope members;
+`searchAsWorkspace($signerId, $term, $envelopeId)` uses workspace credentials instead.
+See [request and response examples](API_REFERENCE.md#envelope-document-selection).
+
+## Integration checks
+
+With the sandbox credentials configured as in [README.md](../README.md), run
+`ASSINAFY_INTEGRATION=1 composer test:integration -- --filter 'testEnvelopeLifecycle|testEnvelopeVerificationEstimates'`.
+These tests create disposable resources and clean them up. Estimate tests send no signing invitations.
+Feature-gate 403s are reported as skipped unless `ASSINAFY_REQUIRE_PLAN_FEATURES=1`, which requires success.
+Other errors fail the tests; prices come from the returned estimates.
+
+For an existing disposable envelope whose documents are all certificated, set
+`ASSINAFY_TEST_COMPLETED_ENVELOPE_ID` and run
+`ASSINAFY_INTEGRATION=1 composer test:integration -- --filter testCompletedEnvelopeArtifacts`.
+This read-only check verifies certification, signed images, individual PDFs and envelope ZIP members.
+It does not sign or delete the supplied envelope; clean up your fixture after verification.
