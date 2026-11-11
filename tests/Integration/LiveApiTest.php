@@ -42,6 +42,8 @@ final class LiveApiTest extends TestCase
     private string $oauthIssuer;
     /** @var array<int, string> document ids we created and need to clean up */
     private array $createdDocuments = [];
+    /** @var list<string> envelope IDs created by this test */
+    private array $createdEnvelopes = [];
     /** @var array<int, string> signer ids we created and need to clean up */
     private array $createdSigners = [];
     /** @var array<int, string> template ids we created and need to clean up */
@@ -107,6 +109,18 @@ final class LiveApiTest extends TestCase
     {
         $cleanupErrors = [];
 
+        foreach ($this->createdEnvelopes as $id) {
+            try {
+                $this->retryRateLimited(fn () => $this->client->envelopes()->cancel($id));
+                $this->retryRateLimited(fn () => $this->client->envelopes()->delete($id));
+            } catch (ApiException $e) {
+                if ($e->getStatusCode() !== 404) {
+                    $cleanupErrors[] = 'envelope cleanup HTTP ' . $e->getStatusCode();
+                }
+            } catch (\Throwable) {
+                $cleanupErrors[] = 'envelope cleanup failed';
+            }
+        }
         foreach ($this->createdDocuments as $id) {
             try {
                 $this->deleteDocumentForCleanup($id);
@@ -134,6 +148,7 @@ final class LiveApiTest extends TestCase
             }
         }
 
+        $this->createdEnvelopes = [];
         $this->createdDocuments = [];
         $this->createdSigners = [];
         $this->createdTemplates = [];
@@ -607,6 +622,144 @@ final class LiveApiTest extends TestCase
      * asserted on its API response, never on a delivered message, so no real inbox is
      * required. This is the SDK's primary flow and must not be opt-in.
      */
+    public function testEnvelopeLifecycle(): void
+    {
+        $name = 'SDK envelope ' . bin2hex(random_bytes(6));
+        $readyDocuments = [];
+        $signer = $this->controlledSigner($this->reservedEmail('sdk-envelope'), 'SDK envelope');
+        $ids = [];
+        for ($i = 0; $i < 3; $i++) {
+            $document = $this->client->documents()->upload($this->makePdfFixture());
+            $id = (string) $document['id'];
+            $this->createdDocuments[] = $id;
+            $ids[] = $id;
+            $readyDocuments[] = $this->client->documents()->waitUntilReady($id, 60, 2);
+        }
+        $fields = array_values(array_filter(
+            $this->client->fields()->list(false, true),
+            static fn (array $field): bool => $field['type'] === 'signature'
+        ));
+        $this->assertNotEmpty($fields);
+        $placements = [[
+            'page_id' => $readyDocuments[1]['pages'][0]['id'],
+            'fields' => [[
+                'signer_id' => $signer['id'], 'field_id' => $fields[0]['id'],
+                'display_settings' => ['left' => 10, 'top' => 10, 'width' => 240, 'height' => 60],
+            ]],
+        ]];
+        $resource = $this->client->envelopes();
+        $body = [
+            'name' => $name, 'message' => 'Disposable SDK envelope', 'max_total_credits' => 0,
+            'signers' => [['id' => $signer['id'], 'verification_method' => 'Email',
+                'notification_methods' => ['Email']]],
+            'documents' => [
+                ['id' => $ids[0], 'signer_ids' => [$signer['id']]],
+                ['id' => $ids[1], 'signer_ids' => [$signer['id']], 'method' => 'collect', 'entries' => $placements],
+            ],
+        ];
+        $estimate = $resource->estimateCost($body);
+        $this->assertSame(1, $estimate['documents']);
+        $this->assertEquals(0, $estimate['total_credits']);
+        $this->assertTrue($estimate['has_sufficient_resources']);
+        $this->assertSame([], $resource->list(filters: ['search' => $name])['data']);
+
+        $this->assertEnvelopeRefusal(fn () => $resource->create(array_replace($body, [
+            'documents' => [$body['documents'][0], $body['documents'][0]],
+        ])), 400);
+        $this->assertEnvelopeRefusal(fn () => $resource->create(array_replace($body, [
+            'max_total_credits' => -1,
+        ])), 400);
+        $this->assertSame([], $resource->list(filters: ['search' => $name])['data']);
+        foreach (array_slice($ids, 0, 2) as $id) {
+            $this->assertSame('metadata_ready', $this->client->documents()->get($id)['status']);
+        }
+
+        $key = 'sdk-envelope-' . bin2hex(random_bytes(16));
+        $envelope = $resource->create($body, $key);
+        $envelopeId = (string) $envelope['id'];
+        $this->createdEnvelopes[] = $envelopeId;
+        $this->assertSame('envelope', $envelope['resource']);
+        $this->assertSame($ids[0], $envelope['documents'][0]['id']);
+        $this->assertSame($ids[1], $envelope['documents'][1]['id']);
+        $this->assertCount(1, $envelope['signing_urls']);
+        $this->assertSame(2, array_sum($envelope['counts']));
+        $this->assertSame($envelopeId, $resource->get($envelopeId)['id']);
+        $this->assertSame('virtual', $this->client->documents()->get($ids[0])['assignment']['method']);
+        $this->assertSame('collect', $this->client->documents()->get($ids[1])['assignment']['method']);
+        $this->assertSame($envelopeId, $resource->create(array_replace($body, ['name' => 'Ignored replay']), $key)['id']);
+        $this->assertSame($name, $resource->get($envelopeId)['name']);
+        $listed = $resource->list(filters: ['search' => $name, 'status' => 'open']);
+        $this->assertSame([$envelopeId], array_column($listed['data'], 'id'));
+        $this->assertSame(1, $listed['pagination']['total_count']);
+        $this->assertSame($envelopeId, $this->client->documents()->get($ids[0], 'envelope_id')['envelope_id']);
+        $this->assertSame(2, $this->client->documents()->list(filters: ['envelope_id' => $envelopeId])['pagination']['total_count']);
+
+        $this->assertEnvelopeRefusal(fn () => $resource->delete($envelopeId), 409, 'EnvelopeOpen');
+        $this->assertEnvelopeRefusal(fn () => $this->client->documents()->delete($ids[0]), 409, 'EnvelopeOpen');
+        $this->assertEnvelopeRefusal(fn () => $resource->download($envelopeId, 'certificated'), 404);
+        $this->assertEnvelopeRefusal(fn () => $resource->update($envelopeId, ['document_ids' => [$ids[0]]]), 400);
+        $updated = $resource->update($envelopeId, [
+            'name' => $name . ' updated', 'message' => null, 'document_ids' => [$ids[1], $ids[0]],
+        ]);
+        $this->assertSame([$ids[1], $ids[0]], array_column($updated['documents'], 'id'));
+        $this->assertNull($updated['message']);
+        $this->assertSame($name . ' updated', $updated['name']);
+        $this->assertStringStartsWith('PK', $resource->download($envelopeId, 'original'));
+        $activities = $resource->activities($envelopeId, 1, 2, 'id');
+        $this->assertNotEmpty($activities['data']);
+        $this->assertGreaterThan(0, $activities['pagination']['total_count']);
+        $this->assertTrue(isset($activities['data'][0]['document_id']));
+        $this->assertSame([], $resource->activities($envelopeId, 9999)['data']);
+        $reminder = $resource->resend($envelopeId, $signer['id']);
+        $this->assertSame($envelopeId, $reminder['envelope_id']);
+        $this->assertSame($signer['id'], $reminder['signer_id']);
+        $this->assertIsBool($reminder['is_sent']);
+
+        $added = $resource->addDocument($envelopeId, [
+            'id' => $ids[2], 'signer_ids' => [$signer['id']], 'max_total_credits' => 0,
+        ]);
+        $this->assertSame([$ids[1], $ids[0], $ids[2]], array_column($added['documents'], 'id'));
+        $removed = $resource->removeDocument($envelopeId, $ids[2]);
+        $this->assertCount(2, $removed['documents']);
+        $this->assertNull($this->client->documents()->get($ids[2], 'envelope_id')['envelope_id']);
+        $this->assertEnvelopeRefusal(fn () => $resource->removeDocument($envelopeId, $ids[2]), 404);
+        $cancelled = $resource->cancel($envelopeId);
+        $this->assertCount(2, $cancelled);
+        $this->assertSame([true, true], array_column($cancelled, 'cancelled'));
+        $this->assertSame([false, false], array_column($resource->cancel($envelopeId), 'cancelled'));
+        $this->assertEnvelopeRefusal(fn () => $resource->resend($envelopeId, $signer['id']), 409, 'EnvelopeClosed');
+        $this->assertSame([$envelopeId], array_column(
+            $resource->list(filters: ['search' => $name, 'status' => 'closed'])['data'],
+            'id'
+        ));
+        $this->assertSame([], $resource->delete($envelopeId));
+        $this->createdEnvelopes = [];
+        $this->assertEnvelopeRefusal(fn () => $resource->get($envelopeId), 404);
+        $this->assertNull($this->client->documents()->get($ids[0], 'envelope_id')['envelope_id']);
+        $this->assertSame([], $resource->list(filters: ['search' => $name])['data']);
+        foreach ($ids as $id) {
+            $this->deleteDocumentForCleanup($id);
+            $this->assertEnvelopeRefusal(fn () => $this->client->documents()->get($id), 404);
+        }
+        $this->createdDocuments = [];
+        $this->client->signers()->delete($signer['id']);
+        $this->assertEnvelopeRefusal(fn () => $this->client->signers()->get($signer['id']), 404);
+        $this->createdSigners = [];
+    }
+
+    private function assertEnvelopeRefusal(callable $operation, int $status, ?string $code = null): void
+    {
+        try {
+            $operation();
+            self::fail('Expected envelope request refusal');
+        } catch (ApiException $exception) {
+            $this->assertSame($status, $exception->getStatusCode());
+            if ($code !== null) {
+                $this->assertSame($code, $exception->getResponseData()['code'] ?? null);
+            }
+        }
+    }
+
     public function testAssignmentFullLifecycle(): void
     {
         $email = $this->reservedEmail('sdk-assignment');
