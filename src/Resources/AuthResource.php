@@ -363,7 +363,7 @@ class AuthResource extends AbstractResource
      *
      * @return array<string, mixed> `{ api_key }` — masked
      * @throws ValidationException when called on a public client without an access token
-     * @throws \Assinafy\SDK\Exceptions\ApiException 404 when no key has been generated
+     * The returned api_key is null when no key has been generated.
      */
     public function getApiKey(#[\SensitiveParameter] ?string $accessToken = null): array
     {

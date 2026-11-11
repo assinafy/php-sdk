@@ -21,6 +21,22 @@ final class SignerSessionResourceTest extends TestCase
         $this->session = new SignerSessionResource($this->http, new Configuration('k', 'a'));
     }
 
+    public function testBrandAndCertifiedCopyUseOnlySignerCodeQuery(): void
+    {
+        $theme = ['account_name' => 'Workspace', 'primary_color' => '123456',
+            'secondary_color' => 'ffffff', 'logo' => null];
+        $this->http->queueJson(200, $theme)->queueRaw(200, 'IMAGE', ['Content-Type' => ['image/png']])
+            ->queueJson(200, ['available' => true, 'notification_method' => 'Email', 'resends_left' => null]);
+        $this->assertSame($theme, $this->session->theme('code'));
+        $this->assertSame('IMAGE', $this->session->logo('code'));
+        $this->assertTrue($this->session->sendCertifiedCopy('code', 'doc')['available']);
+        $this->assertSame(['document_id' => 'doc'], $this->http->lastCall()['body']);
+        foreach ($this->http->calls as $call) {
+            $this->assertSame(['signer-access-code' => 'code'], $call['query']);
+        }
+        $this->assertSame(['sign/theme', 'sign/logo', 'sign/certified-copy'], array_column($this->http->calls, 'uri'));
+    }
+
     public function testSelfSendsAccessCodeAsQuery(): void
     {
         $this->http->queueJson(200, ['id' => 's1']);

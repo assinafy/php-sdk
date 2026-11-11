@@ -206,7 +206,9 @@ class ContractResource extends AbstractResource
      * Read the root contract and every related amendment, renewal, or termination document.
      * `GET /accounts/{account_id}/documents/{document_id}/contract/related`
      *
-     * Request: no query or body. `$documentId` may identify the root or any related document.
+     * Request: optional query ['expand' => 'document'], no body. OAuth scope: documents:read.
+     * `$documentId` may identify the root or any related document. Expansion adds the root
+     * document as `document`, including its name; amendments already include document_name.
      * The response is the root `document_contract` shape from {@see self::get()}, including
      * its complete `amendments` array.
      *
@@ -214,9 +216,12 @@ class ContractResource extends AbstractResource
      * @throws ValidationException when `$documentId` is empty
      * @throws \Assinafy\SDK\Exceptions\ApiException 404 when the document has no contract family
      */
-    public function related(string $documentId): array
+    public function related(string $documentId, ?string $expand = null): array
     {
-        $response = $this->httpClient->get($this->contractPath($documentId, '/related'));
+        $response = $this->httpClient->get(
+            $this->contractPath($documentId, '/related'),
+            $expand === null ? [] : ['expand' => $expand]
+        );
 
         return $this->extractData($response->getData() ?? []);
     }

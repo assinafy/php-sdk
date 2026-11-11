@@ -116,7 +116,7 @@ class GuzzleHttpClient implements HttpClientInterface
 
     /** {@inheritDoc} */
     public function get(
-        string $uri,
+        #[\SensitiveParameter] string $uri,
         #[\SensitiveParameter] array $params = [],
         #[\SensitiveParameter] array $headers = []
     ): Response {
@@ -128,7 +128,7 @@ class GuzzleHttpClient implements HttpClientInterface
 
     /** {@inheritDoc} */
     public function post(
-        string $uri,
+        #[\SensitiveParameter] string $uri,
         #[\SensitiveParameter] ?array $data = null,
         #[\SensitiveParameter] array $headers = [],
         #[\SensitiveParameter] array $query = []
@@ -138,7 +138,7 @@ class GuzzleHttpClient implements HttpClientInterface
 
     /** {@inheritDoc} */
     public function put(
-        string $uri,
+        #[\SensitiveParameter] string $uri,
         #[\SensitiveParameter] ?array $data = null,
         #[\SensitiveParameter] array $headers = [],
         #[\SensitiveParameter] array $query = []
@@ -148,7 +148,7 @@ class GuzzleHttpClient implements HttpClientInterface
 
     /** {@inheritDoc} */
     public function patch(
-        string $uri,
+        #[\SensitiveParameter] string $uri,
         #[\SensitiveParameter] ?array $data = null,
         #[\SensitiveParameter] array $headers = [],
         #[\SensitiveParameter] array $query = []
@@ -158,7 +158,7 @@ class GuzzleHttpClient implements HttpClientInterface
 
     /** {@inheritDoc} */
     public function delete(
-        string $uri,
+        #[\SensitiveParameter] string $uri,
         #[\SensitiveParameter] array $headers = [],
         #[\SensitiveParameter] array $query = [],
         #[\SensitiveParameter] array $data = []
@@ -174,7 +174,7 @@ class GuzzleHttpClient implements HttpClientInterface
 
     /** {@inheritDoc} */
     public function uploadFile(
-        string $uri,
+        #[\SensitiveParameter] string $uri,
         #[\SensitiveParameter] string $filePath,
         #[\SensitiveParameter] array $data = [],
         #[\SensitiveParameter] array $headers = []
@@ -222,7 +222,7 @@ class GuzzleHttpClient implements HttpClientInterface
 
     /** {@inheritDoc} */
     public function postRaw(
-        string $uri,
+        #[\SensitiveParameter] string $uri,
         #[\SensitiveParameter] string $body,
         string $contentType,
         #[\SensitiveParameter] array $query = [],
@@ -279,7 +279,7 @@ class GuzzleHttpClient implements HttpClientInterface
      */
     private function request(
         string $method,
-        string $uri,
+        #[\SensitiveParameter] string $uri,
         #[\SensitiveParameter] array $options = []
     ): Response {
         $path = parse_url($uri, PHP_URL_PATH);
@@ -447,7 +447,7 @@ class GuzzleHttpClient implements HttpClientInterface
      */
     private function withDefaultHeaders(
         string $method,
-        string $uri,
+        #[\SensitiveParameter] string $uri,
         #[\SensitiveParameter] array $options
     ): array {
         $headers = isset($options['headers']) && is_array($options['headers'])
@@ -506,7 +506,7 @@ class GuzzleHttpClient implements HttpClientInterface
      */
     private static function isCredentiallessRequest(
         string $method,
-        string $uri,
+        #[\SensitiveParameter] string $uri,
         bool $hasSignerAccessCode
     ): bool {
         $path = parse_url($uri, PHP_URL_PATH);
@@ -523,6 +523,9 @@ class GuzzleHttpClient implements HttpClientInterface
                 'PUT authentication/request-password-reset',
                 'PUT authentication/reset-password',
                 'GET sign',
+                'GET sign/theme',
+                'GET sign/logo',
+                'POST sign/certified-copy',
                 'POST verify',
                 'POST signature',
                 'GET signers/self',
@@ -536,7 +539,10 @@ class GuzzleHttpClient implements HttpClientInterface
             return true;
         }
 
-        return preg_match('~^GET documents/[^/]+/verify$~', $route) === 1
+        return preg_match('~^POST embed/sessions/[^/]+/exchange$~', $route) === 1
+            || preg_match('~^GET signers/downloads/[^/]+(?:/pades)?$~', $route) === 1
+            || preg_match('~^POST signers/downloads/[^/]+/resend$~', $route) === 1
+            || preg_match('~^GET documents/[^/]+/verify$~', $route) === 1
             || preg_match('~^GET public/documents/[^/]+$~', $route) === 1
             || preg_match('~^PUT public/documents/[^/]+/send-token$~', $route) === 1
             || preg_match('~^GET signature/[^/]+$~', $route) === 1

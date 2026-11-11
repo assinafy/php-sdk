@@ -236,4 +236,76 @@ final class AccountResourceTest extends TestCase
         $this->assertSame('DELETE', $call['method']);
         $this->assertSame('accounts/acc/logo', $call['uri']);
     }
+    public function testUsageAndSigningFeaturesPreserveResponse(): void
+    {
+        $features = ['Embed' => true, 'VerificationBypass' => false];
+        $this->http->queueJson(200, ['signing_features' => $features]);
+        $this->assertSame($features, $this->accounts->get('signing_features')['signing_features']);
+        $this->assertSame(['expand' => 'signing_features'], $this->http->lastCall()['query']);
+        $usage = ['plan' => null, 'balances' => ['credits' => ['balance' => null, 'spent' => 0]]];
+        $this->http->queueJson(200, $usage);
+        $this->assertSame($usage, $this->accounts->usage());
+        $this->assertSame('accounts/acc/usage', $this->http->lastCall()['uri']);
+    }
+
+    public function testEmbedOriginLifecycleWireContract(): void
+    {
+        $origin = ['id' => 'origin/id', 'origin' => 'https://app.example.com'];
+        $this->http->queueJson(200, [$origin]);
+        $this->assertSame([$origin], $this->accounts->embedOrigins());
+        $this->http->queueJson(200, $origin);
+        $this->assertSame($origin, $this->accounts->addEmbedOrigin('https://app.example.com/'));
+        $this->assertSame(['origin' => 'https://app.example.com/'], $this->http->lastCall()['body']);
+        $this->http->queueJson(200, $origin);
+        $this->accounts->updateEmbedOrigin('origin/id', 'http://localhost:3000');
+        $this->assertSame('PUT', $this->http->lastCall()['method']);
+        $this->assertSame('accounts/acc/embed-origins/origin%2Fid', $this->http->lastCall()['uri']);
+        $this->http->queueJson(200, []);
+        $this->assertSame([], $this->accounts->deleteEmbedOrigin('origin/id'));
+        $this->assertSame('DELETE', $this->http->lastCall()['method']);
+    }
+
+    public function testEmbedOriginsRejectNonOriginsBeforeNetwork(): void
+    {
+        foreach (
+            [
+            'http://app.example.com', 'https://app.example.com/path', 'https://app.example.com?q=1',
+            'https://app.example.com#fragment', 'https://user@app.example.com', 'https://*.example.com', '',
+            ] as $origin
+        ) {
+            try {
+                $this->accounts->addEmbedOrigin($origin);
+                $this->fail('Invalid origin accepted');
+            } catch (ValidationException) {
+                $this->assertSame([], $this->http->calls);
+            }
+        }
+    }
+    public function testNotificationPolicyMergesOnlySelectedFields(): void
+    {
+        $policy = ['editable' => true, 'owners_receive_all' => false, 'events' => ['SignerViewed' => false]];
+        $this->http->queueJson(200, $policy);
+        $this->assertSame($policy, $this->accounts->notificationPolicy());
+        $this->assertSame('accounts/acc/notification-policy', $this->http->lastCall()['uri']);
+        $this->http->queueJson(200, $policy);
+        $changes = ['events' => ['SignerViewed' => false, 'FutureAlert' => true], 'owners_receive_all' => true];
+        $this->assertSame($policy, $this->accounts->updateNotificationPolicy($changes));
+        $this->assertSame($changes, $this->http->lastCall()['body']);
+        $this->assertSame('PUT', $this->http->lastCall()['method']);
+    }
+
+    public function testNotificationPolicyRejectsMalformedUpdates(): void
+    {
+        foreach (
+            [[], ['editable' => true], ['events' => []], ['events' => ['SignerViewed' => 1]],
+            ['owners_receive_all' => 1], ['events' => [true]]] as $changes
+        ) {
+            try {
+                $this->accounts->updateNotificationPolicy($changes);
+                $this->fail('Invalid policy accepted');
+            } catch (ValidationException) {
+                $this->assertSame([], $this->http->calls);
+            }
+        }
+    }
 }

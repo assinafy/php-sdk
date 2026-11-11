@@ -22,6 +22,22 @@ final class SignerDocumentResourceTest extends TestCase
         $this->docs = new SignerDocumentResource($this->http, new Configuration('key', 'acc'));
     }
 
+    public function testDownloadTokensAreEncodedAndUseNoSignerQuery(): void
+    {
+        $http = new FakeHttpClient();
+        $resource = new SignerDocumentResource($http, new Configuration('key', 'account'));
+        foreach ([false, true] as $pades) {
+            $http->queueRaw(200, '%PDF', ['Content-Type' => ['application/pdf']]);
+            $this->assertSame('%PDF', $resource->downloadFromToken('token/value', $pades));
+            $this->assertSame('signers/downloads/token%2Fvalue' . ($pades ? '/pades' : ''), $http->lastCall()['uri']);
+            $this->assertSame([], $http->lastCall()['query']);
+        }
+        $http->queueJson(200, ['available' => false, 'notification_method' => 'Whatsapp', 'resends_left' => 0]);
+        $this->assertSame(0, $resource->resendDownload('token/value')['resends_left']);
+        $this->assertSame('signers/downloads/token%2Fvalue/resend', $http->lastCall()['uri']);
+        $this->assertNull($http->lastCall()['body']);
+    }
+
     public function testCurrentSendsAccessCode(): void
     {
         $this->http->queueJson(200, ['id' => 'd1']);

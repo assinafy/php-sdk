@@ -413,4 +413,26 @@ final class WebhookResourceTest extends TestCase
 
         $this->assertSame('accounts/a/webhooks/endpoints/..%2Fsecret', $http->lastCall()['uri']);
     }
+    public function testRotationOverlapReturnsMetadataAndPreservesStringHelper(): void
+    {
+        [$http, $webhooks] = $this->build();
+        $data = ['secret' => 'whsec_new', 'previous_secret_expires_at' => '2026-11-12T15:00:00Z'];
+        $http->queueJson(200, $data);
+        $this->assertSame($data, $webhooks->rotateEndpointSecretWithMetadata('ep/id', true));
+        $this->assertSame(['keep_previous' => true], $http->lastCall()['body']);
+        $this->assertSame('accounts/a/webhooks/endpoints/ep%2Fid/secret/rotate', $http->lastCall()['uri']);
+        $http->queueJson(200, $data);
+        $this->assertSame('whsec_new', $webhooks->rotateEndpointSecret('ep/id', true));
+    }
+
+    public function testTestEndpointReturnsDispatch(): void
+    {
+        [$http, $webhooks] = $this->build();
+        $data = ['id' => 'dispatch-id', 'event' => 'webhook_test', 'delivered' => false];
+        $http->queueJson(200, $data);
+        $this->assertSame($data, $webhooks->testEndpoint('ep/id'));
+        $this->assertSame('POST', $http->lastCall()['method']);
+        $this->assertSame('accounts/a/webhooks/endpoints/ep%2Fid/test', $http->lastCall()['uri']);
+        $this->assertNull($http->lastCall()['body']);
+    }
 }

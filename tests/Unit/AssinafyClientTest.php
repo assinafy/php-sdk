@@ -207,6 +207,26 @@ final class AssinafyClientTest extends TestCase
         ]], $http->lastCall()['body']['signers']);
     }
 
+    public function testUploadWorkflowPreservesEmbeddedSigner(): void
+    {
+        $http = new FakeHttpClient();
+        $client = new AssinafyClient(new Configuration('k', 'a'), $http);
+        $pdf = tempnam(sys_get_temp_dir(), 'asn');
+        $this->assertIsString($pdf);
+        $pdfPath = $pdf . '.pdf';
+        rename($pdf, $pdfPath);
+        file_put_contents($pdfPath, "%PDF-1.4\n%%EOF\n");
+        $http->queueJson(200, ['id' => 'doc1', 'status' => 'uploaded']);
+        $http->queueJson(200, ['id' => 'doc1', 'status' => DocumentResource::STATUS_METADATA_READY]);
+        $http->queueJson(200, ['id' => 'assignment1']);
+        try {
+            $client->uploadAndRequestSignatures($pdfPath, [['id' => 'signer1', 'embedded' => true]]);
+        } finally {
+            unlink($pdfPath);
+        }
+        $this->assertSame([['id' => 'signer1', 'embedded' => true]], $http->lastCall()['body']['signers']);
+    }
+
     public function testBiometricWorkflowRequiresAnExistingSignerBeforeUploading(): void
     {
         $http = new FakeHttpClient();

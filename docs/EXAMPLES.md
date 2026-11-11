@@ -914,7 +914,8 @@ http_response_code(200);
 ```
 
 After `rotateEndpointSecret()`, deliveries are signed only with the new secret, so update the
-receiver's stored value at once. OAuth applications may rotate with `webhooks:write`. Each event
+receiver's stored value at once. Pass `keepPrevious: true` to retain the previous signature for
+24 hours; `rotateEndpointSecretWithMetadata()` also returns the overlap expiry. OAuth applications may rotate with `webhooks:write`. Each event
 can receive up to six attempts about ten minutes apart; after ten failed deliveries the endpoint is
 held and probes the oldest missed event on the published backoff. A successful probe or manual
 retry lifts the hold and drains the backlog oldest first. Dispatch entries remain available for

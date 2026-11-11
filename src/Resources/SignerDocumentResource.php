@@ -523,10 +523,36 @@ class SignerDocumentResource extends AbstractResource
     }
 
     /**
-     * Query for routes that accept a signer access code or the workspace credentials.
-     *
-     * @return array{signer-access-code: string}|array{}
+     * GET /signers/downloads/{token}[/pades]. Public token authentication; no query or body.
+     * Response: application/pdf bytes. Completion links last 7 days; resent links 30 minutes.
+     * Expired/unknown links return 302: the SDK raises ApiException and never follows redirects.
+     * @param string $token bearer download token from a delivered link
+     * @param bool $pades request the qualified certificate artifact; 404 if absent
+     * @return string certified PDF bytes
      */
+    public function downloadFromToken(#[\SensitiveParameter] string $token, bool $pades = false): string
+    {
+        return $this->httpClient->get(
+            'signers/downloads/' . $this->pathSegment($token, 'download token') . ($pades ? '/pades' : '')
+        )->getBody();
+    }
+
+    /**
+     * POST /signers/downloads/{token}/resend. Public token authentication; no body or query.
+     * Works with expired known tokens. Requires a signed, certified document and original contact.
+     * Response: ['available' => true, 'notification_method' => 'Email', 'resends_left' => null,
+     * 'sent_to' => 's***@example.com']. Replacement links last 30 minutes.
+     * Same channel, recipient and rate limits as SignerSessionResource::sendCertifiedCopy().
+     * @param string $token bearer download token; copy receiver links return 409
+     * @return array<string, mixed> delivery result; unknown token 404, unavailable 409, limited 429
+     */
+    public function resendDownload(#[\SensitiveParameter] string $token): array
+    {
+        return $this->extractData($this->httpClient->post(
+            'signers/downloads/' . $this->pathSegment($token, 'download token') . '/resend'
+        )->getData() ?? []);
+    }
+
     /**
      * @param array<string, string>  $authQuery signer access code query, or empty for workspace credentials
      * @param array<string, scalar> $filters

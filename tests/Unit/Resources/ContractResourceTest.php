@@ -129,4 +129,11 @@ final class ContractResourceTest extends TestCase
             }
         }
     }
+    public function testRelatedCanExpandRootDocument(): void
+    {
+        $data = ['document' => ['id' => 'doc', 'name' => 'Root contract']];
+        $this->http->queueJson(200, $data);
+        $this->assertSame($data, $this->contracts->related('doc', 'document'));
+        $this->assertSame(['expand' => 'document'], $this->http->lastCall()['query']);
+    }
 }

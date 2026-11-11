@@ -1,8 +1,23 @@
 # Upgrading
 
-Install a published 2.x release with `composer require assinafy/php-sdk:^2.8`. Remove obsolete
+Install a published 2.x release with `composer require assinafy/php-sdk:^2.9`. Remove obsolete
 VCS/path repository overrides if they prevent Composer from resolving the Packagist package.
 Use the documentation shipped with the installed tag; `main` may include unreleased changes.
+
+## Upgrading to 2.9.0
+
+Existing calls keep their defaults and return shapes. New `envelopes()` and `embeddedSigning()`
+resources support grouped documents and embedded signer sessions. Workspace notification policy,
+push preferences, usage and embed origins are documented in [WORKSPACE.md](docs/WORKSPACE.md).
+
+Pass `embedded: true` in an assignment signer to enable iframe signing. Keep embed session and
+certified-copy download tokens secret; these are bearer credentials. Public exchanges and downloads
+never inherit workspace credentials. See [EMBEDDED_SIGNING.md](docs/EMBEDDED_SIGNING.md) and
+[SIGNER_DELIVERY.md](docs/SIGNER_DELIVERY.md).
+
+Webhook secret rotation still replaces the secret immediately by default. Use `keepPrevious: true`
+for a 24-hour overlap, and `rotateEndpointSecretWithMetadata()` when you need the expiry timestamp.
+The SDK User-Agent is `Assinafy-PHP-SDK/v2.9.0`.
 
 ## Upgrading to 2.8.1
 

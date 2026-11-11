@@ -187,4 +187,27 @@ final class UserResourceTest extends TestCase
             }
         }
     }
+    public function testPushPreferencesAreIndependentAndPreserveFutureKeys(): void
+    {
+        $preferences = array_fill_keys(UserResource::PUSH_PREFERENCE_CODES, true);
+        $this->http->queueJson(200, $preferences);
+        $this->assertSame($preferences, $this->users->pushPreferences());
+        $this->assertSame('users/self/push-preferences', $this->http->lastCall()['uri']);
+        $this->http->queueJson(200, $preferences);
+        $this->users->updatePushPreferences(['SignerViewed' => false, 'FutureAlert' => true], 'access-token');
+        $this->assertSame(['SignerViewed' => false, 'FutureAlert' => true], $this->http->lastCall()['body']);
+        $this->assertSame(['Authorization' => 'Bearer access-token'], $this->http->lastCall()['headers']);
+    }
+
+    public function testPushPreferencesValidateBeforeNetwork(): void
+    {
+        foreach ([[], ['SignerViewed' => 1], ['' => true], [true]] as $preferences) {
+            try {
+                $this->users->updatePushPreferences($preferences);
+                $this->fail('Invalid preferences accepted');
+            } catch (ValidationException) {
+                $this->assertSame([], $this->http->calls);
+            }
+        }
+    }
 }

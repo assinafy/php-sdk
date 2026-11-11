@@ -27,6 +27,9 @@ use Assinafy\SDK\Http\Response;
  */
 class WebhookResource extends AbstractResource
 {
+    /** Test deliveries only; this event cannot be subscribed to. */
+    public const EVENT_WEBHOOK_TEST = 'webhook_test';
+
     public const EVENT_DOCUMENT_UPLOADED = 'document_uploaded';
     public const EVENT_DOCUMENT_METADATA_READY = 'document_metadata_ready';
     public const EVENT_DOCUMENT_PREPARED = 'document_prepared';
@@ -543,11 +546,12 @@ class WebhookResource extends AbstractResource
      * Replace an endpoint's signing secret and return the new one.
      * `POST /accounts/{account_id}/webhooks/endpoints/{endpoint_id}/secret/rotate`
      *
-     * The old secret stops working immediately: deliveries sent afterwards are signed only
+     * By default the old secret stops working immediately: deliveries sent afterwards are signed only
      * with the new one, so update the receiver's stored secret right away. OAuth applications
      * require the `webhooks:write` scope.
      *
-     * Request: no body.
+     * Request: no body by default; keepPrevious sends ['keep_previous' => true] for 24-hour overlap.
+     * Use rotateEndpointSecretWithMetadata() to receive the overlap expiry as well.
      *
      * Example response (SDK return, the new secret):
      * ```php
@@ -559,9 +563,49 @@ class WebhookResource extends AbstractResource
      *     the endpoint does not exist
      * @throws NetworkException when a successful response carries no secret
      */
-    public function rotateEndpointSecret(string $endpointId): string
+    public function rotateEndpointSecret(string $endpointId, bool $keepPrevious = false): string
     {
-        return $this->secretFrom($this->httpClient->post($this->endpointPath($endpointId, '/secret/rotate')));
+        return $this->rotateEndpointSecretWithMetadata($endpointId, $keepPrevious)['secret'];
+    }
+
+    /**
+     * Rotate and return the secret with its overlap deadline.
+     * POST /accounts/{accountId}/webhooks/endpoints/{endpointId}/secret/rotate.
+     * API key/user session or OAuth webhooks:write; signing must be enabled.
+     * Request: ['keep_previous' => true]; omitted by default for immediate replacement.
+     * Response: ['secret' => 'whsec_example', 'previous_secret_expires_at' => '2026-11-12T15:00:00Z'].
+     * The expiry is present only with keep_previous; the replaced secret signs for 24 hours.
+     * A further rotation replaces the retained secret. Persist the new secret immediately.
+     * @return array{secret: string, previous_secret_expires_at?: string}
+     * @throws NetworkException when the response contains no secret
+     */
+    public function rotateEndpointSecretWithMetadata(string $endpointId, bool $keepPrevious = false): array
+    {
+        $response = $this->httpClient->post(
+            $this->endpointPath($endpointId, '/secret/rotate'),
+            $keepPrevious ? ['keep_previous' => true] : null
+        );
+        $data = $this->extractData($response->getData() ?? []);
+        $data['secret'] = $this->secretFrom($response);
+
+        return $data;
+    }
+
+    /**
+     * Send one signed test delivery. POST /accounts/{accountId}/webhooks/endpoints/{endpointId}/test.
+     * API key/user session or OAuth webhooks:write. No body. Works on inactive/held endpoints
+     * without lifting the hold; limited to 10 tests per user per 10 minutes, with a 10-second timeout.
+     * Response: ['resource' => 'activity_dispatching_history', 'id' => 'dispatch-id',
+     * 'event' => 'webhook_test', 'endpoint_id' => 'endpoint-id', 'kind' => 'manual',
+     * 'delivered' => true, 'http_status' => 200, 'response_body' => 'OK', 'error' => null].
+     * Full dispatch fields match dispatches(). webhook_test cannot be subscribed to.
+     * @return array<string, mixed>
+     */
+    public function testEndpoint(string $endpointId): array
+    {
+        return $this->extractData($this->httpClient->post(
+            $this->endpointPath($endpointId, '/test')
+        )->getData() ?? []);
     }
 
     /**

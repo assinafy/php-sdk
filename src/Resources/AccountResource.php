@@ -82,6 +82,9 @@ class AccountResource extends AbstractResource
 
     /**
      * Retrieve the account this client is configured against.
+     * Optional query: ['expand' => 'signing_features'] adds the available signing features
+     * (DigitalCertificate, VerificationIdDocumentFaceMatchBasic, WhatsappNotification,
+     * VerificationBypass and Embed booleans). OAuth requires account:read.
      * `GET /accounts/{account_id}`
      *
      * Request: path parameters shown above; no request body.
@@ -103,11 +106,154 @@ class AccountResource extends AbstractResource
      *
      * @return array<string, mixed>
      */
-    public function get(): array
+    public function get(?string $expand = null): array
     {
-        $response = $this->httpClient->get($this->accountPath());
+        $response = $this->httpClient->get(
+            $this->accountPath(),
+            $expand === null ? [] : ['expand' => $expand]
+        );
 
         return $this->extractData($response->getData() ?? []);
+    }
+
+    /**
+     * Read workspace notification rules. GET /accounts/{accountId}/notification-policy; no body.
+     * API key/user session required; all members can read, third-party OAuth receives 403.
+     * Response: ['editable' => true, 'owners_receive_all' => false, 'events' =>
+     * ['DocumentCompleted' => true, 'SignerDeclined' => true, 'DocumentCancelled' => true,
+     * 'DocumentAboutToExpire' => true, 'DocumentExpired' => true, 'DocumentExpirationReset' => true,
+     * 'DocumentProcessingFailed' => true, 'TemplateProcessingFailed' => true, 'SignerWhatsappFailed' => true,
+     * 'ContractRenewalNotice' => true, 'ContractExpiring' => true, 'ContractExpired' => true,
+     * 'ContractRenewed' => true, 'SignerViewed' => false, 'SignerSigned' => true,
+     * 'SignerIdentityReviewRequired' => true]].
+     * The complete event map is documented in docs/WORKSPACE.md.
+     * @return array<string, mixed>
+     */
+    public function notificationPolicy(): array
+    {
+        return $this->extractData($this->httpClient->get($this->accountPath('notification-policy'))->getData() ?? []);
+    }
+
+    /**
+     * Merge workspace notification rules. PUT /accounts/{accountId}/notification-policy.
+     * API key/user session and owner role required; third-party OAuth receives 403.
+     * Request: ['events' => ['SignerViewed' => false], 'owners_receive_all' => true].
+     * Response: the full policy from notificationPolicy(), with supplied values changed.
+     * Omitted fields remain unchanged. Identity-review email is always sent.
+     * @param array<string, mixed> $changes events boolean map and/or owners_receive_all boolean
+     * @return array<string, mixed>
+     * @throws ValidationException on an empty update, unknown field or invalid value
+     */
+    public function updateNotificationPolicy(array $changes): array
+    {
+        if ($changes === []) {
+            throw new ValidationException('At least one notification policy field is required');
+        }
+        foreach ($changes as $field => $value) {
+            if ($field === 'events' && is_array($value) && $value !== []) {
+                foreach ($value as $code => $enabled) {
+                    if (!is_string($code) || trim($code) === '' || !is_bool($enabled)) {
+                        throw new ValidationException('Notification policy events require string keys and boolean values');
+                    }
+                }
+            } elseif ($field !== 'owners_receive_all' || !is_bool($value)) {
+                throw new ValidationException('Invalid notification policy field or value');
+            }
+        }
+        return $this->extractData($this->httpClient->put(
+            $this->accountPath('notification-policy'),
+            $changes
+        )->getData() ?? []);
+    }
+
+    /**
+     * Read plan and remaining allowances. GET /accounts/{accountId}/usage.
+     * API key/user session only; third-party OAuth receives 403. No request body.
+     * Response: ['plan' => 'Pro', 'documents_renewal_date' => '2026-12-01',
+     * 'balances' => ['documents' => ['balance' => 100, 'limit' => 100, 'spent' => 0],
+     * 'credits' => ['balance' => 20, 'limit' => null, 'spent' => 0]]].
+     * @return array<string, mixed>
+     */
+    public function usage(): array
+    {
+        return $this->extractData($this->httpClient->get($this->accountPath('usage'))->getData() ?? []);
+    }
+
+    /**
+     * List allowed signing origins. GET /accounts/{accountId}/embed-origins.
+     * API key/user session and Embed feature required; OAuth is unavailable. No body.
+     * Response: [['id' => 'origin-id', 'origin' => 'https://app.example.com',
+     * 'created_at' => '2026-11-04T12:05:00Z']]. Ordered oldest first, without pagination.
+     * @return array<int, array<string, mixed>>
+     */
+    public function embedOrigins(): array
+    {
+        return $this->extractData($this->httpClient->get($this->accountPath('embed-origins'))->getData() ?? []);
+    }
+
+    /**
+     * Allow an origin. POST /accounts/{accountId}/embed-origins.
+     * API key/user session and Embed feature required; OAuth is unavailable. At most 10 origins.
+     * Request: ['origin' => 'https://app.example.com'].
+     * Response: ['id' => 'origin-id', 'origin' => 'https://app.example.com',
+     * 'created_at' => '2026-11-04T12:05:00Z']. Duplicate origins return 400.
+     * @return array<string, mixed>
+     */
+    public function addEmbedOrigin(string $origin): array
+    {
+        $this->assertEmbedOrigin($origin);
+        return $this->extractData($this->httpClient->post(
+            $this->accountPath('embed-origins'),
+            ['origin' => $origin]
+        )->getData() ?? []);
+    }
+
+    /**
+     * Replace an allowed origin, preserving its ID. PUT /accounts/{accountId}/embed-origins/{originId}.
+     * API key/user session and Embed feature required; OAuth is unavailable. Origin must exist.
+     * Request: ['origin' => 'https://new.example.com'].
+     * Response: ['id' => 'origin-id', 'origin' => 'https://new.example.com',
+     * 'created_at' => '2026-11-04T12:05:00Z']. Duplicate origins return 400.
+     * @return array<string, mixed>
+     */
+    public function updateEmbedOrigin(string $originId, string $origin): array
+    {
+        $this->assertEmbedOrigin($origin);
+        return $this->extractData($this->httpClient->put(
+            $this->accountPath('embed-origins/' . $this->pathSegment($originId, 'origin ID')),
+            ['origin' => $origin]
+        )->getData() ?? []);
+    }
+
+    /**
+     * Remove an origin. DELETE /accounts/{accountId}/embed-origins/{originId}.
+     * API key/user session and Embed feature required; OAuth is unavailable. No body; response: [].
+     * Removing the last origin makes new embed sessions fail with 409 embed_origins_missing.
+     * @return array<array-key, mixed>
+     */
+    public function deleteEmbedOrigin(string $originId): array
+    {
+        return $this->extractData($this->httpClient->delete(
+            $this->accountPath('embed-origins/' . $this->pathSegment($originId, 'origin ID'))
+        )->getData() ?? []);
+    }
+
+    private function assertEmbedOrigin(string $origin): void
+    {
+        $parts = parse_url($origin);
+        if (
+            $parts === false || filter_var($origin, FILTER_VALIDATE_URL) === false
+            || !isset($parts['host'], $parts['scheme'])
+            || str_contains($parts['host'], '*')
+            || isset($parts['user']) || isset($parts['pass'])
+            || isset($parts['query']) || isset($parts['fragment'])
+            || !in_array($parts['path'] ?? '', ['', '/'], true)
+            || !(strtolower($parts['scheme']) === 'https'
+                || (strtolower($parts['scheme']) === 'http'
+                    && in_array(strtolower($parts['host']), ['localhost', '127.0.0.1'], true)))
+        ) {
+            throw new ValidationException('Embed origin must be HTTPS, or HTTP on localhost, without a path or credentials');
+        }
     }
 
     /**

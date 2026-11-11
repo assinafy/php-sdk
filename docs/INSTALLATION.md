@@ -28,13 +28,13 @@ composer require assinafy/php-sdk
 That resolves to the current 2.x release. Pin the constraint explicitly if you prefer:
 
 ```bash
-composer require assinafy/php-sdk:^2.8
+composer require assinafy/php-sdk:^2.9
 ```
 
 To install the version described by this documentation:
 
 ```bash
-composer require assinafy/php-sdk:2.8.1
+composer require assinafy/php-sdk:2.9.0
 ```
 
 Each `vMAJOR.MINOR.PATCH` tag also publishes versioned ZIP and tar.gz packages plus SHA-256

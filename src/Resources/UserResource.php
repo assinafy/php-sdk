@@ -308,6 +308,57 @@ class UserResource extends AbstractResource
         return $this->extractData($response->getData() ?? []);
     }
 
+    /** Codes for personal push alerts, independent of email preferences. */
+    public const PUSH_PREFERENCE_CODES = [
+        'SignerViewed', 'SignerSigned', 'DocumentCompleted', 'SignerDeclined',
+        'DocumentAboutToExpire', 'DocumentExpired', 'SignerIdentityReviewRequired', 'SignerWhatsappFailed',
+    ];
+
+    /**
+     * Read personal push preferences. GET /users/self/push-preferences; no request body.
+     * API key/user session only; third-party OAuth receives 403. All keys default to true.
+     * Response: ['SignerViewed' => true, 'SignerSigned' => true, 'DocumentCompleted' => true,
+     * 'SignerDeclined' => true, 'DocumentAboutToExpire' => true, 'DocumentExpired' => true,
+     * 'SignerIdentityReviewRequired' => true, 'SignerWhatsappFailed' => true].
+     * @return array<string, bool>
+     */
+    public function pushPreferences(#[\SensitiveParameter] ?string $accessToken = null): array
+    {
+        return $this->extractData($this->httpClient->get(
+            'users/self/push-preferences',
+            [],
+            $this->bearerHeaders($accessToken)
+        )->getData() ?? []);
+    }
+
+    /**
+     * Merge personal push preferences. PUT /users/self/push-preferences.
+     * API key/user session only; third-party OAuth receives 403. Email preferences are unchanged.
+     * Request: ['SignerViewed' => false]. Response: full map from pushPreferences(), with
+     * SignerViewed false; omitted keys keep their values. Unknown keys/non-booleans fail with 400.
+     * @param array<array-key, mixed> $preferences nonempty boolean map; new server keys are forwarded
+     * @return array<string, bool>
+     * @throws ValidationException on an empty map, empty/non-string key, or non-boolean value
+     */
+    public function updatePushPreferences(
+        array $preferences,
+        #[\SensitiveParameter] ?string $accessToken = null
+    ): array {
+        if ($preferences === []) {
+            throw new ValidationException('At least one push preference is required');
+        }
+        foreach ($preferences as $code => $enabled) {
+            if (!is_string($code) || trim($code) === '' || !is_bool($enabled)) {
+                throw new ValidationException('Push preferences require nonempty string keys and boolean values');
+            }
+        }
+        return $this->extractData($this->httpClient->put(
+            'users/self/push-preferences',
+            $preferences,
+            $this->bearerHeaders($accessToken)
+        )->getData() ?? []);
+    }
+
     /**
      * List the user's enrolled two-factor methods and remaining recovery codes.
      * `GET /users/self/mfa`

@@ -652,6 +652,55 @@ class SignerSessionResource extends AbstractResource
         return $this->extractData($response->getData() ?? []);
     }
 
+    /**
+     * GET /sign/theme. Signer access code only; available before verification and after deletion.
+     * Request query: ['signer-access-code' => '<access-code>']; no body.
+     * Response: ['account_name' => 'Example workspace', 'primary_color' => '123456',
+     * 'secondary_color' => 'ffffff', 'logo' => null]. Colors omit the # prefix.
+     * @param string $accessCode signer access code; a pending sequential step returns 400
+     * @return array<string, mixed> workspace brand; logo URLs require signer-access-code
+     */
+    public function theme(#[\SensitiveParameter] string $accessCode): array
+    {
+        return $this->extractData($this->httpClient->get('sign/theme', $this->accessCodeQuery($accessCode))->getData() ?? []);
+    }
+
+    /**
+     * GET /sign/logo. Signer access code only; available before verification and after deletion.
+     * Request query: ['signer-access-code' => '<access-code>']; no body.
+     * Response: image/* bytes. 404 if no logo; 400 while the signer's step is pending.
+     * @param string $accessCode signer access code
+     * @return string logo image bytes
+     */
+    public function logo(#[\SensitiveParameter] string $accessCode): string
+    {
+        return $this->httpClient->get('sign/logo', $this->accessCodeQuery($accessCode))->getBody();
+    }
+
+    /**
+     * POST /sign/certified-copy. Signer access code only, including a closed code after signing.
+     * The document must be certified. Query: ['signer-access-code' => '<access-code>'];
+     * optional body: ['document_id' => 'document-id'] selects another document of the envelope.
+     * Response: ['available' => true, 'notification_method' => 'Email', 'resends_left' => null,
+     * 'sent_to' => 's***@example.com']. Sends only to the original signing contact, on its channel.
+     * Email: once per 2 minutes, 10 times per day. Whatsapp: once per request. Links last 30 minutes.
+     * @param string $accessCode signer access code
+     * @param string|null $documentId another envelope document signed by this signer
+     * @return array<string, mixed> delivery result; 409 when unavailable, 429 when limited
+     */
+    public function sendCertifiedCopy(#[\SensitiveParameter] string $accessCode, ?string $documentId = null): array
+    {
+        if ($documentId !== null && trim($documentId) === '') {
+            throw new ValidationException('Document ID cannot be empty');
+        }
+        return $this->extractData($this->httpClient->post(
+            'sign/certified-copy',
+            $documentId === null ? null : ['document_id' => $documentId],
+            [],
+            $this->accessCodeQuery($accessCode)
+        )->getData() ?? []);
+    }
+
     private function assertType(string $type): void
     {
         if (!in_array($type, [self::TYPE_SIGNATURE, self::TYPE_INITIAL], true)) {

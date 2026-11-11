@@ -23,6 +23,13 @@ final class AssignmentResourceTest extends TestCase
         $this->assignments = new AssignmentResource($this->http, $config);
     }
 
+    public function testEmbeddedSignerFlagReachesTheApi(): void
+    {
+        $this->http->queueJson(200, ['id' => 'assignment']);
+        $this->assignments->create('doc', [['id' => 'signer', 'embedded' => true]]);
+        $this->assertTrue($this->http->lastCall()['body']['signers'][0]['embedded'] ?? false);
+    }
+
     public function testCreateNormalizesStringSignersToObjects(): void
     {
         $this->http->queueJson(201, ['id' => 'a1']);

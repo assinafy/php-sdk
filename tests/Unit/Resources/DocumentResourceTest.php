@@ -27,6 +27,31 @@ final class DocumentResourceTest extends TestCase
         $this->documents = new DocumentResource($this->http, $config);
     }
 
+    public function testGetCanExpandEnvelopeWithoutChangingDefaultRequest(): void
+    {
+        $this->http->queueJson(200, ['id' => 'doc', 'envelope_id' => 'env']);
+        $result = $this->documents->get('doc', 'envelope_id,envelope');
+        $this->assertSame('env', $result['envelope_id']);
+        $this->assertSame(['expand' => 'envelope_id,envelope'], $this->http->lastCall()['query']);
+    }
+
+    public function testTemplateCreationSupportsEmailEmbeddedCeilingAndIdempotency(): void
+    {
+        $this->http->queueJson(200, ['id' => 'doc']);
+        $signers = [['role_id' => 'role', 'email' => 'signer@example.com', 'name' => 'Example Signer',
+            'embedded' => true]];
+        $this->documents->createFromTemplate('template', $signers, ['max_total_credits' => 0.5], 'request-1');
+        $call = $this->http->lastCall();
+        $this->assertSame(['Idempotency-Key' => 'request-1'], $call['headers']);
+        $this->assertSame(['signers' => $signers, 'max_total_credits' => 0.5], $call['body']);
+    }
+
+    public function testTemplateCreationRejectsInvalidEmailWithoutIdBeforeNetwork(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->documents->createFromTemplate('template', [['role_id' => 'role', 'email' => 'invalid']]);
+    }
+
     public function testUploadHitsAccountScopedPathWithFileOnly(): void
     {
         $pdf = $this->writeFixturePdf();

@@ -170,14 +170,17 @@ class DocumentResource extends AbstractResource
      * ]
      * ```
      *
+     * @param string|null $expand optional comma-separated envelope_id,envelope; workspace reads only
+     *     Query ['expand' => 'envelope_id,envelope'] adds 'envelope_id' => 'envelope-id' and
+     *     'envelope' => ['id' => 'envelope-id', 'name' => 'Agreement']; null outside an envelope.
      * @return array<string, mixed>
      * @throws ValidationException when `$documentId` is empty
      * @throws \Assinafy\SDK\Exceptions\ApiException 404 when the document does not exist
      */
-    public function get(string $documentId): array
+    public function get(string $documentId, ?string $expand = null): array
     {
         $documentId = $this->pathSegment($documentId, 'document ID');
-        $response = $this->httpClient->get("documents/{$documentId}");
+        $response = $this->httpClient->get("documents/{$documentId}", $expand === null ? [] : ['expand' => $expand]);
 
         return $this->extractData($response->getData() ?? []);
     }
@@ -1017,17 +1020,23 @@ class DocumentResource extends AbstractResource
      * ]
      * ```
      *
-     * @param array<int, array<string, mixed>> $signers each entry: `{ role_id, id,
-     *     verification_method?, notification_methods?, step? }`
+     * @param array<int, array<string, mixed>> $signers each entry: `{ role_id, id? (or email/name),
+     *     verification_method?, notification_methods?, embedded?, step? }`
      * @param array<string, mixed>             $options optional `name`, `message`, `editor_fields`,
-     *     `expires_at`, and `tags`
+     *     `expires_at`, `tags`, and `max_total_credits`
+     * @param string|null $idempotencyKey Idempotency-Key header, unique per intended template document;
+     *     reuse after ambiguous failure. A deleted result returns 404; an in-flight key returns 409.
+     *     Signers may use email/name instead of id; existing id takes precedence. Embedded is forwarded.
+     *     Options accept max_total_credits: exceeding the ceiling returns 409 without charging;
+     *     a later price increase can produce failed status and document_processing_failed.
      * @return array<string, mixed> the created document
      * @throws ValidationException when `$signers` is empty or an entry is malformed
      */
     public function createFromTemplate(
         string $templateId,
         #[\SensitiveParameter] array $signers,
-        #[\SensitiveParameter] array $options = []
+        #[\SensitiveParameter] array $options = [],
+        ?string $idempotencyKey = null
     ): array {
         if ($signers === []) {
             throw new ValidationException('At least one template signer is required');
@@ -1043,7 +1052,8 @@ class DocumentResource extends AbstractResource
 
         $response = $this->httpClient->post(
             $this->accountPath("templates/{$templateId}/documents"),
-            $payload
+            $payload,
+            $idempotencyKey === null ? [] : ['Idempotency-Key' => $idempotencyKey]
         );
 
         return $this->extractData($response->getData() ?? []);
@@ -1433,8 +1443,11 @@ class DocumentResource extends AbstractResource
             }
 
             $signerId = $signer['id'] ?? null;
-            if ($requireSignerId && (!is_string($signerId) || trim($signerId) === '')) {
-                throw new ValidationException('Each template signer requires an id');
+            if ($requireSignerId && $signerId === null) {
+                $email = $signer['email'] ?? null;
+                if (!is_string($email) || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+                    throw new ValidationException('Each template signer requires an id or valid email');
+                }
             }
             if ($signerId !== null && (!is_string($signerId) || trim($signerId) === '')) {
                 throw new ValidationException('Template signer id must be a non-empty string');

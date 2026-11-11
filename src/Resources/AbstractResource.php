@@ -162,7 +162,7 @@ abstract class AbstractResource
      *
      * @throws ValidationException when the identifier is empty
      */
-    protected function pathSegment(string $value, string $name = 'identifier'): string
+    protected function pathSegment(#[\SensitiveParameter] string $value, string $name = 'identifier'): string
     {
         if (trim($value) === '') {
             throw new ValidationException(ucfirst($name) . ' cannot be empty', [$name => $value]);

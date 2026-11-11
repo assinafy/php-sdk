@@ -222,9 +222,10 @@ class AssignmentResource extends AbstractResource
      *
      * @param array<int, string|array<string, mixed>> $signers
      *     Either a list of signer IDs (strings) or a list of `{ id, verification_method?,
-     *     notification_methods?, step? }` objects. String IDs are normalized to `{ id }`.
+     *     notification_methods?, embedded?, step? }` objects. String IDs are normalized to `{ id }`.
      * @param array<string, mixed> $options
-     *     Optional keys: `entries` (required for collect), `message`, `expires_at`, `copy_receivers`.
+     *     Optional keys: `entries` (required for collect), `message`, `expires_at`, `copy_receivers`,
+     *     `max_total_credits` (creation ceiling; 409 CreditCeilingExceeded if exceeded).
      * @return array<string, mixed> the created assignment
      * @throws ValidationException on an unknown method, an empty signer list, a `collect`
      *     assignment without entries, a malformed `expires_at`, non-contiguous steps, or a
@@ -443,7 +444,8 @@ class AssignmentResource extends AbstractResource
      * @param array<int, string|array<string, mixed>> $signers signer IDs or objects; entries
      *     may omit `id` and carry only `verification_method` / `notification_methods`
      * @param array<string, mixed> $options
-     *     Optional keys: `entries` (required for collect), `message`, `expires_at`, `copy_receivers`.
+     *     Optional keys: `entries` (required for collect), `message`, `expires_at`, `copy_receivers`,
+     *     `max_total_credits` (creation ceiling; 409 CreditCeilingExceeded if exceeded).
      * @return array<string, mixed>
      * @throws ValidationException when a DigitalCertificate signer is used with a non-virtual method
      */
@@ -891,7 +893,7 @@ class AssignmentResource extends AbstractResource
 
     /**
      * Accept either string signer IDs or full signer objects and produce the
-     * `signers: [{ id, verification_method?, notification_methods?, step? }]` shape
+     * `signers: [{ id, verification_method?, notification_methods?, embedded?, step? }]` shape
      * documented by the API.
      *
      * @param array<int, mixed> $signers
@@ -976,6 +978,13 @@ class AssignmentResource extends AbstractResource
                         throw new ValidationException('Signer step must be a positive integer');
                     }
                     $entry['step'] = $signer['step'];
+                }
+
+                if (array_key_exists('embedded', $signer)) {
+                    if (!in_array($signer['embedded'], [null, true, false, 1, 0], true)) {
+                        throw new ValidationException('Embedded must be a boolean, 1, 0 or null');
+                    }
+                    $entry['embedded'] = $signer['embedded'];
                 }
 
                 // Preserve the optional role reference accepted by existing integrations.

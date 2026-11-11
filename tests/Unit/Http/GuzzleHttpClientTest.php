@@ -198,6 +198,41 @@ final class GuzzleHttpClientTest extends TestCase
         }
     }
 
+    public function testEnvelopeCreationHasApiKeyAndOAuthBearerParity(): void
+    {
+        $payload = [
+            'name' => 'Agreement',
+            'signers' => [['id' => 'signer-id', 'verification_method' => 'Email']],
+            'documents' => [['id' => 'document-id', 'signer_ids' => ['signer-id']]],
+            'max_total_credits' => 0,
+        ];
+        $results = [];
+        foreach ([new Configuration('key', 'account'), Configuration::forBearer('bearer', 'account')] as $config) {
+            $history = [];
+            $stack = HandlerStack::create(new MockHandler([
+                new GuzzleResponse(200, [], '{"status":200,"data":{"id":"envelope-id","status":"open"}}'),
+            ]));
+            $stack->push(Middleware::history($history));
+            $transport = new GuzzleHttpClient($config, null, new Client([
+                'base_uri' => $config->getBaseUrl() . '/', 'handler' => $stack,
+            ]));
+            $client = new AssinafyClient($config, $transport);
+            $results[] = $client->envelopes()->create($payload, 'envelope-attempt');
+            $request = $history[0]['request'];
+            self::assertSame('POST', $request->getMethod());
+            self::assertSame('/v1/accounts/account/envelopes', $request->getUri()->getPath());
+            self::assertSame($payload, json_decode((string) $request->getBody(), true));
+            self::assertSame('envelope-attempt', $request->getHeaderLine('Idempotency-Key'));
+            self::assertSame($config->isBearerAuthenticated() ? '' : 'key', $request->getHeaderLine('X-Api-Key'));
+            self::assertSame(
+                $config->isBearerAuthenticated() ? 'Bearer bearer' : '',
+                $request->getHeaderLine('Authorization')
+            );
+        }
+        self::assertSame(['id' => 'envelope-id', 'status' => 'open'], $results[0]);
+        self::assertSame($results[0], $results[1]);
+    }
+
     public function testGetSendsQueryStringAndParsesEnvelope(): void
     {
         $client = $this->client([new GuzzleResponse(200, [], '{"status":200,"data":[{"id":"d1"}]}')]);
@@ -266,6 +301,36 @@ final class GuzzleHttpClientTest extends TestCase
             'Assinafy-PHP-SDK/v' . Configuration::SDK_VERSION,
             $this->lastRequest()->getHeaderLine('User-Agent')
         );
+    }
+
+    public function testEmbedAndDownloadTokenRoutesNeverInheritWorkspaceCredentials(): void
+    {
+        $routes = [
+            ['GET', 'sign/theme'], ['GET', 'sign/logo'], ['POST', 'sign/certified-copy'],
+            ['GET', 'signers/downloads/token'], ['GET', 'signers/downloads/token/pades'],
+            ['POST', 'signers/downloads/token/resend'], ['POST', 'embed/sessions/token/exchange'],
+        ];
+        foreach ([new Configuration('key', 'account'), Configuration::forBearer('bearer', 'account')] as $config) {
+            $history = [];
+            $stack = HandlerStack::create(new MockHandler(array_fill(
+                0,
+                count($routes) + 1,
+                new GuzzleResponse(200, [], '{"status":200,"data":{}}')
+            )));
+            $stack->push(Middleware::history($history));
+            $client = new GuzzleHttpClient($config, null, new Client([
+                'base_uri' => $config->getBaseUrl() . '/', 'handler' => $stack,
+            ]));
+            foreach ($routes as [$method, $uri]) {
+                $method === 'GET' ? $client->get($uri) : $client->post($uri);
+                $request = $history[count($history) - 1]['request'];
+                self::assertFalse($request->hasHeader('X-Api-Key'));
+                self::assertFalse($request->hasHeader('Authorization'));
+            }
+            $client->post('documents/d/assignments/a/signers/s/embed-sessions');
+            $request = $history[count($history) - 1]['request'];
+            self::assertTrue($request->hasHeader($config->isBearerAuthenticated() ? 'Authorization' : 'X-Api-Key'));
+        }
     }
 
     public function testSignerDocumentListAndSearchUseWorkspaceCredentialsWithoutAccessCode(): void
@@ -516,6 +581,35 @@ final class GuzzleHttpClientTest extends TestCase
                     foreach ($previous->getTrace() as $frame) {
                         foreach ($frame['args'] ?? [] as $argument) {
                             $this->assertNotInstanceOf(\GuzzleHttp\Exception\GuzzleException::class, $argument);
+                        }
+                    }
+                }
+            }
+        } finally {
+            ini_set('zend.exception_ignore_args', (string) $previousSetting);
+        }
+    }
+
+    public function testTokenPathsAreAbsentFromTransportExceptionTraces(): void
+    {
+        $previousSetting = ini_set('zend.exception_ignore_args', '0');
+        try {
+            foreach (['embed/sessions/path-secret/exchange', 'signers/downloads/path-secret'] as $uri) {
+                try {
+                    $client = $this->client([new GuzzleResponse(410, [], '{"message":"Expired token"}')]);
+                    str_starts_with($uri, 'embed/') ? $client->post($uri) : $client->get($uri);
+                    self::fail('Expected token expiration');
+                } catch (ApiException $exception) {
+                    self::assertStringNotContainsString('path-secret', $exception->getTraceAsString());
+                    self::assertNotNull($exception->getPrevious());
+                    self::assertStringNotContainsString('path-secret', $exception->getPrevious()->getTraceAsString());
+                    foreach ([$exception, $exception->getPrevious()] as $cause) {
+                        foreach ($cause->getTrace() as $frame) {
+                            foreach ($frame['args'] ?? [] as $argument) {
+                                if (is_string($argument)) {
+                                    self::assertStringNotContainsString('path-secret', $argument);
+                                }
+                            }
                         }
                     }
                 }

@@ -808,7 +808,8 @@ $messageId = $_SERVER['HTTP_WEBHOOK_ID']; // identical on every attempt: dedupli
 
 `verifySignature()` compares each `v1,<signature>` entry in constant time and rejects a
 `webhook-timestamp` more than 300 seconds from the local clock. `rotateEndpointSecret()` replaces
-the secret immediately, so update the receiver at the same time.
+the secret immediately by default; pass `keepPrevious: true` to retain the previous signature
+for 24 hours while updating receivers. See [workspace settings](docs/WORKSPACE.md).
 
 Return 2xx quickly and process through an application queue. Each event can receive up to six
 attempts, about ten minutes apart, for connection failures, timeouts, 408, 429, and 5xx responses.
@@ -847,7 +848,7 @@ $pagination = $result['pagination'];
 // current_page, page_count, per_page, total_count
 ```
 
-Pages start at 1 and `perPage` accepts 1–100. Binary methods return raw bytes. JSON operations
+Pages start at 1 and the SDK accepts `perPage` from 1–100; most API lists cap responses at 50. Binary methods return raw bytes. JSON operations
 with an empty or 204 response return an empty array.
 
 ## Errors, logging, and secrets
@@ -1023,3 +1024,12 @@ protected GitLab job.
 
 See [UPGRADING.md](UPGRADING.md) for release migration guidance. Licensed under the
 [MIT License](LICENSE).
+
+## Envelopes, embedded signing and delivery
+
+Use `envelopes()` to group documents into one signer journey; see the complete
+[envelope request and response examples](docs/ENVELOPES.md). Configure workspace embed origins
+and use `embeddedSigning()` for single-use iframe sessions; see [embedded signing](docs/EMBEDDED_SIGNING.md).
+[Workspace settings](docs/WORKSPACE.md) covers usage, notification policy, push preferences,
+webhook test deliveries and overlapping secret rotation. [Signer delivery](docs/SIGNER_DELIVERY.md)
+covers branding and certified-copy links after completion.

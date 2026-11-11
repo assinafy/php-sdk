@@ -92,6 +92,9 @@ $progress = $client->documents()->getSigningProgress($documentId);
 $document = $client->documents()->get($documentId);
 
 // 7. Após certificated, salve os bytes e valide o hash publicado no documento.
+if ($document['status'] !== 'certificated') {
+    throw new RuntimeException('Aguarde a certificação e retome pelo ID do documento.');
+}
 $pdf = $client->documents()->download($documentId, DocumentResource::ARTIFACT_CERTIFICATED);
 file_put_contents('/armazenamento/privado/contrato-assinado.pdf', $pdf, LOCK_EX);
 $verification = $public->documents()->verify((string) getenv('ASSINAFY_DOCUMENT_SIGNATURE_HASH'));
@@ -118,7 +121,7 @@ ambos seleciona Email. Etapas, quando usadas, devem ser contíguas a partir de 1
 `DigitalCertificate` cobre ICP-Brasil A1 e A3 pelo mesmo payload. Um CPF exige e-CPF, ou e-CNPJ que
 nomeie a pessoa como representante; um CNPJ exige e-CNPJ da empresa. A extensão Web PKI conclui a
 assinatura; o resultado qualificado é `pades` e `signerSession()->sign()` não executa esse protocolo.
-certificado digital custa 0,5 crédito por signatário, além da notificação, e não funciona em
+O certificado digital custa 0,5 crédito por signatário, além da notificação, e não funciona em
 `collect`. Biometria permanece CPF-only; preserve e proteja a URL de captura com fragmento `#t=`.
 
 Em `collect`, obtenha campos com `fields()->list(includeStandard: true)` e envie `entries` com
@@ -127,6 +130,11 @@ Em `collect`, obtenha campos com `fields()->list(includeStandard: true)` e envie
 
 Templates criados pela API começam com função Editor. Configure funções e campos na interface web,
 depois use `documents()->estimateCostFromTemplate()` e `createFromTemplate()`.
+
+Envelopes agrupam documentos com uma única jornada por signatário: veja [envelopes](docs/ENVELOPES.md).
+Para incorporar a assinatura, configure origens e use `embeddedSigning()->createSession()`;
+veja [assinatura incorporada](docs/EMBEDDED_SIGNING.md). [Preferências e políticas](docs/WORKSPACE.md)
+e [entrega de cópias certificadas](docs/SIGNER_DELIVERY.md) descrevem os métodos complementares.
 
 ## Contratos, webhooks e OAuth
 

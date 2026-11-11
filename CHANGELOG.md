@@ -5,6 +5,22 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.9.0] - 2026-11-11
+
+### Added
+
+- Manage multi-document envelopes, including cost estimates, idempotent creation, activities, artifacts, reminders and cancellation.
+- Create embedded signing sessions, manage allowed origins and preserve embedded signer settings.
+- Read signing-page branding and request or download certified copies through dedicated signer links.
+- Read workspace usage and signing features, manage workspace notification policy and personal push preferences.
+- Send webhook test deliveries and rotate signing secrets with an optional 24-hour overlap.
+- Bind template signers by email and name when an existing signer ID is unavailable.
+- Expand related contract documents and envelope membership, and send idempotency keys when creating documents from templates.
+
+### Fixed
+
+- Redact embedded-session and certified-copy tokens from transport diagnostics and exception argument traces.
+
 ## [2.8.1] - 2026-11-02
 
 ### Changed

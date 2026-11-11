@@ -140,6 +140,21 @@ final class LogRedactorTest extends TestCase
         $this->assertStringContainsString('/sign/' . LogRedactor::PLACEHOLDER, $pathCode);
     }
 
+    public function testRedactsEmbeddedAndDownloadPathTokens(): void
+    {
+        foreach (
+            [
+            'https://app.example.com/embed/SECRET',
+            'POST embed/sessions/SECRET/exchange',
+            'GET signers/downloads/SECRET/pades',
+            'https://api.example.com/v1/signers/downloads/SECRET/resend',
+            ] as $text
+        ) {
+            self::assertStringNotContainsString('SECRET', LogRedactor::redactText($text));
+            self::assertStringContainsString(LogRedactor::PLACEHOLDER, LogRedactor::redactText($text));
+        }
+    }
+
     public function testRedactBodySummarisesLargeBinaryBodies(): void
     {
         $body = LogRedactor::redactBody(str_repeat("\x00PDFDATA", 200));

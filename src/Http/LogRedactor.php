@@ -198,6 +198,12 @@ final class LogRedactor
             $text
         ) ?? $text;
 
+        $redacted = preg_replace(
+            '~((?:^|[\s/])(?:embed/sessions|signers/downloads|embed)/)[^/?#\s"\']+~i',
+            '$1' . self::PLACEHOLDER,
+            $redacted
+        ) ?? $redacted;
+
         $redacted = preg_replace_callback(
             '~([?&#])([^=&#\s]+)=([^&#\s]*)~',
             static fn (array $matches): string => self::isSecret(rawurldecode($matches[2]))

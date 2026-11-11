@@ -12,6 +12,8 @@ use Assinafy\SDK\Resources\AssignmentResource;
 use Assinafy\SDK\Resources\AuthResource;
 use Assinafy\SDK\Resources\ContractResource;
 use Assinafy\SDK\Resources\DocumentResource;
+use Assinafy\SDK\Resources\EmbeddedSigningResource;
+use Assinafy\SDK\Resources\EnvelopeResource;
 use Assinafy\SDK\Resources\FieldResource;
 use Assinafy\SDK\Resources\OAuthResource;
 use Assinafy\SDK\Resources\SignerDocumentResource;
@@ -36,7 +38,9 @@ class AssinafyClient
 
     private ?AccountResource $accounts = null;
     private ?ContractResource $contracts = null;
+    private ?EnvelopeResource $envelopes = null;
     private ?DocumentResource $documents = null;
+    private ?EmbeddedSigningResource $embeddedSigning = null;
     private ?SignerResource $signers = null;
     private ?AssignmentResource $assignments = null;
     private ?TemplateResource $templates = null;
@@ -168,6 +172,20 @@ class AssinafyClient
         }
 
         return $this->contracts;
+    }
+
+    /**
+     * Document envelopes: send and manage several documents together.
+     * API-key or workspace Bearer authentication; documents:read/write scopes.
+     * @see EnvelopeResource
+     */
+    public function envelopes(): EnvelopeResource
+    {
+        if ($this->envelopes === null) {
+            $this->envelopes = new EnvelopeResource($this->httpClient, $this->config, $this->loggerProxy);
+        }
+
+        return $this->envelopes;
     }
 
     /**
@@ -310,6 +328,16 @@ class AssinafyClient
         );
     }
 
+    /** Embedded signing session URLs and their single-use exchange; no request on access. */
+    public function embeddedSigning(): EmbeddedSigningResource
+    {
+        if ($this->embeddedSigning === null) {
+            $this->embeddedSigning = new EmbeddedSigningResource($this->httpClient, $this->config, $this->loggerProxy);
+        }
+
+        return $this->embeddedSigning;
+    }
+
     /**
      * The signer's own session: everything a recipient does with their access code.
      *
@@ -374,7 +402,7 @@ class AssinafyClient
      * Each entry in `$signers` may be either:
      *   - an existing signer ID (string), or
      *   - an associative array `{ id? or full_name (or name), email?, whatsapp_phone_number?
-     *     (or phone)?, verification_method?, notification_methods?, step? }`
+     *     (or phone)?, verification_method?, notification_methods?, embedded?, step? }`
      *
      * Signers without an `id` are created via the API; signers found by email (when an email
      * is supplied) are reused. DigitalCertificate and IdDocumentFaceMatchBasic entries must
@@ -635,7 +663,7 @@ class AssinafyClient
         }
 
         $resolved = ['id' => $signerId];
-        foreach (['verification_method', 'notification_methods', 'step'] as $option) {
+        foreach (['verification_method', 'notification_methods', 'embedded', 'step'] as $option) {
             if (array_key_exists($option, $signer)) {
                 $resolved[$option] = $signer[$option];
             }
@@ -775,6 +803,10 @@ class AssinafyClient
      */
     private function validateWorkflowSignerOptions(#[\SensitiveParameter] array $signer): array
     {
+        if (array_key_exists('embedded', $signer) && !in_array($signer['embedded'], [null, true, false, 1, 0], true)) {
+            throw new \InvalidArgumentException('Embedded must be a boolean, 1, 0 or null');
+        }
+
         $verification = $signer['verification_method'] ?? null;
         $notifications = $signer['notification_methods'] ?? null;
 

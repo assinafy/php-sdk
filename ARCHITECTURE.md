@@ -128,6 +128,8 @@ Each resource extends `AbstractResource`, which centralizes account paths, path-
 | `auth()` | Login, social login, password flows, API-key lifecycle, and legacy social URL builders |
 | `contracts()` | Document contract terms, amendment families, renewals, and terminations |
 | `documents()` | Document upload, retrieval, search, downloads (including `pades`), tags, verification, and template-driven creation |
+| `envelopes()` | Multi-document signer journeys, cost estimates, lifecycle and artifacts |
+| `embeddedSigning()` | Single-use iframe sessions and public token exchange |
 | `fields()` | Field definitions, validation, and the global field-type catalog |
 | `oauth()` | Marketplace PKCE transactions, callback validation, token exchange/refresh, revocation, userinfo, and RFC 8414/9728 discovery |
 | `signers()` | Workspace signer CRUD (including `government_id` update), email lookup, and explicit-country-code E.164 normalization |

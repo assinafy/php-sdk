@@ -5,15 +5,15 @@ This reference maps every public resource method in this SDK to the Assinafy API
 - <https://api.assinafy.com.br/v1/docs>
 - <https://api.assinafy.com.br/v1/docs/openapi.json>
 
-This reference describes SDK version 2.8.1. Install published releases with
+This reference describes SDK version 2.9.0. Install published releases with
 `composer require assinafy/php-sdk` and use the documentation shipped with the selected tag.
 See [INSTALLATION.md](INSTALLATION.md) for setup.
 
-Resource classes map all 118 operations in the current production OpenAPI document, including the
-four OAuth and discovery operations under
-[Marketplace OAuth](#marketplace-oauth-oauthresource). Five working template-management routes
-and two legacy social URL builders exist at runtime outside OpenAPI and are documented with their
-resources.
+The resource tables and focused references cover the production API operations, including
+[marketplace OAuth](#marketplace-oauth-oauthresource), [envelopes](ENVELOPES.md),
+[embedded signing](EMBEDDED_SIGNING.md), [workspace settings](WORKSPACE.md), and
+[signer delivery](SIGNER_DELIVERY.md). Working template-management routes and legacy social URL
+builders outside OpenAPI remain available.
 
 Production: `https://api.assinafy.com.br/v1`; sandbox: `https://sandbox.assinafy.com.br/v1`.
 Statistics and notification preferences work in sandbox. Marketplace OAuth is deployed to
@@ -77,7 +77,9 @@ Every non-2xx response from the default HTTP client throws `Assinafy\SDK\Excepti
 
 ### Pagination
 
-Published paginated operations accept `page` (minimum 1) and `per-page` (maximum 100) and return metadata only in these response headers:
+Published paginated operations accept `page` (minimum 1). Most lists default to 20 records and
+cap `per-page` at 50; operation-specific limits take precedence. The SDK continues accepting
+1–100 for compatibility; the server clamps larger requests. Pagination metadata uses these headers:
 
 - `X-Pagination-Current-Page`
 - `X-Pagination-Total-Count`
@@ -126,6 +128,43 @@ with `Retry-After` (seconds). The SDK never retries automatically; on `ApiExcept
 | OAuth start/callback | `GET /auth/authenticate` and `GET /login-callback` are absent from OpenAPI. The SDK retains URL builders for legacy social authentication. Marketplace OAuth uses the authorization server described below. |
 | Signer document download | The SDK requires and sends a signer access code even though OpenAPI marks the operation public. |
 
+
+Template signer bindings may provide `role_id` plus `email` and `name` when no existing signer
+ID is available. An explicit `id` takes precedence. The API resolves or creates the signer;
+`embedded` is forwarded. For example:
+
+```php
+$document = $client->documents()->createFromTemplate(
+    'template-id',
+    [['role_id' => 'role-id', 'email' => 'signer@example.com', 'name' => 'Example Signer']],
+    ['name' => 'Agreement', 'max_total_credits' => 0],
+    'unique-template-request-id',
+);
+// Returns the Document payload documented below, including its id and processing status.
+```
+
+## Additional resource methods
+
+The focused references below provide each method's path, authentication, state requirements,
+parameters, full PHP request and response examples, and binary media types:
+
+| Resource | Methods | Reference |
+| --- | --- | --- |
+| `EnvelopeResource` | `list`, `get`, `create`, `estimateCost`, `update`, `delete`, `activities`, `download`, `cancel`, `resend`, `addDocument`, `removeDocument` | [Envelopes](ENVELOPES.md) |
+| `EmbeddedSigningResource` | `createSession`, `exchangeSession` | [Embedded signing](EMBEDDED_SIGNING.md) |
+| `AccountResource` | `usage`, `notificationPolicy`, `updateNotificationPolicy`, `embedOrigins`, `addEmbedOrigin`, `updateEmbedOrigin`, `deleteEmbedOrigin` | [Workspace settings](WORKSPACE.md) |
+| `UserResource` | `pushPreferences`, `updatePushPreferences` | [Push preferences](WORKSPACE.md#personal-push-preferences) |
+| `WebhookResource` | `rotateEndpointSecretWithMetadata`, `testEndpoint` | [Webhook rotation and delivery](WORKSPACE.md) |
+| `SignerSessionResource`, `SignerDocumentResource` | Branding, certified-copy delivery and token downloads | [Signer delivery](SIGNER_DELIVERY.md) |
+
+Assignment signer objects accept `embedded: bool` in `create()`, `estimateCost()` and
+`uploadAndRequestSignatures()`. Embedded sessions require the Embed feature and registered origins.
+Assignment and template options forward `max_total_credits` to impose a spending cap; estimates
+remain authoritative and do not reserve resources. Template creation's optional idempotency key is
+scoped to the template and has no expiry; reusing it returns the original document, regardless of
+body changes. A still-running request returns `409 IdempotencyKeyInUse`; a deleted document returns
+`404`. The SDK never retries automatically.
+
 ## Core, transport, and support API catalog
 
 The endpoint tables below cover every public method declared by the concrete resource classes.
@@ -145,6 +184,8 @@ resources through `AssinafyClient` instead.
 | `forBearer(string $accessToken, string $accountId, string $baseUrl = Configuration::DEFAULT_BASE_URL): self` | Globally Bearer-authenticated workspace client. |
 | `accounts(): AccountResource` | Lazy, cached account resource. |
 | `contracts(): ContractResource` | Lazy, cached document-contract resource. |
+| `envelopes(): EnvelopeResource` | Lazy, cached [envelope resource](ENVELOPES.md). |
+| `embeddedSigning(): EmbeddedSigningResource` | Lazy, cached [embedded signing resource](EMBEDDED_SIGNING.md). |
 | `documents(): DocumentResource` | Lazy, cached document resource. |
 | `signers(): SignerResource` | Lazy, cached signer resource. |
 | `assignments(): AssignmentResource` | Lazy, cached assignment resource. |
@@ -282,7 +323,7 @@ Workspace-authenticated operations accept either API-key or Bearer authenticatio
 | SDK method | Official operation | Auth | Request | SDK success return | Statuses |
 |---|---|---|---|---|---|
 | `list(?string $accessToken = null)` | [`GET /v1/accounts`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts) | Workspace | No parameters; optional Bearer token lets a bootstrap client discover accounts. `null` uses configured authentication. | Envelope with `data: Account[]`; this endpoint is not declared paginated. | `200; 401, 500` |
-| `get()` | [`GET /v1/accounts/{accountId}`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts%2F%7BaccountId%7D) | Workspace | Configured `accountId` path parameter. | Unwrapped `Account`. | `200; 401, 404, 500` |
+| `get($expand = null)` | [`GET /v1/accounts/{accountId}`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts%2F%7BaccountId%7D) | Workspace | Configured `accountId`; optional `expand=signing_features`. See [workspace settings](WORKSPACE.md). | Unwrapped `Account`. | `200; 401, 404, 500` |
 | `create(string $name, ?string $notificationSenderType = null, ?string $accessToken = null)` | [`POST /v1/accounts`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Faccounts) | Workspace | Required JSON `name`; optional `notification_sender_type: "User" \| "Account"`; optional Bearer token. `null` uses configured authentication. | Unwrapped `Account`. | `200; 400, 401, 500` |
 | `update($name, $notificationSenderType)` | [`PUT /v1/accounts/{accountId}`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Faccounts%2F%7BaccountId%7D) | Workspace | Required JSON object containing either optional `name` and/or `notification_sender_type`. The SDK refuses an empty update. | Unwrapped `Account`. | `200; 400, 401, 500` |
 | `delete($force)` | [`DELETE /v1/accounts/{accountId}`](https://api.assinafy.com.br/v1/docs/markdown?method=delete&path=%2Fv1%2Faccounts%2F%7BaccountId%7D) | Workspace | Optional JSON body `{force: boolean}`. This is a body field, not a query parameter. | Envelope with `data: []`. A 400 restriction response may include `restrictions[]` with `code`, `message`, and `account_ids[]`. | `200; 400, 401, 404, 500` |
@@ -557,7 +598,7 @@ file fails locally. The API still performs authoritative PDF parsing and enforce
 | SDK method | Official operation | Auth | Request | SDK success return | Statuses |
 |---|---|---|---|---|---|
 | `upload($filePath)` | [`POST /v1/accounts/{accountId}/documents`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fdocuments) | Workspace | Required multipart `file` PDF. | Unwrapped `Document`. | `200; 400, 401, 500` |
-| `get($documentId)` | [`GET /v1/documents/{documentId}`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D) | Workspace | Path ID only. | Unwrapped `Document`. | `200; 401, 404, 500` |
+| `get($documentId, $expand = null)` | [`GET /v1/documents/{documentId}`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D) | Workspace | Path ID and optional `expand=envelope_id,envelope`. | Unwrapped `Document`. | `200; 401, 404, 500` |
 | `list($page, $perPage, $filters)` | [`GET /v1/accounts/{accountId}/documents`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fdocuments) | Workspace | Query: `status`, `method: virtual\|collect`, `search`, `tags` (comma-separated tag IDs; documents must carry ALL listed tags), `sort`, `page`, `per-page`. | Envelope with `data: Document[]` and normalized `pagination`. | `200; 401, 500` |
 | `search($term, $page, $perPage, $filters)` | [`GET /v1/accounts/{accountId}/documents/search`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fdocuments%2Fsearch) | Workspace | Query: `search`, `status`, `page`, `per-page`. | Envelope with normalized `pagination`; entries are the compact document shape without `assignment` and `pages`. | `200; 401, 500` |
 | `rename($documentId, $name)` | [`PATCH /v1/documents/{documentId}`](https://api.assinafy.com.br/v1/docs/markdown?method=patch&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D) | Workspace | Required JSON `{name}`. Only valid before signing starts. | Unwrapped `Document`. | `200; 400, 401, 404, 500` |
@@ -574,7 +615,7 @@ file fails locally. The API still performs authoritative PDF parsing and enforce
 | `replaceTags($documentId, $tagNames)` | [`PUT /v1/accounts/{accountId}/documents/{documentId}/tags`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fdocuments%2F%7BdocumentId%7D%2Ftags) | Workspace | Required JSON `{tags: string[]}`. Despite an upstream description saying IDs, runtime values are names and missing names are auto-created. Empty replaces the set with none. | Unwrapped `Tag[]`. | `200; 401, 500` |
 | `appendTags($documentId, $tagNames)` | [`POST /v1/accounts/{accountId}/documents/{documentId}/tags`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fdocuments%2F%7BdocumentId%7D%2Ftags) | Workspace | Required JSON `{tags: string[]}` using names; missing names are auto-created. SDK rejects an empty list. | Unwrapped `Tag[]`. | `200; 401, 500` |
 | `detachTag($documentId, $tagId)` | [`DELETE /v1/accounts/{accountId}/documents/{documentId}/tags/{tagId}`](https://api.assinafy.com.br/v1/docs/markdown?method=delete&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fdocuments%2F%7BdocumentId%7D%2Ftags%2F%7BtagId%7D) | Workspace | Account, document, and tag path IDs. | Unwrapped `{detached: boolean}`. | `200; 401, 500` |
-| `createFromTemplate($templateId, $signers, $options)` | [`POST /v1/accounts/{accountId}/templates/{templateId}/documents`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Ftemplates%2F%7BtemplateId%7D%2Fdocuments) | Workspace | See [Create from template body](#create-from-template-body). `DigitalCertificate` requires a template without placed signer fields; otherwise the API returns `400`. | Unwrapped `Document`. | `200; 400, 401, 500` |
+| `createFromTemplate($templateId, $signers, $options, $idempotencyKey = null)` | [`POST /v1/accounts/{accountId}/templates/{templateId}/documents`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Ftemplates%2F%7BtemplateId%7D%2Fdocuments) | Workspace | See [Create from template body](#create-from-template-body). Optional `Idempotency-Key` header replays the original creation result. `DigitalCertificate` requires a template without placed signer fields; otherwise the API returns `400`. | Unwrapped `Document`. | `200; 400, 401, 500` |
 | `estimateCostFromTemplate($templateId, $signers)` | [`POST /v1/accounts/{accountId}/templates/{templateId}/documents/estimate-cost`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Ftemplates%2F%7BtemplateId%7D%2Fdocuments%2Festimate-cost) | Workspace | Required `{signers: [{role_id, verification_method?, notification_methods?}]}`; signer ID is not required. `DigitalCertificate` returns `400` when placed signer fields make the assignment `collect`. | Unwrapped `CostEstimate`. | `200; 400, 401, 500` |
 
 ### Create from template body
@@ -652,7 +693,7 @@ longer includes contract tracking. Writes require the feature and return 403 whe
 | `list($page = 1, $perPage = 25, $filters = [])` | [`GET /v1/accounts/{accountId}/contracts`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fcontracts) | Workspace (`documents:read`) | Query `page`, `per-page`; optional comma-separated `status` (`draft`, `active`, `expired`, `terminated`), `counterparty`, document-name `search`, `end_date_from`, `end_date_to`, `ending_within_days` (0–3650), `external_system`, `external_id`, `sort` (`end_date`, `updated_at`, optional `-` prefix), and `expand=document`. | Envelope with `data: DocumentContract[]` and normalized `pagination`. | `200; 400, 401, 500` |
 | `get($documentId)` | [`GET /v1/accounts/{accountId}/documents/{documentId}/contract`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fdocuments%2F%7BdocumentId%7D%2Fcontract) | Workspace (`documents:read`) | Document path ID; no query or body. | Unwrapped `DocumentContract` for a root or `DocumentContractAmendment` for a related document. | `200; 401, 404 no terms, 500` |
 | `update($documentId, $data)` | [`PUT /v1/accounts/{accountId}/documents/{documentId}/contract`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fdocuments%2F%7BdocumentId%7D%2Fcontract) | Workspace (`documents:write`) | Non-empty `DocumentContractInput`; fields and null behavior are below. `updated_at` is an optional optimistic-concurrency precondition. | Unwrapped `DocumentContract` or `DocumentContractAmendment`. | `200; 400, 401, 403 feature, 404, 409 changed, 500` |
-| `related($documentId)` | [`GET /v1/accounts/{accountId}/documents/{documentId}/contract/related`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fdocuments%2F%7BdocumentId%7D%2Fcontract%2Frelated) | Workspace (`documents:read`) | Root or related document path ID; no query or body. | Unwrapped root `DocumentContract` with every related document in `amendments`. | `200; 401, 404 no family, 500` |
+| `related($documentId, $expand = null)` | [`GET /v1/accounts/{accountId}/documents/{documentId}/contract/related`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fdocuments%2F%7BdocumentId%7D%2Fcontract%2Frelated) | Workspace (`documents:read`) | Root or related document path ID; optional `expand=document`, no body. | Unwrapped root `DocumentContract` with every related document in `amendments`. | `200; 401, 404 no family, 500` |
 | `renew($documentId, $data = [])` | [`POST /v1/accounts/{accountId}/documents/{documentId}/contract/renew`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fdocuments%2F%7BdocumentId%7D%2Fcontract%2Frenew) | Workspace (`documents:write`) | Optional JSON `{end_date?: date?, value?: number?, term?: integer >= 1, updated_at?: date-time}`. Without a non-empty `end_date`, send the current `term`; an explicit date must be after the current end date. | Unwrapped renewed `DocumentContract`. | `200; 400 invalid/repeated, 401, 403 feature, 404, 409 changed, 500` |
 | `terminate($documentId, $data = [])` | [`POST /v1/accounts/{accountId}/documents/{documentId}/contract/terminate`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fdocuments%2F%7BdocumentId%7D%2Fcontract%2Fterminate) | Workspace (`documents:write`) | Optional JSON `{reason?: string? <= 500, updated_at?: date-time}`. HTML is stripped from the reason. | Unwrapped terminated `DocumentContract`. | `200; 400, 401, 403 feature, 404, 409 changed, 500` |
 
@@ -795,7 +836,7 @@ an event receives it independently. The subscription methods (`register`, `get`,
 | `deleteEndpoint($endpointId)` | [`DELETE /v1/accounts/{accountId}/webhooks/endpoints/{endpointId}`](https://api.assinafy.com.br/v1/docs/markdown?method=delete&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Fendpoints%2F%7BendpointId%7D) | Workspace (`webhooks:write`) | Endpoint path ID. | `[]`. | `200; 401, 404, 500` |
 | `deleteEndpointByUrl($url)` | [`DELETE /v1/accounts/{accountId}/webhooks/endpoints`](https://api.assinafy.com.br/v1/docs/markdown?method=delete&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Fendpoints) | Workspace (`webhooks:write`) | Required exact `url` query; no body. | `[]`. | `200; 400 missing URL, 401, 404 no matching endpoint, 500` |
 | `endpointSecret($endpointId)` | [`GET /v1/accounts/{accountId}/webhooks/endpoints/{endpointId}/secret`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Fendpoints%2F%7BendpointId%7D%2Fsecret) | API key or user token; not OAuth | Endpoint path ID. | The `whsec_` secret string from `data.secret`. | `200; 400 signing disabled, 401, 404, 500` |
-| `rotateEndpointSecret($endpointId)` | [`POST /v1/accounts/{accountId}/webhooks/endpoints/{endpointId}/secret/rotate`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Fendpoints%2F%7BendpointId%7D%2Fsecret%2Frotate) | Workspace (`webhooks:write` for OAuth) | No body. The previous secret stops working immediately. | The new `whsec_` secret string. | `200; 400 signing disabled, 401, 404, 500` |
+| `rotateEndpointSecret($endpointId, $keepPrevious = false)` | [`POST /v1/accounts/{accountId}/webhooks/endpoints/{endpointId}/secret/rotate`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Fendpoints%2F%7BendpointId%7D%2Fsecret%2Frotate) | Workspace (`webhooks:write` for OAuth) | `keep_previous: bool`; false replaces the previous secret immediately, true retains its signature for 24 hours. See [rotation metadata and test deliveries](WORKSPACE.md). | The new `whsec_` secret string. | `200; 400 signing disabled, 401, 404, 500` |
 | `register($url, $email, $events, $isActive)` | [`PUT /v1/accounts/{accountId}/webhooks/subscriptions`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Fsubscriptions) | Workspace | Required JSON `{events: string[], is_active: boolean, url: URI, email: email}`. New or changed URLs require HTTPS. Empty SDK events selects `DEFAULT_EVENTS`. | Unwrapped `WebhookSubscription`. | `200; 400, 401, 500` |
 | `get()` | [`GET /v1/accounts/{accountId}/webhooks/subscriptions`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Fsubscriptions) | Workspace | Account path only. | Unwrapped `WebhookSubscription`, or null when the returned data is empty. | `200; 401, 500` |
 | `deactivate()` | [`PUT /v1/accounts/{accountId}/webhooks/inactivate`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Faccounts%2F%7BaccountId%7D%2Fwebhooks%2Finactivate) | Workspace | No body. | Unwrapped `WebhookSubscription`. | `200; 401, 500` |
