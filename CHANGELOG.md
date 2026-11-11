@@ -5,6 +5,13 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.9.2] - 2026-11-11
+
+### Fixed
+
+- Keep permission failures visible in envelope integration tests; skip only confirmed optional plan restrictions.
+- Verify complete document membership and PDF contents in envelope artifact archives and bundles.
+
 ## [2.9.1] - 2026-11-11
 
 ### Fixed

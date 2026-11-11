@@ -4,6 +4,13 @@ Install a published 2.x release with `composer require assinafy/php-sdk:^2.9`. R
 VCS/path repository overrides if they prevent Composer from resolving the Packagist package.
 Use the documentation shipped with the installed tag; `main` may include unreleased changes.
 
+## Upgrading to 2.9.2
+
+Public method signatures and return shapes are unchanged. Envelope integration tests now fail
+permission denials and incomplete or duplicate archive contents. Optional plan restrictions remain
+skippable; completed-envelope fixtures need public verification codes on every document.
+The SDK User-Agent is `Assinafy-PHP-SDK/v2.9.2`.
+
 ## Upgrading to 2.9.1
 
 Existing return shapes and optional-argument defaults are preserved. `documents()->activities()`

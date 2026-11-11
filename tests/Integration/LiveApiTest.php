@@ -621,7 +621,7 @@ final class LiveApiTest extends TestCase
 
     /**
      * Envelope lifecycle with reserved recipients, virtual/collect documents, idempotency and cleanup.
-     * Feature-gate 403s skip unless ASSINAFY_REQUIRE_PLAN_FEATURES=1.
+     * PlanRestricted 403s skip unless ASSINAFY_REQUIRE_PLAN_FEATURES=1.
      */
     public function testEnvelopeLifecycle(): void
     {
@@ -658,32 +658,25 @@ final class LiveApiTest extends TestCase
                 ['id' => $ids[1], 'signer_ids' => [$signer['id']], 'method' => 'collect', 'entries' => $placements],
             ],
         ];
-        try {
-            $estimate = $resource->estimateCost($body);
-            $this->assertSame(1, $estimate['documents']);
-            $this->assertEquals(0, $estimate['total_credits']);
-            $this->assertTrue($estimate['has_sufficient_resources']);
-            $this->assertSame([], $resource->list(filters: ['search' => $name])['data']);
+        $estimate = $this->withEnvelopeFeature(fn () => $resource->estimateCost($body));
+        $this->assertSame(1, $estimate['documents']);
+        $this->assertEquals(0, $estimate['total_credits']);
+        $this->assertTrue($estimate['has_sufficient_resources']);
+        $this->assertSame([], $resource->list(filters: ['search' => $name])['data']);
 
-            $this->assertEnvelopeRefusal(fn () => $resource->create(array_replace($body, [
-                'documents' => [$body['documents'][0], $body['documents'][0]],
-            ])), 400);
-            $this->assertEnvelopeRefusal(fn () => $resource->create(array_replace($body, [
-                'max_total_credits' => -1,
-            ])), 400);
-            $this->assertSame([], $resource->list(filters: ['search' => $name])['data']);
-            foreach (array_slice($ids, 0, 2) as $id) {
-                $this->assertSame('metadata_ready', $this->client->documents()->get($id)['status']);
-            }
-
-            $key = 'sdk-envelope-' . bin2hex(random_bytes(16));
-            $envelope = $resource->create($body, $key);
-        } catch (ApiException $e) {
-            if ($e->getStatusCode() === 403 && getenv('ASSINAFY_REQUIRE_PLAN_FEATURES') !== '1') {
-                $this->markTestSkipped('The workspace does not permit envelope estimates or creation');
-            }
-            throw $e;
+        $this->assertEnvelopeRefusal(fn () => $this->withEnvelopeFeature(fn () => $resource->create(
+            array_replace($body, ['documents' => [$body['documents'][0], $body['documents'][0]]])
+        )), 400);
+        $this->assertEnvelopeRefusal(fn () => $this->withEnvelopeFeature(fn () => $resource->create(
+            array_replace($body, ['max_total_credits' => -1])
+        )), 400);
+        $this->assertSame([], $resource->list(filters: ['search' => $name])['data']);
+        foreach (array_slice($ids, 0, 2) as $id) {
+            $this->assertSame('metadata_ready', $this->client->documents()->get($id)['status']);
         }
+
+        $key = 'sdk-envelope-' . bin2hex(random_bytes(16));
+        $envelope = $this->withEnvelopeFeature(fn () => $resource->create($body, $key));
         $envelopeId = (string) $envelope['id'];
         $this->createdEnvelopes[] = $envelopeId;
         $this->assertSame('envelope', $envelope['resource']);
@@ -807,7 +800,7 @@ final class LiveApiTest extends TestCase
                         'max_total_credits' => 0,
                     ]);
                 } catch (ApiException $e) {
-                    if ($e->getStatusCode() !== 403 || getenv('ASSINAFY_REQUIRE_PLAN_FEATURES') === '1') {
+                    if (!$this->isOptionalEnvelopePlanRestriction($e)) {
                         throw $e;
                     }
                     $unavailable[] = $verification . '/' . $notification;
@@ -859,7 +852,7 @@ final class LiveApiTest extends TestCase
             $this->assertSame('metadata_ready', $this->client->documents()->get($document['id'])['status']);
         }
         if ($unavailable !== []) {
-            $this->markTestSkipped('Envelope estimates unavailable (403): ' . implode(', ', $unavailable));
+            $this->markTestSkipped('Envelope estimates plan-restricted: ' . implode(', ', $unavailable));
         }
     }
 
@@ -878,48 +871,102 @@ final class LiveApiTest extends TestCase
             $this->assertSame('certificated', $full['status']);
             $this->assertTrue($this->client->documents()->isFullySigned($id));
             $this->assertSame(100.0, $this->client->documents()->getSigningProgress($id)['percentage']);
-            $this->assertNotEmpty($full['verification_code']);
+            $this->assertNotEmpty($full['verification_code'], 'Completed-envelope fixtures need public verification codes');
             $verification = $this->client->documents()->verify($full['verification_code']);
             $this->assertTrue($verification['is_valid']);
             $thumbnail = $this->client->documents()->downloadThumbnail($id, 'certificated');
             $pageImage = $this->client->documents()->downloadPage($id, $full['pages'][0]['id'], 'certificated');
             $this->assertNotFalse(getimagesizefromstring($thumbnail));
             $this->assertNotFalse(getimagesizefromstring($pageImage));
-            foreach (['original', 'certificated', 'certificate-page'] as $artifact) {
+            $artifacts = ['original', 'certificated', 'certificate-page'];
+            if (!empty($full['artifacts']['pades'])) {
+                $artifacts[] = 'pades';
+            }
+            foreach ($artifacts as $artifact) {
                 $bytes = $this->client->documents()->download($id, $artifact);
                 $this->assertStringStartsWith('%PDF-', $bytes);
-                $expectedHashes[$artifact][$document['position']] = hash('sha256', $bytes);
+                $hash = hash('sha256', $bytes);
+                $expectedHashes[$artifact][$document['position']] = [$hash];
+                $expectedHashes['bundle'][$document['position']][] = $hash;
             }
         }
-        foreach (['original', 'certificated', 'certificate-page', 'bundle'] as $artifact) {
-            $bytes = $this->client->envelopes()->download($envelopeId, $artifact);
-            $this->assertStringStartsWith('PK', $bytes);
-            $base = tempnam(sys_get_temp_dir(), 'asn-envelope-artifact-');
-            $this->assertIsString($base);
-            $path = $base . '.zip';
-            $this->temporaryFiles[] = $base;
-            $this->temporaryFiles[] = $path;
-            $this->assertNotFalse(file_put_contents($path, $bytes));
-            $archive = new \PharData($path);
-            $pdfCount = 0;
-            foreach (new \RecursiveIteratorIterator($archive) as $entry) {
-                if ($entry->isDir() || !str_ends_with(strtolower($entry->getFilename()), '.pdf')) {
-                    continue;
-                }
-                $content = $entry->getContent();
-                $this->assertStringStartsWith('%PDF-', $content);
-                $pdfCount++;
-                if ($artifact !== 'bundle') {
-                    $this->assertSame(1, preg_match('/^(\d+) - /', $entry->getFilename(), $match));
-                    $this->assertSame($expectedHashes[$artifact][(int) $match[1]], hash('sha256', $content));
-                }
+        foreach ($expectedHashes as $artifact => $hashes) {
+            $this->assertEnvelopeArchive(
+                $this->client->envelopes()->download($envelopeId, $artifact),
+                $hashes,
+                $artifact === 'bundle'
+            );
+        }
+    }
+
+    /** @param array<int, list<string>> $expectedHashes hashes per document position */
+    private function assertEnvelopeArchive(string $bytes, array $expectedHashes, bool $bundle): void
+    {
+        $this->assertStringStartsWith('PK', $bytes);
+        $base = tempnam(sys_get_temp_dir(), 'asn-envelope-artifact-');
+        $this->assertIsString($base);
+        $path = $base . '.zip';
+        $this->temporaryFiles[] = $base;
+        $this->temporaryFiles[] = $path;
+        $this->assertNotFalse(file_put_contents($path, $bytes));
+        $archive = new \PharData($path);
+        $prefix = 'phar://' . $archive->getPath() . '/';
+        $actual = [];
+        $folders = [];
+        foreach (new \RecursiveIteratorIterator($archive) as $entry) {
+            if ($entry->isDir()) {
+                continue;
             }
-            if ($artifact === 'bundle') {
-                $this->assertGreaterThanOrEqual(count($envelope['documents']), $pdfCount);
+            $relative = substr($entry->getPathname(), strlen($prefix));
+            $parts = explode('/', $relative);
+            $this->assertCount($bundle ? 2 : 1, $parts, 'Unexpected artifact directory layout');
+            $this->assertSame(1, preg_match('/^([1-9][0-9]*) - .+$/', $parts[0], $match));
+            $position = (int) $match[1];
+            $this->assertArrayHasKey($position, $expectedHashes, 'Unexpected document position');
+            $this->assertStringEndsWith('.pdf', strtolower($relative));
+            $content = $entry->getContent();
+            $this->assertStringStartsWith('%PDF-', $content);
+            if ($bundle) {
+                $this->assertSame($folders[$position] ?? $parts[0], $parts[0], 'Duplicate document folder');
+                $folders[$position] = $parts[0];
             } else {
-                $this->assertSame(count($envelope['documents']), $pdfCount);
+                $this->assertArrayNotHasKey($position, $actual, 'Duplicate document position');
             }
-            unset($archive);
+            $actual[$position][] = hash('sha256', $content);
+        }
+        foreach ($actual as &$hashes) {
+            sort($hashes);
+        }
+        unset($hashes);
+        foreach ($expectedHashes as &$hashes) {
+            sort($hashes);
+        }
+        unset($hashes);
+        ksort($actual);
+        ksort($expectedHashes);
+        $this->assertSame($expectedHashes, $actual, 'Every expected document artifact must appear exactly once');
+    }
+
+    private function isOptionalEnvelopePlanRestriction(ApiException $error): bool
+    {
+        return $error->getStatusCode() === 403
+            && ($error->getResponseData()['code'] ?? null) === 'PlanRestricted'
+            && getenv('ASSINAFY_REQUIRE_PLAN_FEATURES') !== '1';
+    }
+
+    /**
+     * @param callable(): array<string, mixed> $operation
+     * @return array<string, mixed>
+     */
+    private function withEnvelopeFeature(callable $operation): array
+    {
+        try {
+            return $operation();
+        } catch (ApiException $error) {
+            if ($this->isOptionalEnvelopePlanRestriction($error)) {
+                $this->markTestSkipped('The workspace plan does not include the requested envelope feature');
+            }
+            throw $error;
         }
     }
 

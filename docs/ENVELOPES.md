@@ -223,11 +223,16 @@ See [request and response examples](API_REFERENCE.md#envelope-document-selection
 With the sandbox credentials configured as in [README.md](../README.md), run
 `ASSINAFY_INTEGRATION=1 composer test:integration -- --filter 'testEnvelopeLifecycle|testEnvelopeVerificationEstimates'`.
 These tests create disposable resources and clean them up. Estimate tests send no signing invitations.
-Feature-gate 403s are reported as skipped unless `ASSINAFY_REQUIRE_PLAN_FEATURES=1`, which requires success.
-Other errors fail the tests; prices come from the returned estimates.
+Only `403` responses with `code: PlanRestricted` from feature-gated estimate/create calls are
+reported as skipped, unless `ASSINAFY_REQUIRE_PLAN_FEATURES=1` requires success. Missing OAuth
+scopes, membership failures, read denials and other errors fail the tests; prices come from estimates.
 
-For an existing disposable envelope whose documents are all certificated, set
+For an existing disposable envelope whose documents are all certificated and have public
+verification codes, set
 `ASSINAFY_TEST_COMPLETED_ENVELOPE_ID` and run
 `ASSINAFY_INTEGRATION=1 composer test:integration -- --filter testCompletedEnvelopeArtifacts`.
-This read-only check verifies certification, signed images, individual PDFs and envelope ZIP members.
+This read-only check verifies certification, signed images and each document's PDF hashes.
+Artifact ZIPs must contain each expected document position exactly once. Bundles must contain
+one folder per document with exactly its original, certificated and certificate-page PDFs, plus
+PAdES when available; duplicate, missing or unexpected content fails verification.
 It does not sign or delete the supplied envelope; clean up your fixture after verification.
