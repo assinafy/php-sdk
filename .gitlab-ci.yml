@@ -1,3 +1,9 @@
+include:
+  - component: git.febacapital.com/infra/gitlab-components/security-scan@main
+    inputs:
+      stage: verify
+      image_stage: integration
+
 stages:
   - verify
   - integration
