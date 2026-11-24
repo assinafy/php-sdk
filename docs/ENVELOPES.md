@@ -236,3 +236,6 @@ Artifact ZIPs must contain each expected document position exactly once. Bundles
 one folder per document with exactly its original, certificated and certificate-page PDFs, plus
 PAdES when available; duplicate, missing or unexpected content fails verification.
 It does not sign or delete the supplied envelope; clean up your fixture after verification.
+
+See [Scheduled sends](SCHEDULED_SENDS.md#schedule-an-envelope) for `schedule()` and
+[Signer delivery](SIGNER_DELIVERY.md#envelope-reminder-pricing) for `estimateResendCost()`.

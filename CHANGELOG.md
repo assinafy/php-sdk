@@ -3,7 +3,24 @@
 All notable changes to the Assinafy PHP SDK are documented here.
 Versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.10.0] - 2026-11-24
+
+### Added
+
+- Schedule assignment and envelope sends, list their states, cancel pending requests and send them immediately.
+- Set signer capacity on assignment creation and read capacities and notification delivery history.
+- Manage document observers and estimate envelope reminder costs.
+- Support PHP 8.6 while retaining PHP 8.2 compatibility.
+
+### Fixed
+
+- Preserve signer capacity through estimates and the upload-and-sign workflow.
+- Allow null to clear signer email, phone and government ID fields.
+- Correct signer verification order, contact confirmation and collect-image requirements in integration examples.
+
+### Changed
+
+- Require Guzzle 7.17+ or 8.6+ for current transport fixes and PHP 8.6 compatibility.
 
 ## [2.9.2] - 2026-11-11
 

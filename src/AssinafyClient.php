@@ -16,6 +16,7 @@ use Assinafy\SDK\Resources\EmbeddedSigningResource;
 use Assinafy\SDK\Resources\EnvelopeResource;
 use Assinafy\SDK\Resources\FieldResource;
 use Assinafy\SDK\Resources\OAuthResource;
+use Assinafy\SDK\Resources\ScheduledSendResource;
 use Assinafy\SDK\Resources\SignerDocumentResource;
 use Assinafy\SDK\Resources\SignerResource;
 use Assinafy\SDK\Resources\SignerSessionResource;
@@ -39,6 +40,7 @@ class AssinafyClient
     private ?AccountResource $accounts = null;
     private ?ContractResource $contracts = null;
     private ?EnvelopeResource $envelopes = null;
+    private ?ScheduledSendResource $scheduledSends = null;
     private ?DocumentResource $documents = null;
     private ?EmbeddedSigningResource $embeddedSigning = null;
     private ?SignerResource $signers = null;
@@ -201,6 +203,16 @@ class AssinafyClient
         }
 
         return $this->signers;
+    }
+
+    /** Manage scheduled sends; API key or OAuth documents:write. No request until a resource method is called. */
+    public function scheduledSends(): ScheduledSendResource
+    {
+        if ($this->scheduledSends === null) {
+            $this->scheduledSends = new ScheduledSendResource($this->httpClient, $this->config, $this->loggerProxy);
+        }
+
+        return $this->scheduledSends;
     }
 
     /**
@@ -663,7 +675,7 @@ class AssinafyClient
         }
 
         $resolved = ['id' => $signerId];
-        foreach (['verification_method', 'notification_methods', 'embedded', 'step'] as $option) {
+        foreach (['verification_method', 'notification_methods', 'embedded', 'step', 'sign_as'] as $option) {
             if (array_key_exists($option, $signer)) {
                 $resolved[$option] = $signer[$option];
             }
@@ -803,6 +815,9 @@ class AssinafyClient
      */
     private function validateWorkflowSignerOptions(#[\SensitiveParameter] array $signer): array
     {
+        if (isset($signer['sign_as']) && !in_array($signer['sign_as'], AssignmentResource::SIGNER_CAPACITIES, true)) {
+            throw new \InvalidArgumentException('Unknown signer capacity');
+        }
         if (array_key_exists('embedded', $signer) && !in_array($signer['embedded'], [null, true, false, 1, 0], true)) {
             throw new \InvalidArgumentException('Embedded must be a boolean, 1, 0 or null');
         }

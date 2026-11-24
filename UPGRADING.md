@@ -1,8 +1,26 @@
 # Upgrading
 
-Install a published 2.x release with `composer require assinafy/php-sdk:^2.9`. Remove obsolete
+Install a published 2.x release with `composer require assinafy/php-sdk:^2.10`. Remove obsolete
 VCS/path repository overrides if they prevent Composer from resolving the Packagist package.
 Use the documentation shipped with the installed tag; `main` may include unreleased changes.
+
+## Upgrading to 2.10.0
+
+Existing public signatures and return shapes are preserved. PHP 8.2–8.6 are supported; PHP has no
+LTS designation. Update dependencies with `composer update assinafy/php-sdk --with-all-dependencies`:
+Guzzle now requires `^7.17.0 || ^8.6.0`, including the PHP 8.6 promise-state compatibility fix.
+
+Scheduled sends, observers, signer capacities and notification history require the corresponding
+routes on your selected API deployment. See [Scheduled sends](docs/SCHEDULED_SENDS.md) and
+[Signer delivery](docs/SIGNER_DELIVERY.md) for complete payloads. OAuth needs `documents:write`
+even to list scheduled sends; observers are unavailable to marketplace OAuth applications.
+
+Signer updates can explicitly clear contact/government-ID fields with null. Omitted keys retain
+their values. `sign_as` is now preserved by assignment normalization and the upload workflow;
+its value must be one of `AssignmentResource::SIGNER_CAPACITIES` or null (plain signing).
+Email/WhatsApp verification precedes terms acceptance. Set name/government ID on the workspace
+signer before assignment creation; `confirmData()` accepts contact information and terms only.
+The SDK User-Agent is `Assinafy-PHP-SDK/v2.10.0`.
 
 ## Upgrading to 2.9.2
 

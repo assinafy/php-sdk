@@ -220,11 +220,11 @@ final class AssinafyClientTest extends TestCase
         $http->queueJson(200, ['id' => 'doc1', 'status' => DocumentResource::STATUS_METADATA_READY]);
         $http->queueJson(200, ['id' => 'assignment1']);
         try {
-            $client->uploadAndRequestSignatures($pdfPath, [['id' => 'signer1', 'embedded' => true]]);
+            $client->uploadAndRequestSignatures($pdfPath, [['id' => 'signer1', 'sign_as' => 'Witness', 'embedded' => true]]);
         } finally {
             unlink($pdfPath);
         }
-        $this->assertSame([['id' => 'signer1', 'embedded' => true]], $http->lastCall()['body']['signers']);
+        $this->assertSame([['id' => 'signer1', 'sign_as' => 'Witness', 'embedded' => true]], $http->lastCall()['body']['signers']);
     }
 
     public function testBiometricWorkflowRequiresAnExistingSignerBeforeUploading(): void
@@ -281,6 +281,7 @@ final class AssinafyClientTest extends TestCase
     {
         $cases = [
             ['   '],
+            [['id' => 'signer', 'sign_as' => 'witness']],
             [['full_name' => 'Name', 'email' => 'valid@example.test', 'verification_method' => 'SMS']],
             [[
                 'full_name' => 'Name',

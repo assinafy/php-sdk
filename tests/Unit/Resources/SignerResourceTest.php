@@ -147,6 +147,14 @@ final class SignerResourceTest extends TestCase
         $this->assertSame(['government_id' => '39053344705'], $this->http->lastCall()['body']);
     }
 
+    public function testUpdateCanClearOptionalContactFields(): void
+    {
+        $this->http->queueJson(200, ['id' => 's1']);
+        $changes = ['email' => null, 'whatsapp_phone_number' => null, 'government_id' => null];
+        $this->signers->update('s1', $changes);
+        $this->assertSame($changes, $this->http->lastCall()['body']);
+    }
+
     public function testUpdateRejectsEmptyGovernmentId(): void
     {
         $this->expectException(ValidationException::class);

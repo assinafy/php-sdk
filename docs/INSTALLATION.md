@@ -2,14 +2,14 @@
 
 ## Requirements
 
-- PHP 8.2, 8.3, 8.4, or 8.5
+- PHP 8.2, 8.3, 8.4, 8.5, or 8.6
 - Composer 2
 - The PHP `json` and `mbstring` extensions
 - TLS 1.2 or newer (the API refuses TLS 1.0 and 1.1)
 - TLS trust roots (CA certificates) suitable for HTTPS API requests
 
 PHP uses annually supported release branches rather than an LTS designation. The
-SDK tests every currently supported branch; use PHP 8.5 for new deployments.
+SDK tests every currently supported branch; use PHP 8.6 for new deployments.
 
 The SDK includes Guzzle as its default HTTP transport. Applications do not need to
 install a separate HTTP client. The default client enforces TLS 1.2 or newer with both cURL
@@ -28,13 +28,13 @@ composer require assinafy/php-sdk
 That resolves to the current 2.x release. Pin the constraint explicitly if you prefer:
 
 ```bash
-composer require assinafy/php-sdk:^2.9
+composer require assinafy/php-sdk:^2.10
 ```
 
 To install the version described by this documentation:
 
 ```bash
-composer require assinafy/php-sdk:2.9.2
+composer require assinafy/php-sdk:2.10.0
 ```
 
 Each `vMAJOR.MINOR.PATCH` tag also publishes versioned ZIP and tar.gz packages plus SHA-256

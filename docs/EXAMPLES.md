@@ -754,9 +754,9 @@ $publicClient->documents()->sendToken(
 );
 ```
 
-The successful request asks Assinafy to deliver the one-time access code; it does not return that
+The successful request asks Assinafy to resend the existing signing link and access code; it does not return that
 code. Read it from the assigned signer's controlled inbox. The assignment's `signing_urls` expose
-only signer IDs and URLs; a URL path segment is not the one-time access code.
+only signer IDs and URLs; a URL path segment is not the signer access code.
 
 ## Signer-facing flow
 
@@ -774,11 +774,11 @@ $assignmentId = requiredEnv('ASSINAFY_TEST_ASSIGNMENT_ID');
 $session = $signerClient->signerSession();
 
 $signerProfile = $session->self($accessCode);
-$session->acceptTerms($accessCode);
 $session->verifyCode(
     $accessCode,
     requiredEnv('ASSINAFY_TEST_VERIFICATION_CODE'),
 );
+$session->acceptTerms($accessCode);
 ```
 
 `acceptTerms()` sends `signer-access-code` in the query and deliberately sends no request body.
@@ -790,7 +790,6 @@ $confirmedSigner = $session->confirmData(
     documentId: $documentId,
     accessCode: $accessCode,
     data: [
-        'full_name' => 'Sandbox Signer',
         'email' => requiredEnv('ASSINAFY_TEST_SIGNER_EMAIL'),
         'has_accepted_terms' => true,
     ],
@@ -800,7 +799,16 @@ $currentDocument = $session->currentDocument($accessCode);
 $session->sign($documentId, $assignmentId, $accessCode, []);
 ```
 
-Collect assignments accept field entries using the API's camelCase field names:
+Collect assignments require both saved images before signing, even without an initial field:
+
+```php
+$session->uploadSignature($accessCode, 'signature', file_get_contents('signature.png'));
+$session->uploadSignature($accessCode, 'initial', file_get_contents('initial.png'));
+```
+
+Submit field entries using the API's camelCase field names. Optional/read-only omissions are filled
+by the server; signature, initial and signatureDate rendering uses stored images/date. Required
+items still need a nonempty submitted value (for example, `signed` for a signature item):
 
 ```php
 $session->sign($documentId, $assignmentId, $accessCode, [
@@ -813,8 +821,8 @@ $session->sign($documentId, $assignmentId, $accessCode, [
 ]);
 ```
 
-For a DigitalCertificate assignment, `confirmData()` also needs the signer's `government_id` and
-`has_accepted_terms: true` before `currentDocument()`. The certificate completion routes have no
+For a DigitalCertificate assignment, set `government_id` on the workspace signer before assignment
+creation, then send `has_accepted_terms: true` to `confirmData()` before `currentDocument()`. The certificate completion routes have no
 published wire contract and are not implemented by this SDK.
 
 Signer document methods use the same query authentication, including search and download:

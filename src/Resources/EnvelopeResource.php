@@ -216,6 +216,52 @@ class EnvelopeResource extends AbstractResource
         )->getData() ?? []);
     }
 
+    /**
+     * POST /accounts/{accountId}/envelopes/{envelopeId}/signers/{signerId}/estimate-resend-cost.
+     * API key or OAuth documents:write. No body/query; sends and charges nothing.
+     * Request: estimateResendCost('envelope-id', 'signer-id'). Response: ['total' => 0,
+     * 'breakdown' => [['code' => 'Email', 'name' => 'Email', 'cost' => 0]],
+     * 'credit_balance' => 20, 'has_sufficient_credits' => true].
+     * Prices one reminder for the whole envelope; does not check resend eligibility or cooldown.
+     * @param string $envelopeId existing envelope ID
+     * @param string $signerId signer belonging to that envelope
+     * @return array<string, mixed> reminder estimate
+     */
+    public function estimateResendCost(string $envelopeId, string $signerId): array
+    {
+        return $this->extractData($this->httpClient->post(
+            $this->envelopePath($envelopeId) . '/signers/' . $this->pathSegment($signerId, 'signer ID')
+            . '/estimate-resend-cost'
+        )->getData() ?? []);
+    }
+
+    /**
+     * POST /accounts/{accountId}/scheduled-sends. API key or OAuth documents:write; Envelopes feature.
+     * Documents must be ready and unassigned. Request: ['name' => 'Agreement',
+     * 'signers' => [['id' => 'signer-id']], 'documents' => [['id' => 'document-id',
+     * 'signer_ids' => ['signer-id']]], 'send_at' => '2027-01-02T12:00:00Z'].
+     * Response: ['resource' => 'scheduled_send', 'id' => 'send-id', 'type' => 'envelope',
+     * 'document_ids' => ['document-id'], 'status' => 'pending', 'send_at' => '2027-01-02T12:00:00Z',
+     * 'assignment_id' => null, 'envelope_id' => null, 'failure_reason' => null,
+     * 'created_at' => '2027-01-01T12:00:00Z', 'processed_at' => null].
+     * Nothing is created, sent or charged now. send_at must be 1 hour–90 days ahead;
+     * each expiration must be at least 2 hours later. No idempotency key is supported.
+     * @param array<string, mixed> $data EnvelopeCreateRequest, including optional max_total_credits
+     * @param string|int $sendAt ISO 8601 time (no offset means UTC) or Unix seconds
+     * @return array<string, mixed> scheduled send; see docs/SCHEDULED_SENDS.md
+     */
+    public function schedule(#[\SensitiveParameter] array $data, string|int $sendAt): array
+    {
+        $this->assertScheduledSendAt($sendAt);
+        $data = $this->creationPayload($data);
+        $data['send_at'] = $sendAt;
+
+        return $this->extractData($this->httpClient->post(
+            $this->accountPath('scheduled-sends'),
+            $data
+        )->getData() ?? []);
+    }
+
     private function envelopePath(string $envelopeId): string
     {
         return $this->accountPath('envelopes/' . $this->pathSegment($envelopeId, 'envelope ID'));

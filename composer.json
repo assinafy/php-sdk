@@ -14,7 +14,7 @@
         "php": "^8.2",
         "ext-json": "*",
         "ext-mbstring": "*",
-        "guzzlehttp/guzzle": "^7.15.2 || ^8.0.2",
+        "guzzlehttp/guzzle": "^7.17.0 || ^8.6.0",
         "psr/log": "^1.1 || ^2.0 || ^3.0"
     },
     "require-dev": {

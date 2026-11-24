@@ -2,7 +2,7 @@
 
 *Português · [Read in English](README.en.md)*
 
-Cliente PHP 8.2–8.5, independente de framework, para a [API Assinafy v1](https://api.assinafy.com.br/v1/docs).
+Cliente PHP 8.2–8.6, independente de framework, para a [API Assinafy v1](https://api.assinafy.com.br/v1/docs).
 A [referência completa](docs/API_REFERENCE.md) documenta cada método, autenticação, pré-condição e
 payload; veja também [OAuth](docs/OAUTH.md), [exemplos](docs/EXAMPLES.md) e [instalação](docs/INSTALLATION.md).
 
@@ -12,7 +12,7 @@ payload; veja também [OAuth](docs/OAUTH.md), [exemplos](docs/EXAMPLES.md) e [in
 composer require assinafy/php-sdk
 ```
 
-PHP não possui edição LTS. O SDK suporta PHP 8.2–8.5 e recomenda PHP 8.5 para projetos novos.
+PHP não possui edição LTS. O SDK suporta PHP 8.2–8.6 e recomenda PHP 8.6 para projetos novos.
 Use TLS 1.2 ou superior e carregue segredos pelo ambiente ou por um gerenciador de segredos.
 
 ```php
@@ -80,10 +80,10 @@ $assignmentId = $assignment['id'];
 $public = AssinafyClient::forAuth(Configuration::SANDBOX_BASE_URL);
 $session = $public->signerSession();
 $accessCode = (string) getenv('ASSINAFY_SIGNER_ACCESS_CODE');
-$session->acceptTerms($accessCode);
 $session->verifyCode($accessCode, (string) getenv('ASSINAFY_VERIFICATION_CODE'));
+$session->acceptTerms($accessCode);
 $session->confirmData($documentId, $accessCode, [
-    'full_name' => 'Signatário de exemplo', 'email' => $email, 'has_accepted_terms' => true,
+    'email' => $email, 'has_accepted_terms' => true,
 ]);
 $session->sign($documentId, $assignmentId, $accessCode, []); // atribuição virtual
 
@@ -114,7 +114,7 @@ ambos seleciona Email. Etapas, quando usadas, devem ser contíguas a partir de 1
 | Verificação | Notificação | Requisitos principais |
 | --- | --- | --- |
 | `Email` | `Email` | Email cadastrado; sem custo de notificação |
-| `Whatsapp` | `Whatsapp` | Telefone E.164, plano compatível; 0,45 crédito |
+| `Whatsapp` | `Whatsapp` | Telefone E.164, plano compatível; consulte a estimativa |
 | `IdDocumentFaceMatchBasic` | `Email` ou `Whatsapp` | Recurso biométrico, CPF válido e consentimento explícito |
 | `DigitalCertificate` | `Email` ou `Whatsapp` | `virtual`, recurso habilitado, CPF ou CNPJ válido e signatário sozinho na etapa |
 
@@ -126,7 +126,8 @@ O custo do certificado digital vem de `estimateCost()`, além da notificação, 
 
 Em `collect`, obtenha campos com `fields()->list(includeStandard: true)` e envie `entries` com
 `page_id`, `signer_id`, `field_id` e `display_settings`. Os valores finais usam `itemId`, `fieldId`,
-`pageId` e `value`. As coordenadas são pixels da imagem da página a 150 DPI.
+`pageId` e `value`. Salve imagens `signature` e `initial` antes de assinar, mesmo sem campo de rubrica.
+As coordenadas são pixels da imagem da página a 150 DPI.
 
 Templates criados pela API começam com função Editor. Configure funções e campos na interface web,
 depois use `documents()->estimateCostFromTemplate()` e `createFromTemplate()`.
@@ -135,6 +136,10 @@ Envelopes agrupam documentos com uma única jornada por signatário: veja [envel
 Para incorporar a assinatura, configure origens e use `embeddedSigning()->createSession()`;
 veja [assinatura incorporada](docs/EMBEDDED_SIGNING.md). [Preferências e políticas](docs/WORKSPACE.md)
 e [entrega de cópias certificadas](docs/SIGNER_DELIVERY.md) descrevem os métodos complementares.
+
+Agende solicitações com `assignments()->schedule()` ou `envelopes()->schedule()` e gerencie-as por
+`scheduledSends()`: veja [agendamentos](docs/SCHEDULED_SENDS.md). [Entrega](docs/SIGNER_DELIVERY.md)
+também cobre observadores, qualidade do signatário (`sign_as`) e histórico de notificações.
 
 ## Contratos, webhooks e OAuth
 

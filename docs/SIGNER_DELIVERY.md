@@ -1,4 +1,4 @@
-# Signer branding and certified copies
+# Signer delivery, capacities and observers
 
 Use `$client->signerSession()` and `$client->signerDocuments()` with a public client, for example
 `AssinafyClient::forAuth(Configuration::DEFAULT_BASE_URL)`. These routes use a signer access code
@@ -100,3 +100,109 @@ $result = [
     'sent_to' => '+55******0001',
 ];
 ```
+
+## Signer capacity on the certificate
+
+The following workspace methods are published by the
+[staging API](https://api.angry-pisco.stage.assinafy.com.br/v1/docs); the selected deployment must
+support them. They do not use a signer access code.
+
+Pass `sign_as` in each signer to `assignments()->create()`, `estimateCost()` or `schedule()`, or
+in the signer options of `uploadAndRequestSignatures()`. For example:
+
+```php
+$signers = [['id' => 'signer-id', 'sign_as' => 'Witness']];
+$estimate = $client->assignments()->estimateCost('document-id', $signers);
+$assignment = $client->assignments()->create('document-id', $signers);
+$capacities = $client->assignments()->signerCapacities('document-id');
+// SDK response:
+$capacities = [['signer_id' => 'signer-id', 'sign_as' => 'Witness']];
+```
+
+`signerCapacities(string $documentId): array` sends
+`GET /v1/documents/{documentId}/signer-capacities`, no body/query, with workspace credentials
+or OAuth `documents:read`. It returns `[]` before assignment and otherwise follows signer order.
+Capacity is fixed at assignment creation, appears on the certificate row, and does not change
+verification, signing order or cost. It is absent from the ordinary assignment and webhook bodies.
+Omitting it or sending null means `Sign`.
+
+`AssignmentResource::SIGNER_CAPACITIES` contains the supported case-sensitive values:
+`Sign`, `Approve`, `Acknowledge`, `Party`, `Witness`, `Intervening`, `Receipt`,
+`IssuerEndorserGuarantor`, `IssuerEndorserGuarantorSurety`, `Surety`, `PartySurety`,
+`JointDebtor`, `PartyJointDebtor`, `ContractingParty`, `ContractedParty`, `Landlord`, `Tenant`,
+`Buyer`, `Seller`, `AttorneyInFact`, `LegalRepresentative`, `Employer`, `Employee`.
+
+## Notification history
+
+`assignments()->notificationHistory(string $documentId): array` sends
+`GET /v1/documents/{documentId}/notification-history`, no body/query. Use workspace credentials
+or OAuth `documents:read`. Before assignment it returns `[]`; otherwise:
+
+```php
+[
+    ['signer_id' => 'signer-id', 'notification_history' => [
+        [
+            'event' => 'signature_request',
+            'status' => 'sent',
+            'error_code' => null,
+            'error_message' => null,
+            'sent_at' => '2027-01-02T12:00:00Z',
+            'failed_at' => null,
+            'delivered_at' => null,
+            'opened_at' => null,
+        ],
+    ]],
+]
+```
+
+`status` is the furthest stage: `sent`, `delivered`, `opened` or `failed`. Delivery/open timestamps
+are nullable; the SDK retains them when returned. An open can mean an email open/click or a
+WhatsApp read and is not proof that a person read the document. A failure can supply localized
+`error_message` and `error_code`: `MailboxFull`, `AddressNotFound`, `AddressSuppressed`,
+`ContentRejected`, `MarkedAsSpam`, `NotOnWhatsapp`, `RecipientRestricted`, `NotSent` or `Unknown`.
+Do not log these records as general diagnostics; they may contain personal data.
+
+## Document observers
+
+`documents()->watchers(string $documentId): array` sends `GET /v1/documents/{documentId}/watchers`,
+no body/query. `setWatchers(string $documentId, array $watcherIds): array` sends `PUT` on the same
+path with `['watcher_ids' => ['contact-id']]`. These methods require an API key or user-session
+Bearer; marketplace OAuth cannot use them.
+
+```php
+$watchers = $client->documents()->setWatchers('document-id', ['contact-id']);
+// Both methods return complete contact records:
+$watchers = [[
+    'resource' => 'signer', 'id' => 'contact-id', 'full_name' => 'Example Observer',
+    'email' => 'observer@example.com', 'whatsapp_phone_number' => null,
+    'government_id' => null, 'has_accepted_terms' => false,
+]];
+$client->documents()->setWatchers('document-id', []); // Clear all observers.
+```
+
+Up to ten distinct existing workspace contacts with email addresses may observe an unfinished
+document. The SDK deduplicates/reindexes IDs before sending. Reading follows the saved order and
+omits deleted contacts. Observers receive an email when the document expires, is declined or is
+signed by everyone; it contains the document/sender names, with no link or attachment. Workspace
+notification preferences do not suppress these messages. Updating a closed document is refused.
+
+## Envelope reminder pricing
+
+`envelopes()->estimateResendCost(string $envelopeId, string $signerId): array` sends
+`POST /v1/accounts/{accountId}/envelopes/{envelopeId}/signers/{signerId}/estimate-resend-cost`,
+no body/query, using workspace credentials or OAuth `documents:write`.
+
+```php
+$estimate = $client->envelopes()->estimateResendCost('envelope-id', 'signer-id');
+// SDK response:
+$estimate = [
+    'total' => 0,
+    'breakdown' => [['code' => 'Email', 'name' => 'Email', 'cost' => 0]],
+    'credit_balance' => 20,
+    'has_sufficient_credits' => true,
+];
+```
+
+The estimate prices one reminder for the whole envelope and neither sends nor charges. It does
+not check cooldown or eligibility; `resend()` can still refuse. Use returned prices for paid
+channels. Document and envelope reminders share the two-minute cooldown and ten-per-day limit.

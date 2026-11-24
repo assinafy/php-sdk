@@ -235,6 +235,14 @@ abstract class AbstractResource
         ], $filters);
     }
 
+    /** Validate syntax locally; the server checks the scheduling window against its clock. */
+    protected function assertScheduledSendAt(string|int $sendAt): void
+    {
+        if (is_string($sendAt) && \Assinafy\SDK\Support\Iso8601::reasonInvalid($sendAt) !== null) {
+            throw new ValidationException('Scheduled send time must be ISO 8601 or Unix seconds');
+        }
+    }
+
     /**
      * Build the query shared by the account and cross-account KPI endpoints.
      *

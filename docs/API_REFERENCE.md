@@ -4,15 +4,16 @@ This reference maps every public resource method in this SDK to the Assinafy API
 
 - <https://api.assinafy.com.br/v1/docs>
 - <https://api.assinafy.com.br/v1/docs/openapi.json>
+- <https://api.angry-pisco.stage.assinafy.com.br/v1/docs>
 
-This reference describes SDK version 2.9.2. Install published releases with
+This reference describes SDK version 2.10.0. Install published releases with
 `composer require assinafy/php-sdk` and use the documentation shipped with the selected tag.
 See [INSTALLATION.md](INSTALLATION.md) for setup.
 
 The resource tables and focused references cover the production API operations, including
 [marketplace OAuth](#marketplace-oauth-oauthresource), [envelopes](ENVELOPES.md),
 [embedded signing](EMBEDDED_SIGNING.md), [workspace settings](WORKSPACE.md), and
-[signer delivery](SIGNER_DELIVERY.md). Working template-management routes and legacy social URL
+[signer delivery](SIGNER_DELIVERY.md) and [scheduled sends](SCHEDULED_SENDS.md). Working template-management routes and legacy social URL
 builders outside OpenAPI remain available.
 
 Production: `https://api.assinafy.com.br/v1`; sandbox: `https://sandbox.assinafy.com.br/v1`.
@@ -115,7 +116,7 @@ with `Retry-After` (seconds). The SDK never retries automatically; on `ApiExcept
 | Public send-token body | The operation requires `{ "recipient": "...", "channel": "email" }` — both mandatory, with `channel` restricted to the enum `["email"]`. The recipient must identify a signer assigned to the document. |
 | Assignment account context | `GET /assignments` requires the camelCase `accountId` query parameter in addition to the documented pagination parameters. The SDK supplies it from `Configuration`. |
 | Signer access-code name | The SDK sends the OpenAPI query name `signer-access-code`; generated endpoint Markdown calls it `access_code`. |
-| Signer access-code acquisition | The one-time code is delivered to the assigned signer's inbox through `sendToken()`. Assignment `signing_urls` contain no access-code field and must not be parsed as one. |
+| Signer access-code acquisition | `sendToken()` resends the existing signing link and access code to the assigned signer; it does not mint a new code. Assignment `signing_urls` contain no access-code field and must not be parsed as one. |
 | Notification preferences | GET and PUT `/users/self/notification-preferences` return the complete boolean map in both environments. |
 | Ordinary assignment notifications | At most one notification method is allowed. For Email/WhatsApp verification, a non-empty notification must match; supplying only one side infers the other, omitting both defaults to Email, and an explicit empty list remains empty. `DigitalCertificate` and `IdDocumentFaceMatchBasic` accept either channel. |
 | Template assignment notifications | Template endpoints accept notification arrays without the ordinary-assignment max-one/coupling checks. The SDK preserves the supplied array. |
@@ -123,7 +124,7 @@ with `Retry-After` (seconds). The SDK never retries automatically; on `ApiExcept
 | Webhook URL operations | New and changed webhook URLs require HTTPS. `listEndpoints($url)` and `deleteEndpointByUrl($url)` still accept an exact stored HTTP URL so legacy endpoints can be found or removed. |
 | Webhook signing secret | A signed endpoint create response includes `secret`. OAuth applications must persist it then because they cannot read it later; with `webhooks:write` they may rotate it and must store the replacement immediately. API-key/user-session clients can use `endpointSecret()`. |
 | Digital-certificate assignment | `DigitalCertificate` requires `method: virtual`, the account feature, a valid signer CPF or CNPJ in `government_id`, and an isolated signing step. The SDK rejects ordinary `collect` calls with stable validation code `digital_certificate_requires_virtual_assignment`. Template requests are forwarded; the API returns `400` when placed signer fields make the generated assignment `collect`. |
-| Digital-certificate signer gate | Call `confirmData()` with `has_accepted_terms: true` before `GET /sign`. The confirm-data schema lists only `full_name`, `email`, and `government_id`; the `GET /sign` narrative documents `has_accepted_terms` as part of this body, which is where the SDK sends it. |
+| Digital-certificate signer gate | Call `confirmData()` with `has_accepted_terms: true` before `GET /sign`. The body accepts `email`, `whatsapp_phone_number` and `has_accepted_terms`; name and government ID must be set on the workspace signer before assignment creation. |
 | Template management | `TemplateResource::create()`, `get()`, `update()`, `delete()`, and `downloadPage()` use service routes absent from OpenAPI. They are marked **undocumented** below and may change independently of the specification. |
 | OAuth start/callback | `GET /auth/authenticate` and `GET /login-callback` are absent from OpenAPI. The SDK retains URL builders for legacy social authentication. Marketplace OAuth uses the authorization server described below. |
 | Signer document download | The SDK requires and sends a signer access code even though OpenAPI marks the operation public. |
@@ -150,7 +151,7 @@ parameters, full PHP request and response examples, and binary media types:
 
 | Resource | Methods | Reference |
 | --- | --- | --- |
-| `EnvelopeResource` | `list`, `get`, `create`, `estimateCost`, `update`, `delete`, `activities`, `download`, `cancel`, `resend`, `addDocument`, `removeDocument` | [Envelopes](ENVELOPES.md) |
+| `EnvelopeResource` | `list`, `get`, `create`, `estimateCost`, `update`, `delete`, `activities`, `download`, `cancel`, `resend`, `addDocument`, `removeDocument`, `schedule`, `estimateResendCost` | [Envelopes](ENVELOPES.md), [scheduling](SCHEDULED_SENDS.md), [reminder estimates](SIGNER_DELIVERY.md#envelope-reminder-pricing) |
 | `EmbeddedSigningResource` | `createSession`, `exchangeSession` | [Embedded signing](EMBEDDED_SIGNING.md) |
 | `AccountResource` | `usage`, `notificationPolicy`, `updateNotificationPolicy`, `embedOrigins`, `addEmbedOrigin`, `updateEmbedOrigin`, `deleteEmbedOrigin` | [Workspace settings](WORKSPACE.md) |
 | `UserResource` | `pushPreferences`, `updatePushPreferences` | [Push preferences](WORKSPACE.md#personal-push-preferences) |
@@ -164,6 +165,17 @@ remain authoritative and do not reserve resources. Template creation's optional 
 scoped to the template and has no expiry; reusing it returns the original document, regardless of
 body changes. A still-running request returns `409 IdempotencyKeyInUse`; a deleted document returns
 `404`. The SDK never retries automatically.
+
+### Scheduled sends and signer delivery
+
+These additions require support in the selected deployment; their routes are published in the staging contract.
+
+| Resource | Methods | Complete request/response and preconditions |
+|---|---|---|
+| `ScheduledSendResource` | `list`, `cancel`, `sendNow` | [Scheduled sends](SCHEDULED_SENDS.md) |
+| `AssignmentResource` | `schedule` | [Assignment schedules](SCHEDULED_SENDS.md#schedule-an-assignment) |
+| `AssignmentResource` | `signerCapacities`, `notificationHistory` | [Signer delivery](SIGNER_DELIVERY.md#signer-capacity-on-the-certificate) |
+| `DocumentResource` | `watchers`, `setWatchers` | [Observers](SIGNER_DELIVERY.md#document-observers) |
 
 ## Core, transport, and support API catalog
 
@@ -184,6 +196,7 @@ resources through `AssinafyClient` instead.
 | `forBearer(string $accessToken, string $accountId, string $baseUrl = Configuration::DEFAULT_BASE_URL): self` | Globally Bearer-authenticated workspace client. |
 | `accounts(): AccountResource` | Lazy, cached account resource. |
 | `contracts(): ContractResource` | Lazy, cached document-contract resource. |
+| `scheduledSends(): ScheduledSendResource` | Lazy, cached [scheduled-send resource](SCHEDULED_SENDS.md). |
 | `envelopes(): EnvelopeResource` | Lazy, cached [envelope resource](ENVELOPES.md). |
 | `embeddedSigning(): EmbeddedSigningResource` | Lazy, cached [embedded signing resource](EMBEDDED_SIGNING.md). |
 | `documents(): DocumentResource` | Lazy, cached document resource. |
@@ -380,11 +393,11 @@ addition is the certificate signature itself.
 | Per signer | Credits |
 |---|---|
 | Email verification and notification | 0 |
-| WhatsApp verification and notification | 0.45 |
+| WhatsApp verification and notification | Plan-dependent; use the estimate breakdown |
 | DigitalCertificate signature | Current `unit_cost` from the `SignatureDigitalCertificate` estimate breakdown, charged per signature on top of notification |
 
 Notification cost is charged per signer, on top of the document cost: two signers notified by
-email cost 0 credits, two notified by WhatsApp cost 0.9. Use `estimateCost()` to preview the exact
+email cost 0 credits; paid-channel prices depend on the workspace plan. Use `estimateCost()` for the exact
 total before creating an assignment.
 
 By default every signer is notified as soon as the assignment is created. When `signers[].step`
@@ -400,6 +413,9 @@ Certificate completion operates on the signer's virtual item; the ordinary signi
 refuses a certificate signer, so a placed-field `collect` assignment cannot be completed.
 
 ### Assignment creation body
+
+Each signer may include `sign_as` (nullable, default `Sign`); see the complete
+[capacity values and read method](SIGNER_DELIVERY.md#signer-capacity-on-the-certificate).
 
 ```text
 method*                 "virtual" | "collect"
@@ -648,6 +664,10 @@ template without those fields can use certificate signing. The service accepts t
 notification arrays without the
 ordinary-assignment max-one/coupling rules, so the SDK preserves the supplied array.
 
+Certified documents cannot be deleted. The deletion route returns 400 for `certificated`; consult
+`statuses()` for other state restrictions. Completing a signing test in a shared workspace therefore
+leaves a certified record. Use an isolated disposable workspace when permanent cleanup is required.
+
 ### Document helper methods
 
 These public methods perform local/composite behavior rather than map one-to-one to an additional API operation.
@@ -784,6 +804,9 @@ channel on an in-flight request rotates its access and verification codes, inval
 links/OTPs. Call the assignment resend endpoint after such an update. `full_name` remains freely
 editable.
 
+Contact updates accept null to clear `email`, `whatsapp_phone_number` or `government_id`; omitted keys
+remain unchanged. The channel-change rules above also apply to clearing contact information.
+
 ## Signer session (`SignerSessionResource`)
 
 These methods act as the end signer and must not rely on the workspace API key. The SDK sends
@@ -794,9 +817,9 @@ signer's inbox after `sendToken()`. Assignment `signing_urls` do not contain the
 | SDK method | Official operation | Auth | Request | SDK success return | Statuses |
 |---|---|---|---|---|---|
 | `self($accessCode)` | [`GET /v1/signers/self`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fsigners%2Fself) | Signer | Access code query. | Unwrapped `SignerSelf`. | `200; 401, 500` |
-| `acceptTerms($accessCode)` | [`PUT /v1/signers/accept-terms`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Fsigners%2Faccept-terms) | Signer | `signer-access-code` query; no request body. | Success envelope fields. | `200; 401, 500` |
+| `acceptTerms($accessCode)` | [`PUT /v1/signers/accept-terms`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Fsigners%2Faccept-terms) | Signer | `signer-access-code` query; no request body. Verify Email/WhatsApp first. | Success envelope fields. | `200; 401, 500` |
 | `verifyCode($accessCode, $verificationCode)` | [`POST /v1/verify`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Fverify) | Signer | Access code query plus required JSON `{ "verification-code": string }`. | Success envelope fields. | `200; 400, 401, 500` |
-| `confirmData($documentId, $accessCode, $data)` | [`PUT /v1/documents/{documentId}/signers/confirm-data`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fsigners%2Fconfirm-data) | Signer | Required JSON object. Schema lists optional `full_name`, `email`, `government_id`; `GET /sign` prose additionally requires `has_accepted_terms: true` in this body for DigitalCertificate, which is where the SDK sends it. Access code query. | Unwrapped `Signer`. | `200; 401, 500` |
+| `confirmData($documentId, $accessCode, $data)` | [`PUT /v1/documents/{documentId}/signers/confirm-data`](https://api.assinafy.com.br/v1/docs/markdown?method=put&path=%2Fv1%2Fdocuments%2F%7BdocumentId%7D%2Fsigners%2Fconfirm-data) | Signer | Required JSON object. Optional `email`, `whatsapp_phone_number`, `has_accepted_terms`; DigitalCertificate requires `has_accepted_terms: true` before opening the document. Name and government ID are ignored here. Access code query. | Unwrapped `Signer`. | `200; 401, 500` |
 | `uploadSignature($accessCode, $type, $imageBytes, $mimeType, $reuse)` | [`POST /v1/signature`](https://api.assinafy.com.br/v1/docs/markdown?method=post&path=%2Fv1%2Fsignature) | Signer | Access code query; `type` (`signature` or `initial`) and optional `reuse: boolean`; required raw image body. OpenAPI lists PNG; SDK also accepts JPEG for runtime compatibility. | Success envelope fields. | `200; 401, 500` |
 | `downloadSignature($accessCode, $type)` | [`GET /v1/signature/{signatureType}`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fsignature%2F%7BsignatureType%7D) | Signer | Signature type path plus access code query. | Raw image bytes. | `200; 401, 404, 500` |
 | `currentDocument($accessCode, $hasAcceptedTerms = null, $documentId = null, $expand = null)` | [`GET /v1/sign`](https://api.assinafy.com.br/v1/docs/markdown?method=get&path=%2Fv1%2Fsign) | Signer | Access code query; optional `has_accepted_terms: boolean`, `document_id` (another assigned envelope member), and `expand=envelope`. For DigitalCertificate this query is too late to satisfy the gate; call `confirmData(..., ['has_accepted_terms' => true, ...])` first. | Unwrapped `Document`. | `200; 400, 401, 409, 500` |
@@ -811,7 +834,10 @@ resends preserve live provider sessions. Billing is once at assignment creation,
 While InReview, the signer may view and sign; account review holds certification.
 
 For virtual assignments, call `confirmData()` and then `sign()` with an empty field list. Collect
-assignments pass their completed field entries to `sign()`. This ordinary sign operation cannot
+assignments need both saved signature and initial images, even without an initial field, then pass
+their field entries to `sign()`. Omitted optional/read-only fields are filled by the server; signature,
+initial and signatureDate values come from stored images/date. Required items still need a nonempty
+submitted value before rendering. Verify Email/WhatsApp before accepting terms. This ordinary sign operation cannot
 complete an ICP-Brasil DigitalCertificate signature. The sign-operation prose names `POST /v1/signers/certificate/start` and
 `POST /v1/signers/certificate/complete`; OpenAPI contains no operations describing their payloads.
 The SDK does not implement that Web PKI browser protocol.

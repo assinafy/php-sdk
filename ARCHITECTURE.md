@@ -4,7 +4,7 @@
 
 The Assinafy PHP SDK is a small, synchronous client for the Assinafy v1 API. It uses a facade over focused resource classes, a project-specific HTTP abstraction, PSR-3 logging, strict PHP types, and explicit exception mapping.
 
-The package targets PHP 8.2 through 8.5, the complete supported CI matrix, and implements the
+The package targets PHP 8.2 through 8.6, covered by the GitHub runtime matrix, and implements the
 workspace, document, contract, signer, authentication and webhook operations. The endpoint mapping and operational notes are in
 [docs/API_REFERENCE.md](docs/API_REFERENCE.md).
 
@@ -32,8 +32,11 @@ assinafy-php-sdk/
 │   │   ├── AuthResource.php
 │   │   ├── ContractResource.php
 │   │   ├── DocumentResource.php
+│   │   ├── EmbeddedSigningResource.php
+│   │   ├── EnvelopeResource.php
 │   │   ├── FieldResource.php
 │   │   ├── OAuthResource.php
+│   │   ├── ScheduledSendResource.php
 │   │   ├── SignerDocumentResource.php
 │   │   ├── SignerResource.php
 │   │   ├── SignerSessionResource.php
@@ -53,6 +56,11 @@ assinafy-php-sdk/
 │   ├── EXAMPLES.md
 │   ├── INSTALLATION.md
 │   ├── OAUTH.md
+│   ├── ENVELOPES.md
+│   ├── EMBEDDED_SIGNING.md
+│   ├── SCHEDULED_SENDS.md
+│   ├── SIGNER_DELIVERY.md
+│   ├── WORKSPACE.md
 │   ├── index.php
 │   └── quickstart.php
 ├── composer.json

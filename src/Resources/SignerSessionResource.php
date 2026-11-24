@@ -69,7 +69,7 @@ class SignerSessionResource extends AbstractResource
      *
      * A prerequisite for signing: until this is called, `has_accepted_terms` on
      * {@see self::self()} stays false and the signing routes refuse. Record it once per
-     * signer, not per document.
+     * signer, not per document. Email/WhatsApp verification must succeed first.
      *
      * Request: no body; the credential travels as the `signer-access-code` query parameter.
      *
@@ -139,27 +139,19 @@ class SignerSessionResource extends AbstractResource
     }
 
     /**
-     * Confirm the signer's name, email, government ID, or terms acceptance.
+     * Confirm the signer's contact information and terms acceptance.
      * `PUT /documents/{documentId}/signers/confirm-data?signer-access-code={code}`
      *
-     * The `signer-access-code` is sent as a query parameter, the rest of the data
-     * goes in the JSON body.
-     *
-     * A digital-certificate signer must send `has_accepted_terms: true` here before it
-     * can open the document. The published `/sign` narrative documents the field as part of
-     * the confirm-data body even though the published OpenAPI body schema for this operation
-     * lists only `full_name`, `email` and `government_id`; the SDK forwards it in the JSON
-     * request body.
-     *
-     * The signer confirms the identity details that will be printed on the certificate page.
+     * The access code is a query credential; the body accepts email, whatsapp_phone_number
+     * and has_accepted_terms. Set the name and government ID through the workspace signer
+     * before assignment creation; this endpoint ignores those fields.
+     * DigitalCertificate signers must send has_accepted_terms: true before currentDocument().
      *
      * Request:
      * ```
      * PUT /documents/{documentId}/signers/confirm-data?signer-access-code=<access code>
      * [
-     *   'full_name'          => 'Jane Doe',
      *   'email'              => 'jane@example.com',
-     *   'government_id'      => '11144477735',
      *   'has_accepted_terms' => true,
      * ]
      * ```
@@ -176,7 +168,7 @@ class SignerSessionResource extends AbstractResource
      * ]
      * ```
      *
-     * @param array<string, mixed> $data subset of { full_name, email, government_id,
+     * @param array<string, mixed> $data subset of { email, whatsapp_phone_number,
      *     has_accepted_terms }
      * @return array<string, mixed> the confirmed signer data
      * @throws ValidationException when the document ID or access code is blank
@@ -311,7 +303,8 @@ class SignerSessionResource extends AbstractResource
      * The signer's view of what they have been asked to sign. Requires the access code and
      * a completed {@see self::verifyCode()}. The response mirrors the document shape, plus
      * the signer's `current_signer` and the assignment `items` they must complete — those
-     * `items[].id` values are the `itemId`s {@see self::sign()} expects.
+     * `items[].id` values are the `itemId`s {@see self::sign()} expects. Other participants
+     * have masked contact/identity fields; only this signer's items are returned, without signing_urls.
      *
      * Request: no body; query ['signer-access-code' => '<code>', 'has_accepted_terms' => true,
      * 'document_id' => 'second-document-id', 'expand' => 'envelope']; all but the code are optional.
@@ -434,12 +427,6 @@ class SignerSessionResource extends AbstractResource
      *                 ],
      *             ],
      *         ],
-     *         'signing_urls' => [
-     *             [
-     *                 'signer_id' => 'signer-id',
-     *                 'url' => 'https://app-sandbox.assinafy.com.br/sign/signing-token?email=signer%40example.com',
-     *             ],
-     *         ],
      *     ],
      *     'pages' => [
      *         [
@@ -492,7 +479,11 @@ class SignerSessionResource extends AbstractResource
      * Sign a document with input fields (collect method).
      * `POST /documents/{documentId}/assignments/{assignmentId}?signer-access-code={code}`
      *
-     * The act of signing: submits a value for every assignment item. For virtual assignments
+     * Collect signing requires saved signature and initial images, even without an initial field.
+     * Omitted optional/read-only values are filled by the server. Values for signature, initial
+     * and signatureDate items come from the saved images/date, not the supplied value.
+     * Still send a nonempty value for required items; the API validates it before rendering.
+     * For virtual assignments
      * the signer must first call {@see confirmData()}. Take the three IDs from the
      * `assignment.items` array on {@see self::currentDocument()}.
      *

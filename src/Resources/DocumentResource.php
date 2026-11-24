@@ -399,7 +399,7 @@ class DocumentResource extends AbstractResource
      *
      * Only allowed from a status whose `deletable` flag is true — call
      * {@see self::statuses()} for the authoritative list. A document mid-certification
-     * cannot be removed.
+     * cannot be removed. Certified documents are also retained and cannot be deleted.
      *
      * Request: no body.
      *
@@ -783,7 +783,7 @@ class DocumentResource extends AbstractResource
     }
 
     /**
-     * Request an access token to be sent to a signer through email.
+     * Resend the existing signing link and access code to an assigned signer through email.
      * `PUT /public/documents/{document_id}/send-token` (no auth).
      *
      * Only the `email` channel is supported. Pass {@see SEND_TOKEN_CHANNEL_EMAIL} — arbitrary
@@ -804,6 +804,9 @@ class DocumentResource extends AbstractResource
      * ['recipient' => 'jane@example.com', 'channel' => 'email']
      * ```
      *
+     * The request must be unexpired and the signer in the current step. A resend is limited
+     * to once per two minutes, shared across an envelope (429 with Retry-After). A 200 means
+     * delivery was accepted, not that it reached the inbox. No new access code is minted.
      * The document must be in `pending_signature`; otherwise the API answers
      * `400 "O documento não está com status de assinatura pendente."`
      *
@@ -822,7 +825,7 @@ class DocumentResource extends AbstractResource
      * ]
      * ```
      *
-     * @param string $recipient email address to receive the one-time token
+     * @param string $recipient email address of the assigned signer
      * @param string $channel   delivery channel; only {@see SEND_TOKEN_CHANNEL_EMAIL}
      * @return array<array-key, mixed>
      * @throws ValidationException on an unsupported channel or a malformed recipient
@@ -1549,5 +1552,49 @@ class DocumentResource extends AbstractResource
                 throw new ValidationException('Tag names must be non-empty strings');
             }
         }
+    }
+
+    /**
+     * GET /documents/{documentId}/watchers. No query/body; API key or user-session Bearer only.
+     * Marketplace OAuth cannot manage watchers. Request: watchers('document-id').
+     * Response: [['resource' => 'signer', 'id' => 'signer-id', 'full_name' => 'Example Observer',
+     * 'email' => 'observer@example.com', 'whatsapp_phone_number' => null, 'government_id' => null,
+     * 'has_accepted_terms' => false]]. Deleted contacts are omitted; order follows setWatchers().
+     * @param string $documentId workspace document ID
+     * @return array<int, array<string, mixed>> complete Signer records, or []
+     */
+    public function watchers(string $documentId): array
+    {
+        return $this->extractData($this->httpClient->get(
+            'documents/' . $this->pathSegment($documentId, 'document ID') . '/watchers'
+        )->getData() ?? []);
+    }
+
+    /**
+     * PUT /documents/{documentId}/watchers. API key or user-session Bearer; no marketplace OAuth.
+     * Request: ['watcher_ids' => ['signer-id']]. Response: complete Signer list as in watchers().
+     * Replaces up to 10 workspace contacts with email addresses; [] clears them. The document
+     * must not have ended. They receive an email when declined, expired or fully signed, with
+     * the document and sender names but no link or file. Workspace notification settings do not apply.
+     * @param string $documentId unfinished workspace document ID
+     * @param array<int, mixed> $watcherIds workspace signer/contact IDs; duplicates count once
+     * @return array<int, array<string, mixed>> saved watchers
+     */
+    public function setWatchers(string $documentId, array $watcherIds): array
+    {
+        foreach ($watcherIds as $id) {
+            if (!is_string($id) || trim($id) === '') {
+                throw new ValidationException('Watcher IDs must be non-empty strings');
+            }
+        }
+        $watcherIds = array_values(array_unique($watcherIds));
+        if (count($watcherIds) > 10) {
+            throw new ValidationException('A document takes at most 10 watchers');
+        }
+
+        return $this->extractData($this->httpClient->put(
+            'documents/' . $this->pathSegment($documentId, 'document ID') . '/watchers',
+            ['watcher_ids' => $watcherIds]
+        )->getData() ?? []);
     }
 }

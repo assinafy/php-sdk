@@ -25,7 +25,7 @@ class AssignmentResource extends AbstractResource
 
     /**
      * Signer enters a code received over WhatsApp. Needs `whatsapp_phone_number` and a paid
-     * subscription, and always travels with the WhatsApp notification — 0.45 credits per signer.
+     * subscription, and always travels with the WhatsApp notification; estimate its plan-dependent cost.
      */
     public const VERIFICATION_WHATSAPP = 'Whatsapp';
 
@@ -49,6 +49,14 @@ class AssignmentResource extends AbstractResource
     public const IDENTITY_REVIEW_APPROVED = 'Approved';
     public const IDENTITY_REVIEW_REJECTED = 'Rejected';
 
+    /** Capacity stated by the sender on the certificate page; null defaults to Sign. */
+    public const SIGNER_CAPACITIES = [
+        'Sign', 'Approve', 'Acknowledge', 'Party', 'Witness', 'Intervening', 'Receipt',
+        'IssuerEndorserGuarantor', 'IssuerEndorserGuarantorSurety', 'Surety', 'PartySurety',
+        'JointDebtor', 'PartyJointDebtor', 'ContractingParty', 'ContractedParty', 'Landlord',
+        'Tenant', 'Buyer', 'Seller', 'AttorneyInFact', 'LegalRepresentative', 'Employer', 'Employee',
+    ];
+
     public const VERIFICATION_METHODS = [
         self::VERIFICATION_EMAIL,
         self::VERIFICATION_WHATSAPP,
@@ -61,7 +69,7 @@ class AssignmentResource extends AbstractResource
 
     /**
      * Sends the signing invitation over WhatsApp. Needs `whatsapp_phone_number` and a paid
-     * subscription. 0.45 credits per signer, charged again on every resend.
+     * subscription. The plan-dependent cost is charged again on every resend.
      */
     public const NOTIFICATION_WHATSAPP = 'Whatsapp';
 
@@ -222,7 +230,7 @@ class AssignmentResource extends AbstractResource
      *
      * @param array<int, string|array<string, mixed>> $signers
      *     Either a list of signer IDs (strings) or a list of `{ id, verification_method?,
-     *     notification_methods?, embedded?, step? }` objects. String IDs are normalized to `{ id }`.
+     *     notification_methods?, embedded?, sign_as?, step? }` objects. String IDs are normalized to `{ id }`.
      * @param array<string, mixed> $options
      *     Optional keys: `entries` (required for collect), `message`, `expires_at`, `copy_receivers`,
      *     `max_total_credits` (creation ceiling; 409 CreditCeilingExceeded if exceeded).
@@ -238,29 +246,7 @@ class AssignmentResource extends AbstractResource
         string $method = self::METHOD_VIRTUAL,
         #[\SensitiveParameter] array $options = []
     ): array {
-        $this->assertMethod($method);
-        $this->assertSigners($signers);
-        $this->assertDigitalCertificateMethod($method, $signers);
-        $options = $this->normalizeListOptions($options);
-
-        if ($method === self::METHOD_COLLECT && ($options['entries'] ?? []) === []) {
-            throw new ValidationException('Collect assignments require field entries');
-        }
-        if (isset($options['expires_at'])) {
-            if (!is_string($options['expires_at'])) {
-                throw new ValidationException('Expiration must be an ISO 8601 date-time');
-            }
-            $this->assertDateTime($options['expires_at']);
-        }
-
-        unset($options['method'], $options['signers']);
-        $payload = array_merge(
-            [
-                'method' => $method,
-                'signers' => $this->normalizeSigners($signers),
-            ],
-            $options
-        );
+        $payload = $this->creationPayload($signers, $method, $options);
 
         $documentId = $this->pathSegment($documentId, 'document ID');
         $response = $this->httpClient->post("documents/{$documentId}/assignments", $payload);
@@ -539,7 +525,7 @@ class AssignmentResource extends AbstractResource
      * ```
      *
      * Breakdown items may also carry `quantity` and `unit_cost` (per the published
-     * `CostEstimateBreakdownItem`), e.g. two WhatsApp notifications at 0.45 each.
+     * `CostEstimateBreakdownItem`); use returned prices for the workspace plan.
      *
      * The live-verified resend response uses `total` and `has_sufficient_credits`;
      * the published `CostEstimate` schema describes assignment creation instead.
@@ -864,11 +850,119 @@ class AssignmentResource extends AbstractResource
         return $this->extractData($response->getData() ?? []);
     }
 
+    /**
+     * Schedule an assignment without sending or charging now.
+     * POST /documents/{documentId}/scheduled-sends. API key or OAuth documents:write.
+     * The document must be unassigned and the signers must belong to the workspace.
+     * Request: ['method' => 'virtual', 'signers' => [['id' => 'signer-id', 'sign_as' => 'Witness']],
+     * 'send_at' => '2027-01-02T12:00:00Z', 'expires_at' => '2027-01-03T12:00:00Z'].
+     * Response: ['resource' => 'scheduled_send', 'id' => 'send-id', 'type' => 'assignment',
+     * 'document_ids' => ['document-id'], 'status' => 'pending', 'send_at' => '2027-01-02T12:00:00Z',
+     * 'assignment_id' => null, 'envelope_id' => null, 'failure_reason' => null,
+     * 'created_at' => '2027-01-01T12:00:00Z', 'processed_at' => null].
+     * The server requires send_at 1 hour–90 days ahead and expiration at least 2 hours later.
+     * It rechecks permissions, features and balance when sending. See docs/SCHEDULED_SENDS.md.
+     *
+     * @param string $documentId unassigned document ID
+     * @param array<int, array<string, mixed>|string> $signers same signer descriptions as create()
+     * @param string|int $sendAt ISO 8601 time (no offset means UTC) or Unix seconds
+     * @param string $method virtual or collect
+     * @param array<string, mixed> $options create() options; expires_at also accepts Unix seconds
+     * @return array<string, mixed> scheduled send; no assignment exists yet
+     */
+    public function schedule(
+        string $documentId,
+        #[\SensitiveParameter] array $signers,
+        string|int $sendAt,
+        string $method = self::METHOD_VIRTUAL,
+        #[\SensitiveParameter] array $options = []
+    ): array {
+        $this->assertScheduledSendAt($sendAt);
+        $expiration = $options['expires_at'] ?? null;
+        if (is_int($expiration)) {
+            unset($options['expires_at']);
+        }
+        $payload = $this->creationPayload($signers, $method, $options);
+        if (is_int($expiration)) {
+            $payload['expires_at'] = $expiration;
+        }
+        $payload['send_at'] = $sendAt;
+
+        return $this->extractData($this->httpClient->post(
+            'documents/' . $this->pathSegment($documentId, 'document ID') . '/scheduled-sends',
+            $payload
+        )->getData() ?? []);
+    }
+
+    /**
+     * GET /documents/{documentId}/signer-capacities. API key or OAuth documents:read; no body/query.
+     * Request: signerCapacities('document-id'). Response: [['signer_id' => 'signer-id', 'sign_as' => 'Witness']].
+     * Returns [] before assignment. Order matches the assignment's signers; omitted capacity is Sign.
+     * @param string $documentId workspace document ID
+     * @return array<int, array{signer_id: string, sign_as: string}> signer capacities
+     */
+    public function signerCapacities(string $documentId): array
+    {
+        return $this->extractData($this->httpClient->get(
+            'documents/' . $this->pathSegment($documentId, 'document ID') . '/signer-capacities'
+        )->getData() ?? []);
+    }
+
+    /**
+     * GET /documents/{documentId}/notification-history. API key or OAuth documents:read; no body/query.
+     * Request: notificationHistory('document-id'). Response: [['signer_id' => 'signer-id',
+     * 'notification_history' => [['event' => 'signature_request', 'status' => 'sent',
+     * 'error_code' => null, 'error_message' => null, 'failed_at' => null, 'sent_at' => '2027-01-02T12:00:00Z',
+     * 'delivered_at' => '2027-01-02T12:00:05Z', 'opened_at' => null]]]].
+     * Entries retain all NotificationHistoryEntry fields; delivery/open times are nullable.
+     * Open tracking is a hint, not proof of reading. Returns [] before assignment.
+     * @param string $documentId workspace document ID
+     * @return array<int, array<string, mixed>> signers and delivery history
+     */
+    public function notificationHistory(string $documentId): array
+    {
+        return $this->extractData($this->httpClient->get(
+            'documents/' . $this->pathSegment($documentId, 'document ID') . '/notification-history'
+        )->getData() ?? []);
+    }
+
     private function identityVerificationPath(string $documentId, string $assignmentId, string $signerId): string
     {
         return 'documents/' . $this->pathSegment($documentId, 'document ID')
             . '/assignments/' . $this->pathSegment($assignmentId, 'assignment ID')
             . '/signers/' . $this->pathSegment($signerId, 'signer ID') . '/identity-verification';
+    }
+
+    /**
+     * @param array<int, array<string, mixed>|string> $signers
+     * @param array<string, mixed> $options
+     * @return array<string, mixed>
+     */
+    private function creationPayload(array $signers, string $method, array $options): array
+    {
+        $this->assertMethod($method);
+        $this->assertSigners($signers);
+        $this->assertDigitalCertificateMethod($method, $signers);
+        $options = $this->normalizeListOptions($options);
+
+        if ($method === self::METHOD_COLLECT && ($options['entries'] ?? []) === []) {
+            throw new ValidationException('Collect assignments require field entries');
+        }
+        if (isset($options['expires_at'])) {
+            if (!is_string($options['expires_at'])) {
+                throw new ValidationException('Expiration must be an ISO 8601 date-time');
+            }
+            $this->assertDateTime($options['expires_at']);
+        }
+
+        unset($options['method'], $options['signers']);
+        return array_merge(
+            [
+                'method' => $method,
+                'signers' => $this->normalizeSigners($signers),
+            ],
+            $options
+        );
     }
 
     private function assertMethod(string $method): void
@@ -893,7 +987,7 @@ class AssignmentResource extends AbstractResource
 
     /**
      * Accept either string signer IDs or full signer objects and produce the
-     * `signers: [{ id, verification_method?, notification_methods?, embedded?, step? }]` shape
+     * `signers: [{ id, verification_method?, notification_methods?, embedded?, sign_as?, step? }]` shape
      * documented by the API.
      *
      * @param array<int, mixed> $signers
@@ -978,6 +1072,13 @@ class AssignmentResource extends AbstractResource
                         throw new ValidationException('Signer step must be a positive integer');
                     }
                     $entry['step'] = $signer['step'];
+                }
+
+                if (array_key_exists('sign_as', $signer)) {
+                    if ($signer['sign_as'] !== null && !in_array($signer['sign_as'], self::SIGNER_CAPACITIES, true)) {
+                        throw new ValidationException('Unknown signer capacity');
+                    }
+                    $entry['sign_as'] = $signer['sign_as'];
                 }
 
                 if (array_key_exists('embedded', $signer)) {

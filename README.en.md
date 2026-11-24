@@ -37,7 +37,7 @@ structure, and [Testing](#testing) below describes the quality gate and the live
 
 ## Requirements
 
-- PHP 8.2 through PHP 8.5
+- PHP 8.2 through PHP 8.6
 - `ext-json`
 - `ext-mbstring`
 - Composer 2
@@ -361,7 +361,7 @@ before sending the request.
 | Verification | Allowed notification | Requirements | Credits per signer |
 | --- | --- | --- | --- |
 | `VERIFICATION_EMAIL` | `Email` | An email address on the signer | 0 |
-| `VERIFICATION_WHATSAPP` | `Whatsapp` | `whatsapp_phone_number` and a paid subscription | 0.45 |
+| `VERIFICATION_WHATSAPP` | `Whatsapp` | `whatsapp_phone_number` and a paid subscription | Plan-dependent; use the estimate |
 | `VERIFICATION_ID_DOCUMENT_FACE_MATCH_BASIC` | `Email` or `Whatsapp` | Account ID Document + Face Match feature and valid CPF in `government_id` | Per-signer fee returned by the estimate |
 | `VERIFICATION_DIGITAL_CERTIFICATE` | `Email` or `Whatsapp` | The `virtual` method, the account's Digital Certificate feature (Standard and Pro plans), a valid CPF or CNPJ in `government_id`, and the signer alone in its step | Use the signature price returned by `estimateCost()`, plus its notification |
 
@@ -471,11 +471,11 @@ signing URL, log it, or persist it in plain text.
 $accessCode = (string) getenv('ASSINAFY_SIGNER_ACCESS_CODE');
 
 $profile = $public->signerSession()->self($accessCode);
-$public->signerSession()->acceptTerms($accessCode);
 $public->signerSession()->verifyCode(
     $accessCode,
     (string) getenv('ASSINAFY_VERIFICATION_CODE'),
 );
+$public->signerSession()->acceptTerms($accessCode);
 
 ```
 
@@ -483,7 +483,6 @@ For a virtual assignment, confirm the signer data and finalize with an empty fie
 
 ```php
 $public->signerSession()->confirmData($documentId, $accessCode, [
-    'full_name' => 'Example Signer',
     'email' => 'signer@example.test',
     'has_accepted_terms' => true,
 ]);
@@ -1035,3 +1034,7 @@ and use `embeddedSigning()` for single-use iframe sessions; see [embedded signin
 [Workspace settings](docs/WORKSPACE.md) covers usage, notification policy, push preferences,
 webhook test deliveries and overlapping secret rotation. [Signer delivery](docs/SIGNER_DELIVERY.md)
 covers branding and certified-copy links after completion.
+
+Scheduled assignment/envelope requests and their lifecycle are documented in
+[Scheduled sends](docs/SCHEDULED_SENDS.md). [Signer delivery](docs/SIGNER_DELIVERY.md) covers
+observers, signer capacities, notification history and envelope reminder pricing.

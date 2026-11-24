@@ -27,6 +27,32 @@ final class DocumentResourceTest extends TestCase
         $this->documents = new DocumentResource($this->http, $config);
     }
 
+    public function testWatchersAreReplacedClearedAndReadAsLists(): void
+    {
+        $http = new FakeHttpClient();
+        $documents = new DocumentResource($http, new Configuration('key', 'account'));
+        $watchers = [['id' => 'signer', 'email' => 'observer@example.com']];
+        $http->queueJson(200, $watchers);
+        self::assertSame($watchers, $documents->setWatchers('doc/id', [2 => 'signer', 5 => 'signer']));
+        self::assertSame(['watcher_ids' => ['signer']], $http->lastCall()['body']);
+        self::assertSame('documents/doc%2Fid/watchers', $http->lastCall()['uri']);
+        $http->queueJson(200, []);
+        self::assertSame([], $documents->setWatchers('doc/id', []));
+        self::assertSame(['watcher_ids' => []], $http->lastCall()['body']);
+        $http->queueJson(200, []);
+        self::assertSame([], $documents->watchers('doc/id'));
+        self::assertSame('GET', $http->lastCall()['method']);
+        foreach ([[''], [null], range(1, 11), array_map('strval', range(1, 11))] as $invalid) {
+            $before = count($http->calls);
+            try {
+                $documents->setWatchers('doc', $invalid);
+                self::fail('Invalid watchers accepted');
+            } catch (ValidationException) {
+                self::assertCount($before, $http->calls);
+            }
+        }
+    }
+
     public function testGetCanExpandEnvelopeWithoutChangingDefaultRequest(): void
     {
         $this->http->queueJson(200, ['id' => 'doc', 'envelope_id' => 'env']);

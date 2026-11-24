@@ -23,6 +23,18 @@ final class AssignmentResourceTest extends TestCase
         $this->assignments = new AssignmentResource($this->http, $config);
     }
 
+    public function testSignerCapacityIsPreservedForCreationAndEstimation(): void
+    {
+        foreach (['create', 'estimateCost'] as $operation) {
+            foreach (['Witness', null] as $capacity) {
+                $this->http->queueJson(200, []);
+                $this->assignments->{$operation}('doc', [['id' => 'signer', 'sign_as' => $capacity]]);
+                $this->assertArrayHasKey('sign_as', $this->http->lastCall()['body']['signers'][0]);
+                $this->assertSame($capacity, $this->http->lastCall()['body']['signers'][0]['sign_as']);
+            }
+        }
+    }
+
     public function testEmbeddedSignerFlagReachesTheApi(): void
     {
         $this->http->queueJson(200, ['id' => 'assignment']);

@@ -194,6 +194,7 @@ class SignerResource extends AbstractResource
      * {@see self::create()} time; either way it must be present **before** a
      * digital-certificate assignment can be created for this signer.
      *
+     * Send null to clear email, whatsapp_phone_number or government_id. Omitted fields stay unchanged.
      * Verification integrity: changing `email` or `whatsapp_phone_number` returns `400` while
      * the signer has verified that channel on an in-flight (not yet certificated) document;
      * changing a channel that has only unverified in-flight requests rotates their
@@ -244,14 +245,14 @@ class SignerResource extends AbstractResource
             }
         }
 
-        if (array_key_exists('whatsapp_phone_number', $data)) {
+        if (isset($data['whatsapp_phone_number'])) {
             if (!is_string($data['whatsapp_phone_number'])) {
                 throw new ValidationException('whatsapp_phone_number must be a string');
             }
             $data['whatsapp_phone_number'] = self::normalizePhoneNumber($data['whatsapp_phone_number']);
         }
 
-        if (array_key_exists('email', $data)) {
+        if (isset($data['email'])) {
             if (!is_string($data['email'])) {
                 throw new ValidationException('email must be a string');
             }
@@ -259,7 +260,7 @@ class SignerResource extends AbstractResource
         }
 
         if (
-            array_key_exists('government_id', $data)
+            isset($data['government_id'])
             && (!is_string($data['government_id']) || trim($data['government_id']) === '')
         ) {
             throw new ValidationException('government_id must be a non-empty string');
